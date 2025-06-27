@@ -1,0 +1,44 @@
+name: prestinv
+description: "Application de gestion d'inventaire"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  http: ^1.2.1
+  provider: ^6.1.2
+  shared_preferences: ^2.2.3
+  mobile_scanner: ^5.1.1
+  fl_chart: ^0.68.0
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.13.1
+
+# -------------------------------------------------
+# La section flutter s'arrête ici
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+
+# -------------------------------------------------
+# La section flutter_launcher_icons commence ici,
+# au même niveau d'indentation que la section 'flutter' ci-dessus.
+# Elle ne doit PAS être décalée vers la droite.
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/icon.png"
+  min_sdk_android: 21
+# -------------------------------------------------
