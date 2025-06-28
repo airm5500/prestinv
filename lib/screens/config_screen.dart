@@ -1,6 +1,7 @@
 // lib/screens/config_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/screens/home_screen.dart';
@@ -13,26 +14,35 @@ class ConfigScreen extends StatefulWidget {
 }
 
 class _ConfigScreenState extends State<ConfigScreen> {
-  final _localController = TextEditingController();
-  final _distantController = TextEditingController();
+  // MODIFICATION: 4 contrôleurs au lieu de 2
+  final _localAddressController = TextEditingController();
+  final _localPortController = TextEditingController();
+  final _distantAddressController = TextEditingController();
+  final _distantPortController = TextEditingController();
+
   final _maxResultController = TextEditingController();
   late bool _showStockValue;
 
   @override
   void initState() {
     super.initState();
-    // On initialise les champs avec les valeurs actuelles de la configuration
     final appConfig = Provider.of<AppConfig>(context, listen: false);
-    _localController.text = appConfig.localApiUrl;
-    _distantController.text = appConfig.distantApiUrl;
+
+    _localAddressController.text = appConfig.localApiAddress;
+    _localPortController.text = appConfig.localApiPort;
+    _distantAddressController.text = appConfig.distantApiAddress;
+    _distantPortController.text = appConfig.distantApiPort;
+
     _maxResultController.text = appConfig.maxResult.toString();
     _showStockValue = appConfig.showTheoreticalStock;
   }
 
   @override
   void dispose() {
-    _localController.dispose();
-    _distantController.dispose();
+    _localAddressController.dispose();
+    _localPortController.dispose();
+    _distantAddressController.dispose();
+    _distantPortController.dispose();
     _maxResultController.dispose();
     super.dispose();
   }
@@ -48,23 +58,72 @@ class _ConfigScreenState extends State<ConfigScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Connexion Prestige Inventaire', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _localController,
-              decoration: const InputDecoration(
-                labelText: 'Adresse IP Locale (ex: http://192.168.1.10:8080)',
-                border: OutlineInputBorder(),
-              ),
-            ),
+            Text('Prestige INV Connexion', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
-            TextField(
-              controller: _distantController,
-              decoration: const InputDecoration(
-                labelText: 'Adresse IP Publique (32.22)',
-                border: OutlineInputBorder(),
-              ),
+
+            // --- Section Locale ---
+            const Text('Adresse Locale', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _localAddressController,
+                    decoration: const InputDecoration(
+                      labelText: 'Adresse IP ou domaine',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 80,
+                  child: TextField(
+                    controller: _localPortController,
+                    decoration: const InputDecoration(
+                      labelText: 'Port',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 24),
+
+            // --- Section Distante ---
+            const Text('Adresse Distante', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _distantAddressController,
+                    decoration: const InputDecoration(
+                      labelText: 'Adresse IP ou domaine',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 80,
+                  child: TextField(
+                    controller: _distantPortController,
+                    decoration: const InputDecoration(
+                      labelText: 'Port',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  ),
+                ),
+              ],
+            ),
+
             const Divider(height: 40),
             Text('Paramètres de l\'application', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
@@ -97,27 +156,19 @@ class _ConfigScreenState extends State<ConfigScreen> {
                   foregroundColor: Colors.white,
                 ),
                 onPressed: () {
-                  // On récupère et nettoie les valeurs
-                  String localUrl = _localController.text.trim();
-                  if (localUrl.isNotEmpty && !localUrl.startsWith('http')) {
-                    localUrl = 'http://$localUrl';
-                  }
-                  String distantUrl = _distantController.text.trim();
-                  if (distantUrl.isNotEmpty && !distantUrl.startsWith('http')) {
-                    distantUrl = 'http://$distantUrl';
-                  }
+                  appConfig.setApiConfig(
+                    localAddress: _localAddressController.text.trim(),
+                    localPort: _localPortController.text.trim(),
+                    distantAddress: _distantAddressController.text.trim(),
+                    distantPort: _distantPortController.text.trim(),
+                  );
 
                   final int maxResult = int.tryParse(_maxResultController.text) ?? 3;
-
-                  // On sauvegarde toutes les configurations
-                  appConfig.setApiUrls(localUrl, distantUrl);
                   appConfig.setAppSettings(
                     maxResult: maxResult,
                     showStock: _showStockValue,
                   );
 
-                  // On gère la navigation : si on peut revenir en arrière, on le fait.
-                  // Sinon (premier lancement), on va à l'écran d'accueil.
                   if (Navigator.canPop(context)) {
                     Navigator.of(context).pop();
                   } else {

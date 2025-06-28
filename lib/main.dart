@@ -30,7 +30,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        // 4. Fournir l'instance déjà créée en utilisant ChangeNotifierProvider.value
+        // Fournir l'instance déjà créée en utilisant ChangeNotifierProvider.value
         ChangeNotifierProvider.value(value: appConfig),
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
         ChangeNotifierProvider(create: (_) => EntryProvider()),
@@ -42,8 +42,8 @@ class MyApp extends StatelessWidget {
           visualDensity: VisualDensity.adaptivePlatformDensity,
         ),
         debugShowCheckedModeBanner: false,
-        // 5. Utiliser l'instance pour la logique de démarrage.
-        home: appConfig.localApiUrl.isEmpty || appConfig.distantApiUrl.isEmpty
+        // MODIFICATION: On utilise les nouvelles variables pour la logique de démarrage.
+        home: appConfig.localApiAddress.isEmpty || appConfig.distantApiAddress.isEmpty
             ? const ConfigScreen()
             : const HomeScreen(),
       ),
