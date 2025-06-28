@@ -5,10 +5,12 @@ import 'package:provider/provider.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/rayon.dart';
+import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
 import 'package:prestinv/screens/recap_screen.dart';
 import 'package:prestinv/screens/variance_screen.dart';
+import 'package:prestinv/utils/app_utils.dart';
 
 class InventoryEntryScreen extends StatefulWidget {
   final String inventoryId;
@@ -23,16 +25,22 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   final _quantityController = TextEditingController();
   final _quantityFocusNode = FocusNode();
   int? _lastDisplayedProductId;
+
   late ApiService _apiService;
 
   @override
   void initState() {
     super.initState();
-    _apiService = ApiService(baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    _apiService = ApiService(
+      baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
+      sessionCookie: authProvider.sessionCookie,
+    );
 
     Future.microtask(() {
       final provider = Provider.of<EntryProvider>(context, listen: false);
       provider.reset();
+      // Cette méthode charge les rayons et, si un seul, charge aussi les produits.
       provider.fetchRayons(_apiService, widget.inventoryId);
     });
   }
@@ -56,7 +64,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  // MODIFICATION: Centralisation de la logique d'envoi
   Future<void> _sendDataToServer() async {
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final unsyncedProducts = provider.products.where((p) => !p.isSynced).toList();
@@ -64,51 +71,33 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     if (unsyncedProducts.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Aucune nouvelle saisie à envoyer.'),
+        backgroundColor: Colors.orange,
       ));
       return;
     }
 
-    final ValueNotifier<String> progressNotifier = ValueNotifier('Préparation de l\'envoi...');
+    final ValueNotifier<String> progressNotifier = ValueNotifier('Préparation...');
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          content: ValueListenableBuilder<String>(
-            valueListenable: progressNotifier,
-            builder: (context, value, child) {
-              return Row(
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(width: 20),
-                  Text(value),
-                ],
-              );
-            },
-          ),
-        );
-      },
-    );
+    // Utilisation de la fonction centralisée pour afficher la progression
+    showProgressDialog(context, progressNotifier);
 
     int successCount = 0;
     for (final product in unsyncedProducts) {
       progressNotifier.value = 'Envoi... (${successCount + 1}/${unsyncedProducts.length})';
-      final success = await _apiService.updateProductQuantity(
-          product.id, product.quantiteSaisie);
+      final success = await _apiService.updateProductQuantity(product.id, product.quantiteSaisie);
       if (success) {
-        // Le provider n'est pas utilisé pour la mise à jour de l'état ici
-        // car la vue ne dépend pas directement de 'isSynced'
-        product.isSynced = true;
+        product.isSynced = true; // On marque comme synchronisé dans le provider
         successCount++;
       }
     }
 
     progressNotifier.value = '$successCount sur ${unsyncedProducts.length} envoyé(s).';
     await Future.delayed(const Duration(seconds: 2));
-    Navigator.of(context).pop();
-  }
 
+    if (mounted) {
+      Navigator.of(context).pop(); // Ferme la pop-up
+    }
+  }
 
   void _validateAndNext() {
     final provider = Provider.of<EntryProvider>(context, listen: false);
@@ -142,7 +131,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               child: const Text('Oui'),
               onPressed: () {
                 Navigator.of(ctx).pop();
-                _sendDataToServer(); // Appel de la nouvelle méthode centralisée
+                _sendDataToServer();
               },
             ),
           ],
@@ -172,7 +161,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Le build ne change que l'appel onPressed du bouton d'envoi
     return Scaffold(
       appBar: AppBar(
         title: const Text('Saisie Inventaire'),
@@ -180,16 +168,15 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           IconButton(
             icon: const Icon(Icons.send),
             tooltip: 'Envoyer les données',
-            onPressed: _sendDataToServer, // Appel de la nouvelle méthode
+            onPressed: _sendDataToServer,
           ),
           Consumer<EntryProvider>(
             builder: (context, provider, child) {
               if (provider.selectedRayon == null) return const SizedBox.shrink();
               return Row(
-                // ... le reste de l'appbar ne change pas
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.list_alt),
+                    icon: const Icon(Icons.list_alt_outlined),
                     tooltip: 'Récapitulatif',
                     onPressed: () {
                       Navigator.of(context).push(MaterialPageRoute(
@@ -202,7 +189,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                     },
                   ),
                   IconButton(
-                    icon: const Icon(Icons.edit_note),
+                    icon: const Icon(Icons.edit_note_outlined),
                     tooltip: 'Correction écarts',
                     onPressed: () {
                       Navigator.of(context).push(MaterialPageRoute(
@@ -222,7 +209,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       ),
       body: Consumer<EntryProvider>(
         builder: (context, provider, child) {
-          // ... Le reste du body ne change pas ...
           if (provider.error != null) {
             return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text('Une erreur est survenue :\n${provider.error}', textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontSize: 16))));
           }
@@ -275,7 +261,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   Widget buildProductView(EntryProvider provider) {
-    // ... cette méthode ne change pas
     final product = provider.currentProduct!;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),

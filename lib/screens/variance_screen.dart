@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/product.dart';
-import 'package:prestinv/widgets/numeric_keyboard.dart';
-import 'package:provider/provider.dart';
+import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/screens/barcode_scanner_screen.dart';
+import 'package:prestinv/widgets/numeric_keyboard.dart';
+import 'package:prestinv/utils/app_utils.dart'; // Import du fichier utilitaire
+import 'package:provider/provider.dart';
 
 class VarianceScreen extends StatefulWidget {
   final String inventoryId;
@@ -39,124 +41,21 @@ class _VarianceScreenState extends State<VarianceScreen> {
   @override
   void initState() {
     super.initState();
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _apiService = ApiService(
-        baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl);
+      baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
+      sessionCookie: authProvider.sessionCookie,
+    );
     _fetchAndSetupProducts();
     _searchController.addListener(_filterProducts);
   }
 
-  Future<void> _scanBarcode() async {
-    try {
-      final scannedCode = await Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (context) => const BarcodeScannerScreen()),
-      );
-
-      if (scannedCode == null) return;
-
-      // On recherche le produit correspondant au code scanné
-      final foundProduct = _allProducts.firstWhere(
-            (p) => p.produitCip == scannedCode,
-        // MODIFICATION: Ajout des paramètres manquants pour le produit factice
-        orElse: () => Product(
-          id: -1,
-          produitCip: '',
-          produitName: 'NOT_FOUND',
-          produitPrixAchat: 0,
-          produitPrixUni: 0,
-          quantiteInitiale: 0,
-          quantiteSaisie: 0,
-        ),
-      );
-
-      if (foundProduct.id != -1) {
-        _selectProduct(foundProduct);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Produit non trouvé dans cet emplacement.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur du scanner: $e')),
-      );
-    }
-  }
-
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Correction Écarts - ${widget.rayonName}'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code_scanner),
-            tooltip: 'Scanner un code-barres',
-            onPressed: _scanBarcode,
-          ),
-          IconButton(
-            icon: const Icon(Icons.send),
-            tooltip: 'Envoyer les modifications',
-            onPressed: _sendDataToServer,
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                labelText: 'Rechercher par CIP ou Désignation',
-                prefixIcon: const Icon(Icons.search),
-                border: const OutlineInputBorder(),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    _searchController.clear();
-                  },
-                )
-                    : null,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Stack(
-              children: [
-                if (_selectedProduct != null && !_showSearchResults)
-                  buildProductView(_selectedProduct!),
-                if (_showSearchResults)
-                  Container(
-                    color: Colors.white,
-                    child: ListView.builder(
-                      itemCount: _filteredProducts.length,
-                      itemBuilder: (context, index) {
-                        final product = _filteredProducts[index];
-                        return ListTile(
-                          title: Text(product.produitName),
-                          subtitle: Text('CIP: ${product.produitCip}'),
-                          onTap: () => _selectProduct(product),
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          if (!_showSearchResults) NumericKeyboard(onKeyPressed: _onKeyPressed),
-        ],
-      ),
-    );
+  void dispose() {
+    _searchController.dispose();
+    _quantityController.dispose();
+    super.dispose();
   }
-
-  // Le reste du fichier est identique à la version précédente.
-  // J'inclus les méthodes pour que le fichier soit complet.
 
   Future<void> _fetchAndSetupProducts() async {
     setState(() => _isLoading = true);
@@ -167,7 +66,12 @@ class _VarianceScreenState extends State<VarianceScreen> {
         _selectProduct(_allProducts.first);
       }
     } catch (e) {
-      // Gérer l'erreur
+      // Gérer l'erreur, par exemple avec un SnackBar
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur de chargement des produits: $e')),
+        );
+      }
     }
     setState(() => _isLoading = false);
   }
@@ -234,6 +138,44 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }
   }
 
+  Future<void> _scanBarcode() async {
+    try {
+      final scannedCode = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (context) => const BarcodeScannerScreen()),
+      );
+
+      if (scannedCode == null) return;
+
+      final foundProduct = _allProducts.firstWhere(
+            (p) => p.produitCip == scannedCode,
+        orElse: () => Product(
+          id: -1,
+          produitCip: '',
+          produitName: 'NOT_FOUND',
+          produitPrixAchat: 0,
+          produitPrixUni: 0,
+          quantiteInitiale: 0,
+          quantiteSaisie: 0,
+        ),
+      );
+
+      if (foundProduct.id != -1) {
+        _selectProduct(foundProduct);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Produit non trouvé dans cet emplacement.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur du scanner: $e')),
+      );
+    }
+  }
+
   Future<void> _sendDataToServer() async {
     final unsyncedProducts = _allProducts.where((p) => !p.isSynced).toList();
 
@@ -246,26 +188,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
     final ValueNotifier<String> progressNotifier = ValueNotifier('Préparation de l\'envoi...');
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          content: ValueListenableBuilder<String>(
-            valueListenable: progressNotifier,
-            builder: (context, value, child) {
-              return Row(
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(width: 20),
-                  Text(value),
-                ],
-              );
-            },
-          ),
-        );
-      },
-    );
+    // Utilisation de la fonction centralisée pour afficher la progression
+    showProgressDialog(context, progressNotifier);
 
     int successCount = 0;
     for (final product in unsyncedProducts) {
@@ -284,14 +208,79 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
     await Future.delayed(const Duration(seconds: 2));
 
-    Navigator.of(context).pop();
+    if (mounted) {
+      Navigator.of(context).pop(); // Ferme la pop-up
+    }
   }
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    _quantityController.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Correction Écarts - ${widget.rayonName}'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.qr_code_scanner),
+            tooltip: 'Scanner un code-barres',
+            onPressed: _scanBarcode,
+          ),
+          IconButton(
+            icon: const Icon(Icons.send),
+            tooltip: 'Envoyer les modifications',
+            onPressed: _sendDataToServer,
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: 'Rechercher par CIP ou Désignation',
+                prefixIcon: const Icon(Icons.search),
+                border: const OutlineInputBorder(),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    _searchController.clear();
+                  },
+                )
+                    : null,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Stack(
+              children: [
+                if (_selectedProduct != null && !_showSearchResults)
+                  buildProductView(_selectedProduct!),
+                if (_showSearchResults)
+                  Container(
+                    color: Colors.white.withOpacity(0.95),
+                    child: ListView.builder(
+                      itemCount: _filteredProducts.length,
+                      itemBuilder: (context, index) {
+                        final product = _filteredProducts[index];
+                        return ListTile(
+                          title: Text(product.produitName),
+                          subtitle: Text('CIP: ${product.produitCip}'),
+                          onTap: () => _selectProduct(product),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (!_showSearchResults) NumericKeyboard(onKeyPressed: _onKeyPressed),
+        ],
+      ),
+    );
   }
 
   Widget buildProductView(Product product) {
@@ -303,11 +292,20 @@ class _VarianceScreenState extends State<VarianceScreen> {
           Text(
             product.produitName,
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 10),
           Text('CIP: ${product.produitCip}'),
           const SizedBox(height: 10),
-          Text('Stock Théorique: ${product.quantiteInitiale}'),
+          Consumer<AppConfig>(
+            builder: (context, appConfig, child) {
+              return Visibility(
+                visible: appConfig.showTheoreticalStock,
+                child: Text('Stock Théorique: ${product.quantiteInitiale}'),
+              );
+            },
+          ),
           const SizedBox(height: 20),
           TextField(
             controller: _quantityController,
