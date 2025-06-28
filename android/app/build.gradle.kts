@@ -10,7 +10,7 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "27.0.12077973" // Ajoutez ou modifiez cette ligne
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -30,6 +30,18 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    // Ajouter ce bloc pour renommer les fichiers de sortie
+    applicationVariants.all {
+        val variant = this // 'this' fait référence à la variante (ex: release, debug)
+        outputs.all {
+            // 'this' ici fait référence à la sortie (l'APK)
+            // Nous changeons le nom du fichier de sortie.
+            val outputImpl = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            // Construire le nouveau nom, par exemple : prestigeinv-release-1.0.0+1.apk
+            outputImpl.outputFileName = "prestigeinv-${variant.name}-${variant.versionName}.apk"
+        }
     }
 
     buildTypes {
