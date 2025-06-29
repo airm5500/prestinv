@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:prestinv/api/api_service.dart';
+import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/providers/auth_provider.dart';
@@ -30,6 +31,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   late ApiService _apiService;
 
+  String? _notificationMessage;
+  Color? _notificationColor;
+  Timer? _notificationTimer;
+
+  Timer? _sendReminderTimer;
+
   @override
   void initState() {
     super.initState();
@@ -52,7 +59,49 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   void dispose() {
     _quantityController.dispose();
     _quantityFocusNode.dispose();
+    _notificationTimer?.cancel();
+    _sendReminderTimer?.cancel();
     super.dispose();
+  }
+
+  void _showNotification(String message, Color color) {
+    _notificationTimer?.cancel();
+    setState(() {
+      _notificationMessage = message;
+      _notificationColor = color;
+    });
+    _notificationTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() {
+          _notificationMessage = null;
+        });
+      }
+    });
+  }
+
+  void _resetSendReminderTimer() {
+    _sendReminderTimer?.cancel();
+
+    final appConfig = Provider.of<AppConfig>(context, listen: false);
+    final provider = Provider.of<EntryProvider>(context, listen: false);
+
+    if (appConfig.sendMode == SendMode.collect && appConfig.sendReminderMinutes > 0) {
+      _sendReminderTimer = Timer(Duration(minutes: appConfig.sendReminderMinutes), () {
+        if (provider.hasUnsyncedData && mounted) {
+          _showSendReminderNotification();
+        }
+      });
+    }
+  }
+
+  void _showSendReminderNotification() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Rappel : Vous avez des données non envoyées !'),
+        backgroundColor: Colors.blue,
+        duration: Duration(seconds: 5),
+      ),
+    );
   }
 
   void _onKeyPressed(String value) {
@@ -72,10 +121,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
     final provider = Provider.of<EntryProvider>(context, listen: false);
     if (!provider.hasUnsyncedData) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Aucune nouvelle saisie à envoyer.'),
-        backgroundColor: Colors.orange,
-      ));
+      _showNotification('Aucune nouvelle saisie à envoyer.', Colors.orange);
       return;
     }
 
@@ -94,6 +140,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     });
 
     progressNotifier.value = '$unsyncedCount article(s) traité(s).';
+    _sendReminderTimer?.cancel();
     await Future.delayed(const Duration(seconds: 2));
 
     if (mounted) {
@@ -107,7 +154,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final appConfig = Provider.of<AppConfig>(context, listen: false);
 
     if (_quantityController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Veuillez saisir une quantité.'), backgroundColor: Colors.orange));
+      _showNotification('Veuillez saisir une quantité.', Colors.orange);
       return;
     }
 
@@ -115,9 +162,25 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
     Future<void> proceedToNext() async {
       await provider.updateQuantity(quantity.toString());
+      _resetSendReminderTimer();
+
+      if (appConfig.sendMode == SendMode.direct) {
+        try {
+          await _apiService.updateProductQuantity(provider.currentProduct!.id, quantity);
+          if(mounted) {
+            _showNotification('Saisie envoyée !', Colors.green);
+          }
+        } catch(e) {
+          if(mounted) {
+            _showNotification('Erreur réseau. Saisie non envoyée.', Colors.red);
+          }
+        }
+      }
+
       bool isLastProduct = provider.currentProductIndex >= provider.totalProducts - 1;
 
       if (isLastProduct && provider.totalProducts > 0) {
+        _sendReminderTimer?.cancel();
         if (!mounted) return;
         showDialog(
           context: context,
@@ -158,14 +221,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  Future<bool> _onWillPop() async {
+  Future<void> _handleBackNavigation() async {
+    _sendReminderTimer?.cancel();
     final provider = Provider.of<EntryProvider>(context, listen: false);
     if (!provider.hasUnsyncedData) {
-      return true;
+      if (mounted) Navigator.of(context).pop();
+      return;
     }
-
-    if (!mounted) return false;
-
+    if (!mounted) return;
     final bool? sendAndLeave = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -178,12 +241,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         ],
       ),
     );
-
+    if (!mounted) return;
     if (sendAndLeave == true) {
       await _sendDataToServer();
-      return true;
+      if (mounted) Navigator.of(context).pop();
     } else {
-      return false;
+      _resetSendReminderTimer();
     }
   }
 
@@ -209,42 +272,66 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
+  /// CORRECTION : Logique de changement d'emplacement mise à jour
+  void _onLocationChanged(Rayon? newValue) async {
+    if (newValue == null) return;
+
+    final provider = Provider.of<EntryProvider>(context, listen: false);
+    if (newValue.id == provider.selectedRayon?.id) return;
+
+    if (provider.hasUnsyncedData) {
+      final bool? confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Changer d\'emplacement ?'),
+          content: const Text('Les données de l\'emplacement actuel seront envoyées au serveur avant de changer.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),
+            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Continuer')),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+
+      await _sendDataToServer();
+    }
+
+    if (mounted) {
+      _sendReminderTimer?.cancel();
+      provider.fetchProducts(_apiService, widget.inventoryId, newValue.id).then((_) {
+        _resetSendReminderTimer();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop,
+    // CORRECTION : Retour à PopScope, le widget moderne.
+    return PopScope(
+      canPop: false,
+      // ignore: deprecated_member_use
+      onPopInvoked: (bool didPop) {
+        if (didPop) return;
+        _handleBackNavigation();
+      },
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Saisie Inventaire'),
           actions: [
-            // CORRECTION : Le bouton "premier article" a été retiré d'ici.
-            IconButton(
-              // CORRECTION : Couleur ré-appliquée manuellement
-                icon: const Icon(Icons.send, color: Colors.cyanAccent),
-                tooltip: 'Envoyer les données',
-                onPressed: _sendDataToServer
-            ),
+            IconButton(icon: const Icon(Icons.send), tooltip: 'Envoyer les données', onPressed: _sendDataToServer),
             Consumer<EntryProvider>(
               builder: (context, provider, child) {
                 if (provider.selectedRayon == null) return const SizedBox.shrink();
                 return Row(
                   children: [
-                    IconButton(
-                      // CORRECTION : Couleur ré-appliquée manuellement
-                        icon: const Icon(Icons.list_alt_outlined, color: Colors.lightGreenAccent),
-                        tooltip: 'Récapitulatif',
-                        onPressed: () {
-                          if (!mounted) return;
-                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecapScreen(inventoryId: widget.inventoryId, rayonId: provider.selectedRayon!.id, rayonName: provider.selectedRayon!.libelle)));
-                        }),
-                    IconButton(
-                      // CORRECTION : Couleur ré-appliquée manuellement
-                        icon: const Icon(Icons.edit_note_outlined, color: Colors.orangeAccent),
-                        tooltip: 'Correction écarts',
-                        onPressed: () {
-                          if (!mounted) return;
-                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => VarianceScreen(inventoryId: widget.inventoryId, rayonId: provider.selectedRayon!.id, rayonName: provider.selectedRayon!.libelle)));
-                        }),
+                    IconButton(icon: const Icon(Icons.list_alt_outlined), tooltip: 'Récapitulatif', onPressed: () {
+                      if (!mounted) return;
+                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecapScreen(inventoryId: widget.inventoryId, rayonId: provider.selectedRayon!.id, rayonName: provider.selectedRayon!.libelle)));
+                    }),
+                    IconButton(icon: const Icon(Icons.edit_note_outlined), tooltip: 'Correction écarts', onPressed: () {
+                      if (!mounted) return;
+                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => VarianceScreen(inventoryId: widget.inventoryId, rayonId: provider.selectedRayon!.id, rayonName: provider.selectedRayon!.libelle)));
+                    }),
                   ],
                 );
               },
@@ -264,8 +351,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
             if (currentProduct != null && currentProduct.id != _lastDisplayedProductId) {
               _lastDisplayedProductId = currentProduct.id;
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                _quantityController.clear();
-                _quantityFocusNode.requestFocus();
+                if(mounted) {
+                  _quantityController.clear();
+                  _quantityFocusNode.requestFocus();
+                }
               });
             }
 
@@ -277,19 +366,21 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
             return Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8.0),
+                  ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<Rayon>(
                       isExpanded: true,
                       hint: const Text('Sélectionner un emplacement'),
                       value: provider.selectedRayon,
-                      style: const TextStyle(color: Color(0xFF002D42), fontSize: 16, fontWeight: FontWeight.bold),
-                      onChanged: (Rayon? newValue) {
-                        if (newValue != null) {
-                          provider.fetchProducts(_apiService, widget.inventoryId, newValue.id);
-                        }
-                      },
+                      icon: const Icon(Icons.touch_app_outlined, color: AppColors.primary),
+                      style: const TextStyle(color: AppColors.primary, fontSize: 16, fontWeight: FontWeight.bold),
+                      onChanged: _onLocationChanged,
                       items: provider.rayons.map<DropdownMenuItem<Rayon>>((Rayon rayon) => DropdownMenuItem<Rayon>(value: rayon, child: Text(rayon.displayName))).toList(),
                     ),
                   ),
@@ -311,10 +402,33 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
+  Widget _buildNotificationArea() {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      transitionBuilder: (Widget child, Animation<double> animation) {
+        return FadeTransition(opacity: animation, child: child);
+      },
+      child: _notificationMessage == null
+          ? const SizedBox(height: 48, key: ValueKey('empty'))
+          //: Container(
+          : SizedBox(
+        key: const ValueKey('notification'),
+        height: 48,
+        child: Center(
+          child: Text(
+            _notificationMessage!,
+            style: TextStyle(color: _notificationColor, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget buildProductView(EntryProvider provider) {
     final Product product = provider.currentProduct!;
-    const boldBlueStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue);
-    final textFieldBorderColor = Colors.deepPurple; // Couleur pour le champ et le bouton
+    // CORRECTION : 'final' est changé en 'const'
+    const boldBlueStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary);
+    const textFieldBorderColor = Colors.deepPurple;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
@@ -345,7 +459,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('Prix Achat: ${product.produitPrixAchat} F', style: const TextStyle(fontSize: 18, color: Colors.orange, fontWeight: FontWeight.w500)),
-                Text('Prix Vente: ${product.produitPrixUni} F', style: const TextStyle(fontSize: 18, color: Colors.green, fontWeight: FontWeight.w500)),
+                Text('Prix Vente: ${product.produitPrixUni} F', style: const TextStyle(fontSize: 18, color: AppColors.accent, fontWeight: FontWeight.w500)),
               ],
             ),
           ),
@@ -359,7 +473,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   padding: const EdgeInsets.only(bottom: 16.0),
                   child: Text(
                     'Stock Théorique: ${product.quantiteInitiale}',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: product.quantiteInitiale < 0 ? Colors.red.shade700 : const Color(0xFF1B5E20)),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: product.quantiteInitiale < 0 ? Colors.red.shade700 : const Color(0xFF1B5E20)),
                   ),
                 ),
               );
@@ -372,14 +486,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               SizedBox(
                 width: 72,
                 height: 72,
-                child: OutlinedButton( // Nouveau style de bouton
+                child: OutlinedButton(
                   style: OutlinedButton.styleFrom(
                     shape: const CircleBorder(),
                     padding: const EdgeInsets.all(16),
-                    side: BorderSide(color: textFieldBorderColor, width: 2),
+                    side: const BorderSide(color: textFieldBorderColor, width: 2),
                   ),
                   onPressed: provider.previousProduct,
-                  child: Icon(Icons.chevron_left, size: 32, color: textFieldBorderColor),
+                  child: const Icon(Icons.chevron_left, size: 32, color: textFieldBorderColor),
                 ),
               ),
               const SizedBox(width: 8),
@@ -388,11 +502,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 child: TextField(
                   controller: _quantityController,
                   focusNode: _quantityFocusNode,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     labelText: 'Quantité Comptée',
-                    border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(12))
+                    ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: const BorderRadius.all(Radius.circular(12)),
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
                       borderSide: BorderSide(color: textFieldBorderColor, width: 2),
                     ),
                   ),
@@ -400,20 +516,20 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   readOnly: true,
                   textAlign: TextAlign.center,
                   cursorColor: textFieldBorderColor,
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: textFieldBorderColor),
+                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: textFieldBorderColor),
                 ),
               ),
+              // CORRECTION : Remplacement de Container par SizedBox
               const SizedBox(width: 72),
             ],
           ),
-          const SizedBox(height: 20),
-
-          // CORRECTION : Bouton déplacé ici depuis l'AppBar
+          const SizedBox(height: 10),
           TextButton.icon(
             onPressed: () => provider.goToFirstProduct(),
             icon: const Icon(Icons.first_page),
             label: const Text('Retour au premier article'),
           ),
+          _buildNotificationArea(),
         ],
       ),
     );

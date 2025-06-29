@@ -1,14 +1,16 @@
 // lib/screens/variance_screen.dart
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/providers/auth_provider.dart';
-import 'package:prestinv/screens/barcode_scanner_screen.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
-import 'package:prestinv/utils/app_utils.dart';
 import 'package:provider/provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 class VarianceScreen extends StatefulWidget {
   final String inventoryId;
@@ -29,14 +31,21 @@ class VarianceScreen extends StatefulWidget {
 class _VarianceScreenState extends State<VarianceScreen> {
   final _searchController = TextEditingController();
   final _quantityController = TextEditingController();
+  final _quantityFocusNode = FocusNode();
 
   List<Product> _productsWithVariance = [];
   List<Product> _filteredProducts = [];
-  Product? _selectedProduct;
+  int _currentProductIndex = 0;
+
   bool _isLoading = true;
   bool _showSearchResults = false;
   bool _isNewEntry = true;
   late ApiService _apiService;
+
+  // NOUVEAU : Variables pour gérer la notification personnalisée
+  String? _notificationMessage;
+  Color? _notificationColor;
+  Timer? _notificationTimer;
 
   @override
   void initState() {
@@ -54,6 +63,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
   void dispose() {
     _searchController.dispose();
     _quantityController.dispose();
+    _quantityFocusNode.dispose();
+    _notificationTimer?.cancel(); // On annule le timer s'il existe
     super.dispose();
   }
 
@@ -62,34 +73,44 @@ class _VarianceScreenState extends State<VarianceScreen> {
     try {
       List<Product> allProductsFromServer = await _apiService.fetchProducts(widget.inventoryId, widget.rayonId);
 
-      // FILTRAGE : On ne garde que les produits qui ont fait l'objet d'une saisie et qui présentent un écart.
-      _productsWithVariance = allProductsFromServer
-          .where((p) => p.quantiteSaisie != p.quantiteInitiale)
-          .toList();
+      if (mounted) {
+        setState(() {
+          _productsWithVariance = allProductsFromServer
+              .where((p) => p.quantiteSaisie != p.quantiteInitiale)
+              .toList();
 
-      if (_productsWithVariance.isNotEmpty) {
-        _selectProduct(_productsWithVariance.first);
+          if (_productsWithVariance.isNotEmpty) {
+            _updateCurrentProduct(0);
+          }
+          _isLoading = false;
+        });
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Erreur de chargement des produits: $e')),
         );
+        setState(() => _isLoading = false);
       }
     }
-    if (mounted) {
-      setState(() => _isLoading = false);
-    }
+  }
+
+  void _updateCurrentProduct(int index) {
+    setState(() {
+      _currentProductIndex = index;
+      _quantityController.text = _productsWithVariance[index].quantiteSaisie.toString();
+      _isNewEntry = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _quantityFocusNode.requestFocus();
+    });
   }
 
   void _filterProducts() {
     final query = _searchController.text.toLowerCase();
     if (query.isEmpty) {
       if (mounted) {
-        setState(() {
-          _filteredProducts = [];
-          _showSearchResults = false;
-        });
+        setState(() { _filteredProducts = []; _showSearchResults = false; });
       }
       return;
     }
@@ -105,14 +126,27 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 
   void _selectProduct(Product product) {
-    setState(() {
-      _selectedProduct = product;
-      _quantityController.text = product.quantiteSaisie.toString();
-      _searchController.clear();
-      _showSearchResults = false;
-      _isNewEntry = true;
-      FocusScope.of(context).unfocus();
-    });
+    final index = _productsWithVariance.indexWhere((p) => p.id == product.id);
+    if(index != -1) {
+      _updateCurrentProduct(index);
+      setState(() {
+        _searchController.clear();
+        _showSearchResults = false;
+        FocusScope.of(context).unfocus();
+      });
+    }
+  }
+
+  void _previousProduct() {
+    if(_currentProductIndex > 0) {
+      _updateCurrentProduct(_currentProductIndex - 1);
+    }
+  }
+
+  void _nextProduct() {
+    if(_currentProductIndex < _productsWithVariance.length - 1) {
+      _updateCurrentProduct(_currentProductIndex + 1);
+    }
   }
 
   void _onKeyPressed(String value) {
@@ -123,7 +157,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
       }
       _isNewEntry = false;
     } else if (value == 'OK') {
-      _updateQuantity();
+      _updateQuantityAndSend();
     } else {
       if (_isNewEntry) {
         _quantityController.text = value;
@@ -134,86 +168,76 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }
   }
 
-  void _updateQuantity() {
-    if (_selectedProduct != null) {
-      final newQuantity = int.tryParse(_quantityController.text) ?? 0;
-      setState(() {
-        _selectedProduct!.quantiteSaisie = newQuantity;
-        _selectedProduct!.isSynced = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Quantité mise à jour. Pensez à envoyer les modifications.'),
-        duration: Duration(seconds: 2),
-      ));
-    }
-  }
+  /// Met à jour la quantité, envoie DIRECTEMENT au serveur et passe au produit suivant.
+  void _updateQuantityAndSend() async {
+    if (_productsWithVariance.isEmpty || !mounted) return;
 
-  Future<void> _scanBarcode() async {
-    if (!mounted) {
-      return;
-    }
+    final product = _productsWithVariance[_currentProductIndex];
+    final newQuantity = int.tryParse(_quantityController.text) ?? 0;
+
+    setState(() {
+      product.quantiteSaisie = newQuantity;
+    });
+
     try {
-      final scannedCode = await Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (context) => const BarcodeScannerScreen()),
-      );
-      if (scannedCode == null || !mounted) {
-        return;
-      }
-
-      final foundProduct = _productsWithVariance.firstWhere(
-            (p) => p.produitCip == scannedCode,
-        orElse: () => Product(id: -1, produitCip: '', produitName: 'NOT_FOUND', produitPrixAchat: 0, produitPrixUni: 0, quantiteInitiale: 0, quantiteSaisie: 0),
-      );
-
-      if (foundProduct.id != -1) {
-        _selectProduct(foundProduct);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ce produit ne fait pas partie des écarts.'), backgroundColor: Colors.red));
+      await _apiService.updateProductQuantity(product.id, newQuantity);
+      if (mounted) {
+        _showNotification('Correction envoyée !', Colors.green);
+        _nextProduct(); // On passe au suivant après le succès
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur du scanner: $e')));
+        _showNotification('Erreur d\'envoi: $e', Colors.red);
       }
     }
   }
 
-  Future<void> _sendDataToServer() async {
-    if (!mounted) return;
-
-    final unsyncedProducts = _productsWithVariance.where((p) => !p.isSynced).toList();
-    if (unsyncedProducts.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Aucune modification à envoyer.')));
-      return;
-    }
-
-    final ValueNotifier<String> progressNotifier = ValueNotifier('Préparation de l\'envoi...');
-    showProgressDialog(context, progressNotifier);
-
-    int successCount = 0;
-    try {
-      for (final product in unsyncedProducts) {
-        progressNotifier.value = 'Envoi... (${successCount + 1}/${unsyncedProducts.length})';
-        try {
-          await _apiService.updateProductQuantity(product.id, product.quantiteSaisie);
-          if (mounted) {
-            setState(() => product.isSynced = true);
-          }
-          successCount++;
-        } catch (e) {
-          // L'échec d'un produit n'arrête pas la boucle
-        }
+  /// Affiche une notification temporaire à l'écran.
+  void _showNotification(String message, Color color) {
+    _notificationTimer?.cancel(); // Annule le timer précédent s'il existe
+    setState(() {
+      _notificationMessage = message;
+      _notificationColor = color;
+    });
+    _notificationTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() {
+          _notificationMessage = null;
+        });
       }
-      progressNotifier.value = '$successCount sur ${unsyncedProducts.length} envoyé(s).';
-      await Future.delayed(const Duration(seconds: 2));
+    });
+  }
 
-    } catch (e) {
-      progressNotifier.value = 'Une erreur est survenue !';
-      await Future.delayed(const Duration(seconds: 2));
-    } finally {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-    }
+  Future<void> _printVariances() async {
+    final doc = pw.Document();
+
+    final tableData = <List<String>>[
+      ['Désignation', 'CIP', 'Stock Théo.', 'Stock Corrigé', 'Écart'],
+      ..._productsWithVariance.map((p) => [
+        p.produitName,
+        p.produitCip,
+        p.quantiteInitiale.toString(),
+        p.quantiteSaisie.toString(),
+        (p.quantiteSaisie - p.quantiteInitiale).toString(),
+      ])
+    ];
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        header: (context) => pw.Header(level: 0, text: 'Rapport des Écarts - ${widget.rayonName}'),
+        build: (context) => [
+          pw.TableHelper.fromTextArray(
+            context: context,
+            data: tableData,
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            cellAlignments: {1: pw.Alignment.center, 2: pw.Alignment.center, 3: pw.Alignment.center},
+          )
+        ],
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (format) => doc.save());
   }
 
   @override
@@ -222,23 +246,17 @@ class _VarianceScreenState extends State<VarianceScreen> {
       appBar: AppBar(
         title: Text('Correction Écarts - ${widget.rayonName}'),
         actions: [
-          IconButton(icon: const Icon(Icons.qr_code_scanner), tooltip: 'Scanner un code-barres', onPressed: _scanBarcode),
-          IconButton(icon: const Icon(Icons.send), tooltip: 'Envoyer les modifications', onPressed: _sendDataToServer),
+          IconButton(
+            icon: const Icon(Icons.print_outlined),
+            tooltip: 'Imprimer les écarts',
+            onPressed: _productsWithVariance.isEmpty ? null : _printVariances,
+          ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : (_productsWithVariance.isEmpty && !_isLoading)
-          ? const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text(
-            "Aucun produit avec un écart de stock n'a été trouvé dans cet emplacement.",
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16),
-          ),
-        ),
-      )
+          ? const Center(child: Padding(padding: EdgeInsets.all(16.0), child: Text("Aucun produit avec un écart de stock n'a été trouvé.", textAlign: TextAlign.center, style: TextStyle(fontSize: 16))))
           : Column(
         children: [
           Padding(
@@ -249,17 +267,15 @@ class _VarianceScreenState extends State<VarianceScreen> {
                 labelText: 'Rechercher un produit avec écart',
                 prefixIcon: const Icon(Icons.search),
                 border: const OutlineInputBorder(),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(icon: const Icon(Icons.clear), onPressed: () => _searchController.clear())
-                    : null,
+                suffixIcon: _searchController.text.isNotEmpty ? IconButton(icon: const Icon(Icons.clear), onPressed: () => _searchController.clear()) : null,
               ),
             ),
           ),
           Expanded(
             child: Stack(
               children: [
-                if (_selectedProduct != null && !_showSearchResults)
-                  buildProductView(_selectedProduct!),
+                if (_productsWithVariance.isNotEmpty && !_showSearchResults)
+                  buildProductView(_productsWithVariance[_currentProductIndex]),
                 if (_showSearchResults)
                   Container(
                     color: const Color(0xF2FFFFFF),
@@ -267,21 +283,44 @@ class _VarianceScreenState extends State<VarianceScreen> {
                         ? const Center(child: Text("Ce produit ne fait pas partie des écarts."))
                         : ListView.builder(
                       itemCount: _filteredProducts.length,
-                      itemBuilder: (context, index) {
-                        final product = _filteredProducts[index];
-                        return ListTile(
-                          title: Text(product.produitName),
-                          subtitle: Text('CIP: ${product.produitCip}'),
-                          onTap: () => _selectProduct(product),
-                        );
-                      },
+                      itemBuilder: (context, index) => ListTile(
+                        title: Text(_filteredProducts[index].produitName),
+                        subtitle: Text('CIP: ${_filteredProducts[index].produitCip}'),
+                        onTap: () => _selectProduct(_filteredProducts[index]),
+                      ),
                     ),
                   ),
               ],
             ),
           ),
+          // NOUVEAU WIDGET : Zone de notification
+          _buildNotificationArea(),
           if (!_showSearchResults) NumericKeyboard(onKeyPressed: _onKeyPressed),
         ],
+      ),
+    );
+  }
+
+  /// Construit la zone de notification personnalisée.
+  Widget _buildNotificationArea() {
+    if (_notificationMessage == null) {
+      // Retourne un conteneur vide avec une hauteur fixe pour ne pas décaler l'UI
+      return const SizedBox(height: 50);
+    }
+    return Container(
+      height: 50,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: _notificationColor?.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _notificationColor ?? Colors.transparent),
+      ),
+      child: Center(
+        child: Text(
+          _notificationMessage!,
+          style: TextStyle(color: _notificationColor, fontWeight: FontWeight.bold),
+        ),
       ),
     );
   }
@@ -290,35 +329,50 @@ class _VarianceScreenState extends State<VarianceScreen> {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
-            product.produitName,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+            'Produit ${_currentProductIndex + 1} sur ${_productsWithVariance.length}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 50),
+            child: Text(
+              product.produitName,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
           const SizedBox(height: 10),
           Text('CIP: ${product.produitCip}'),
           const SizedBox(height: 10),
           Consumer<AppConfig>(
-            builder: (context, appConfig, child) {
-              return Visibility(
-                visible: appConfig.showTheoreticalStock,
-                child: Text('Stock Théorique: ${product.quantiteInitiale}'),
-              );
-            },
+            builder: (context, appConfig, child) => Visibility(
+              visible: appConfig.showTheoreticalStock,
+              child: Text('Stock Théorique: ${product.quantiteInitiale}'),
+            ),
           ),
           const SizedBox(height: 20),
           TextField(
             controller: _quantityController,
-            decoration: const InputDecoration(
-              labelText: 'Quantité Corrigée',
-              border: OutlineInputBorder(),
-            ),
+            focusNode: _quantityFocusNode,
+            decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
             keyboardType: TextInputType.none,
             readOnly: true,
             style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             textAlign: TextAlign.center,
           ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              ElevatedButton.icon(onPressed: _currentProductIndex > 0 ? _previousProduct : null, icon: const Icon(Icons.chevron_left), label: const Text('Précédent')),
+              ElevatedButton.icon(onPressed: _currentProductIndex < _productsWithVariance.length - 1 ? _nextProduct : null, label: const Text('Suivant'), icon: const Icon(Icons.chevron_right)),
+            ],
+          )
         ],
       ),
     );
