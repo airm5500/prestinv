@@ -31,10 +31,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   late ApiService _apiService;
 
+  // Variables pour la notification personnalisée
   String? _notificationMessage;
   Color? _notificationColor;
   Timer? _notificationTimer;
 
+  // Timer pour le rappel d'envoi en mode collecte
   Timer? _sendReminderTimer;
 
   @override
@@ -64,6 +66,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     super.dispose();
   }
 
+  /// Affiche une notification temporaire dans la zone dédiée.
   void _showNotification(String message, Color color) {
     _notificationTimer?.cancel();
     setState(() {
@@ -79,6 +82,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     });
   }
 
+  /// Démarre ou réinitialise le minuteur de rappel d'envoi.
   void _resetSendReminderTimer() {
     _sendReminderTimer?.cancel();
 
@@ -117,6 +121,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   Future<void> _sendDataToServer() async {
+    _sendReminderTimer?.cancel();
     if (!mounted) return;
 
     final provider = Provider.of<EntryProvider>(context, listen: false);
@@ -140,7 +145,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     });
 
     progressNotifier.value = '$unsyncedCount article(s) traité(s).';
-    _sendReminderTimer?.cancel();
     await Future.delayed(const Duration(seconds: 2));
 
     if (mounted) {
@@ -272,7 +276,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
-  /// CORRECTION : Logique de changement d'emplacement mise à jour
+  /// Logique de changement d'emplacement mise à jour
   void _onLocationChanged(Rayon? newValue) async {
     if (newValue == null) return;
 
@@ -306,7 +310,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // CORRECTION : Retour à PopScope, le widget moderne.
     return PopScope(
       canPop: false,
       // ignore: deprecated_member_use
@@ -410,7 +413,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       },
       child: _notificationMessage == null
           ? const SizedBox(height: 48, key: ValueKey('empty'))
-          //: Container(
           : SizedBox(
         key: const ValueKey('notification'),
         height: 48,
@@ -426,7 +428,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   Widget buildProductView(EntryProvider provider) {
     final Product product = provider.currentProduct!;
-    // CORRECTION : 'final' est changé en 'const'
     const boldBlueStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary);
     const textFieldBorderColor = Colors.deepPurple;
 
@@ -442,7 +443,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
             constraints: const BoxConstraints(minHeight: 50),
             child: Text(
               product.produitName,
-              style: boldBlueStyle.copyWith(fontSize: 20),
+              style: boldBlueStyle.copyWith(fontSize: 20, color: AppColors.primary),
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -519,7 +520,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: textFieldBorderColor),
                 ),
               ),
-              // CORRECTION : Remplacement de Container par SizedBox
               const SizedBox(width: 72),
             ],
           ),
