@@ -1,15 +1,22 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Permissions requises par l'application -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- On déclare que la caméra est une fonctionnalité utilisée,
+         mais elle n'est pas obligatoire pour que l'application s'installe. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
 
     <!-- La balise application contient la configuration principale -->
     <application
         android:label="prestinv"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon"
-        android:networkSecurityConfig="@xml/network_security_config">
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:ignore="UnusedAttribute">
 
         <!-- Activité principale de Flutter -->
         <activity
@@ -39,12 +46,7 @@
 
     </application>
 
-    <!-- Required to query activities that can process text, see:
-         https://developer.android.com/training/package-visibility?hl=en and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
-
-         In particular, this is used by the Flutter engine in textfield and the
-         flutter social share plugin. -->
+    <!-- Required to query activities that can process text -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
