@@ -23,22 +23,16 @@ class AuthProvider with ChangeNotifier {
   bool get rememberMe => _rememberMe;
 
   AuthProvider() {
-    _loadFromPrefs();
+    loadUserFromStorage();
   }
 
-  // Charge les préférences au démarrage
-  Future<void> _loadFromPrefs() async {
+  Future<void> loadUserFromStorage() async {
     final prefs = await SharedPreferences.getInstance();
-    _sessionCookie = prefs.getString('sessionCookie');
     _rememberMe = prefs.getBool('rememberMe') ?? false;
 
-    if (_sessionCookie != null) {
-      final userData = prefs.getString('userData');
-      if (userData != null) {
-        _user = AppUser.fromJson(json.decode(userData));
-        _isLoggedIn = true;
-      }
-    }
+    // NOTE: On ne charge plus de session au démarrage.
+    // L'utilisateur devra toujours se reconnecter.
+    // Cette méthode ne sert plus qu'à pré-charger l'état de "rememberMe".
     notifyListeners();
   }
 
@@ -60,13 +54,10 @@ class AuthProvider with ChangeNotifier {
         final responseData = json.decode(response.body);
         if (responseData['success'] == true) {
           _user = AppUser.fromJson(responseData);
-          _parseAndSaveCookie(response);
           _isLoggedIn = true;
+          _parseAndSetCookie(response); // On met le cookie en mémoire, sans le sauvegarder
 
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('userData', json.encode(responseData));
-
-          // Sauvegarde des identifiants si "Rester connecté" est coché
           if (_rememberMe) {
             await prefs.setString('savedLogin', login);
             await prefs.setString('savedPassword', password);
@@ -82,10 +73,10 @@ class AuthProvider with ChangeNotifier {
           _errorMessage = "Identifiant ou mot de passe incorrect.";
         }
       } else {
-        _errorMessage = "Erreur serveur: ${response.statusCode}";
+        _errorMessage = "Erreur serveur (${response.statusCode})";
       }
     } catch (e) {
-      _errorMessage = "Erreur de connexion: $e";
+      _errorMessage = "Erreur de connexion. Vérifiez le réseau et l'adresse du serveur.";
     }
 
     _isLoading = false;
@@ -93,14 +84,11 @@ class AuthProvider with ChangeNotifier {
     return false;
   }
 
-  void _parseAndSaveCookie(http.Response response) async {
+  // La méthode ne sauvegarde plus le cookie, elle le met juste en mémoire
+  void _parseAndSetCookie(http.Response response) {
     final rawCookie = response.headers['set-cookie'];
     if (rawCookie != null) {
-      // On extrait juste la partie JSESSIONID=...;
-      final cookie = rawCookie.split(';').firstWhere((c) => c.trim().startsWith('JSESSIONID'));
-      _sessionCookie = cookie;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('sessionCookie', _sessionCookie!);
+      _sessionCookie = rawCookie.split(';').firstWhere((c) => c.trim().startsWith('JSESSIONID'));
     }
   }
 
@@ -108,6 +96,10 @@ class AuthProvider with ChangeNotifier {
     _rememberMe = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('rememberMe', value);
+    if (!value) {
+      await prefs.remove('savedLogin');
+      await prefs.remove('savedPassword');
+    }
     notifyListeners();
   }
 
@@ -121,10 +113,12 @@ class AuthProvider with ChangeNotifier {
     _sessionCookie = null;
     _isLoggedIn = false;
 
+    // On ne supprime plus de cookie du stockage car il n'y est plus
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('sessionCookie');
-    await prefs.remove('userData');
-    // On ne supprime pas les identifiants sauvegardés si rememberMe est true
+    if (!rememberMe) {
+      await prefs.remove('savedLogin');
+      await prefs.remove('savedPassword');
+    }
 
     notifyListeners();
   }

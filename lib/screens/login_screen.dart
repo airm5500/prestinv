@@ -1,5 +1,7 @@
 // lib/screens/login_screen.dart
+
 import 'package:flutter/material.dart';
+import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/screens/config_screen.dart';
@@ -25,10 +27,14 @@ class _LoginScreenState extends State<LoginScreen> {
     _loadCredentials();
   }
 
+  /// Charge les identifiants depuis le stockage si "Rester connecté" était coché.
   Future<void> _loadCredentials() async {
     final prefs = await SharedPreferences.getInstance();
-    final rememberMe = prefs.getBool('rememberMe') ?? false;
-    if (rememberMe) {
+    // On utilise `mounted` pour s'assurer que le widget existe toujours
+    if (!mounted) return;
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    if (authProvider.rememberMe) {
       _loginController.text = prefs.getString('savedLogin') ?? '';
       _passwordController.text = prefs.getString('savedPassword') ?? '';
     }
@@ -41,127 +47,117 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  /// Gère la logique de connexion lors du clic sur le bouton.
   void _handleLogin() async {
+    // On vérifie que le widget est toujours monté avant d'utiliser son context
+    if (!mounted) return;
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final appConfig = Provider.of<AppConfig>(context, listen: false);
 
     bool success = await authProvider.login(
-      _loginController.text,
-      _passwordController.text,
+      _loginController.text.trim(),
+      _passwordController.text.trim(),
       appConfig,
     );
 
-    if (success && mounted) {
+    if (!mounted) return;
+
+    if (success) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
     } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(authProvider.errorMessage ?? 'Une erreur est survenue.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(authProvider.errorMessage ?? 'Une erreur est survenue.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
-
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.deepOrange, Colors.orange.shade300],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+        // Fond d'écran avec la nouvelle couleur primaire
+        decoration: const BoxDecoration(
+          color: AppColors.primary,
         ),
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(32.0),
-            child: Card(
-              elevation: 8,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Prestinv',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).primaryColor,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    TextField(
-                      controller: _loginController,
-                      decoration: const InputDecoration(
-                        labelText: 'Identifiant',
-                        prefixIcon: Icon(Icons.person),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _passwordController,
-                      obscureText: !_isPasswordVisible,
-                      decoration: InputDecoration(
-                        labelText: 'Mot de passe',
-                        prefixIcon: const Icon(Icons.lock),
-                        border: const OutlineInputBorder(),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _isPasswordVisible ? Icons.visibility_off : Icons.visibility,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Card(
+                // Le CardTheme du main.dart s'applique ici
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
+                  child: Consumer<AuthProvider>(
+                    builder: (context, auth, child) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.inventory_2_outlined, size: 64, color: AppColors.accent),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Prestige Inv',
+                            style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: AppColors.primary),
                           ),
-                          onPressed: () {
-                            setState(() => _isPasswordVisible = !_isPasswordVisible);
-                          },
-                        ),
-                      ),
-                    ),
-                    CheckboxListTile(
-                      title: const Text('Rester connecté'),
-                      value: authProvider.rememberMe,
-                      onChanged: (bool? value) {
-                        authProvider.setRememberMe(value ?? false);
-                      },
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    const SizedBox(height: 24),
-                    authProvider.isLoading
-                        ? const CircularProgressIndicator()
-                        : SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                          const SizedBox(height: 32),
+                          TextField(
+                            controller: _loginController,
+                            decoration: const InputDecoration(
+                              labelText: 'Identifiant',
+                              prefixIcon: Icon(Icons.person_outline),
+                            ),
+                            onSubmitted: (_) => _handleLogin(),
                           ),
-                        ),
-                        onPressed: _handleLogin,
-                        child: const Text('CONNEXION'),
-                      ),
-                    ),
-                  ],
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: _passwordController,
+                            obscureText: !_isPasswordVisible,
+                            decoration: InputDecoration(
+                              labelText: 'Mot de passe',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                icon: Icon(_isPasswordVisible ? Icons.visibility_off : Icons.visibility),
+                                onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+                              ),
+                            ),
+                            onSubmitted: (_) => _handleLogin(),
+                          ),
+                          CheckboxListTile(
+                            title: const Text('Rester connecté'),
+                            value: auth.rememberMe,
+                            onChanged: (bool? value) => auth.setRememberMe(value ?? false),
+                            controlAffinity: ListTileControlAffinity.leading,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          const SizedBox(height: 24),
+                          auth.isLoading
+                              ? const CircularProgressIndicator()
+                              : SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              // Le style vient du ElevatedButtonTheme dans main.dart
+                              onPressed: _handleLogin,
+                              child: const Text('CONNEXION'),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
           ),
         ),
       ),
-      // Bouton pour accéder aux paramètres
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          Navigator.of(context).push(MaterialPageRoute(builder: (_) => ConfigScreen()));
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConfigScreen()));
         },
         tooltip: 'Configuration',
         mini: true,

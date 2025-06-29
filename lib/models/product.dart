@@ -1,3 +1,5 @@
+// lib/models/product.dart
+
 class Product {
   final int id;
   final String produitCip;
@@ -5,8 +7,8 @@ class Product {
   final double produitPrixAchat;
   final double produitPrixUni;
   final int quantiteInitiale;
-  int quantiteSaisie; // mutable
-  bool isSynced; // pour le suivi de la synchronisation
+  int quantiteSaisie;
+  bool isSynced;
 
   Product({
     required this.id,
@@ -16,9 +18,10 @@ class Product {
     required this.produitPrixUni,
     required this.quantiteInitiale,
     required this.quantiteSaisie,
-    this.isSynced = true, // Par défaut, on considère que c'est synchronisé
+    this.isSynced = true,
   });
 
+  // Constructeur pour créer un Product depuis un Map (JSON)
   factory Product.fromJson(Map<String, dynamic> json) {
     return Product(
       id: json['id'],
@@ -28,6 +31,22 @@ class Product {
       produitPrixUni: (json['produitPrixUni'] as num).toDouble(),
       quantiteInitiale: json['quantiteInitiale'],
       quantiteSaisie: json['quantiteSaisie'],
+      // On ajoute 'isSynced' pour la persistance locale
+      isSynced: json['isSynced'] ?? true,
     );
+  }
+
+  // NOUVELLE MÉTHODE: Convertit un Product en Map (JSON) pour le stockage
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'produitCip': produitCip,
+      'produitName': produitName,
+      'produitPrixAchat': produitPrixAchat,
+      'produitPrixUni': produitPrixUni,
+      'quantiteInitiale': quantiteInitiale,
+      'quantiteSaisie': quantiteSaisie,
+      'isSynced': isSynced,
+    };
   }
 }

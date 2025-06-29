@@ -6,8 +6,19 @@ import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
+import 'package:prestinv/providers/auth_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart';
+
+// Imports pour la génération PDF et l'impression
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
 
 class AnalysisScreen extends StatefulWidget {
   const AnalysisScreen({super.key});
@@ -18,25 +29,36 @@ class AnalysisScreen extends StatefulWidget {
 
 class _AnalysisScreenState extends State<AnalysisScreen> {
   late ApiService _apiService;
+  final numberFormat = NumberFormat.currency(locale: 'fr_FR', symbol: 'F', decimalDigits: 0);
+
+  // Clé pour capturer le widget du graphique en tant qu'image
+  final GlobalKey _chartKey = GlobalKey();
 
   List<Inventory> _inventories = [];
   Inventory? _selectedInventory;
-
   List<Rayon> _rayons = [];
   Rayon? _selectedRayon;
-
   List<Product> _products = [];
+  bool _isLoading = false;
 
-  // Variables pour stocker les résultats de l'analyse
+  // Variables pour les statistiques
   int _positiveCount = 0;
   int _negativeCount = 0;
   int _correctCount = 0;
-  bool _isLoading = false;
+
+  // Variables pour la valorisation
+  double _valeurStockAvant = 0;
+  double _valeurStockApres = 0;
+  double _valeurEcart = 0;
 
   @override
   void initState() {
     super.initState();
-    _apiService = ApiService(baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    _apiService = ApiService(
+      baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
+      sessionCookie: authProvider.sessionCookie,
+    );
     _fetchInventories();
   }
 
@@ -45,38 +67,30 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     try {
       _inventories = await _apiService.fetchInventories(maxResult: 100);
     } catch (e) {
-      // Gérer l'erreur
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur de chargement des inventaires: $e"), backgroundColor: Colors.red));
     }
-    setState(() => _isLoading = false);
+    if (mounted) setState(() => _isLoading = false);
   }
 
   Future<void> _fetchRayons(String inventoryId) async {
-    setState(() {
-      _isLoading = true;
-      _rayons = [];
-      _selectedRayon = null;
-      _clearAnalysis();
-    });
+    setState(() { _isLoading = true; _rayons = []; _selectedRayon = null; _clearAnalysis(); });
     try {
       _rayons = await _apiService.fetchRayons(inventoryId);
     } catch (e) {
-      // Gérer l'erreur
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur de chargement des emplacements: $e"), backgroundColor: Colors.red));
     }
-    setState(() => _isLoading = false);
+    if (mounted) setState(() => _isLoading = false);
   }
 
   Future<void> _fetchProductsAndAnalyze(String inventoryId, String rayonId) async {
-    setState(() {
-      _isLoading = true;
-      _clearAnalysis();
-    });
+    setState(() { _isLoading = true; _clearAnalysis(); });
     try {
       _products = await _apiService.fetchProducts(inventoryId, rayonId);
       _performAnalysis(_products);
     } catch (e) {
-      // Gérer l'erreur
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur de chargement des produits: $e"), backgroundColor: Colors.red));
     }
-    setState(() => _isLoading = false);
+    if (mounted) setState(() => _isLoading = false);
   }
 
   void _clearAnalysis() {
@@ -85,45 +99,127 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       _positiveCount = 0;
       _negativeCount = 0;
       _correctCount = 0;
+      _valeurStockAvant = 0;
+      _valeurStockApres = 0;
+      _valeurEcart = 0;
     });
   }
 
   void _performAnalysis(List<Product> products) {
     if (products.isEmpty) return;
 
-    int pos = 0;
-    int neg = 0;
-    int correct = 0;
+    int pos = 0, neg = 0, correct = 0;
+    double valAvant = 0, valApres = 0;
 
     for (final product in products) {
       final ecart = product.quantiteSaisie - product.quantiteInitiale;
-      if (ecart > 0) {
-        pos++;
-      } else if (ecart < 0) {
-        neg++;
-      } else {
-        correct++;
-      }
+      if (ecart > 0) pos++;
+      else if (ecart < 0) neg++;
+      else correct++;
+
+      valAvant += product.quantiteInitiale * product.produitPrixAchat;
+      valApres += product.quantiteSaisie * product.produitPrixAchat;
     }
-    setState(() {
-      _positiveCount = pos;
-      _negativeCount = neg;
-      _correctCount = correct;
-    });
+
+    if (mounted) {
+      setState(() {
+        _positiveCount = pos;
+        _negativeCount = neg;
+        _correctCount = correct;
+        _valeurStockAvant = valAvant;
+        _valeurStockApres = valApres;
+        _valeurEcart = valApres - valAvant;
+      });
+    }
+  }
+
+  /// Génère le document PDF de l'analyse et lance l'impression.
+  Future<void> _printAnalysis() async {
+    // 1. Capturer le graphique en tant qu'image
+    final boundary = _chartKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: 3.0);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    if(byteData == null) return;
+    final Uint8List pngBytes = byteData.buffer.asUint8List();
+    final chartImage = pw.MemoryImage(pngBytes);
+
+    // 2. Créer le document PDF
+    final doc = pw.Document();
+
+    final total = _products.length;
+    final double positiveRate = total > 0 ? (_positiveCount / total) * 100 : 0;
+    final double negativeRate = total > 0 ? (_negativeCount / total) * 100 : 0;
+    final double correctRate = total > 0 ? (_correctCount / total) * 100 : 0;
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Header(level: 0, text: 'Rapport d\'Analyse'),
+              pw.Text('Inventaire: ${_selectedInventory?.libelle ?? 'N/A'}'),
+              pw.Text('Emplacement: ${_selectedRayon?.displayName ?? 'N/A'}'),
+              pw.Divider(height: 20),
+
+              pw.Header(level: 1, text: 'Valorisation de l\'inventaire'),
+              pw.Text('Valeur Avant: ${numberFormat.format(_valeurStockAvant)}'),
+              pw.Text('Valeur Après: ${numberFormat.format(_valeurStockApres)}'),
+              pw.Text('Écart Total: ${numberFormat.format(_valeurEcart)}',
+                  style: pw.TextStyle(color: _valeurEcart >= 0 ? PdfColors.green : PdfColors.red, fontWeight: pw.FontWeight.bold)
+              ),
+              pw.SizedBox(height: 20),
+
+              pw.Header(level: 1, text: 'Répartition des Écarts'),
+              pw.Center(
+                child: pw.SizedBox(
+                  width: 250,
+                  height: 250,
+                  child: pw.Image(chartImage),
+                ),
+              ),
+              pw.SizedBox(height: 20),
+
+              pw.Table.fromTextArray(
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                data: [
+                  ['Catégorie', 'Nombre d\'articles', 'Pourcentage'],
+                  ['Écarts Positifs', '$_positiveCount', '${positiveRate.toStringAsFixed(1)}%'],
+                  ['Écarts Négatifs', '$_negativeCount', '${negativeRate.toStringAsFixed(1)}%'],
+                  ['Stocks Corrects', '$_correctCount', '${correctRate.toStringAsFixed(1)}%'],
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    // 3. Lancer l'impression
+    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save());
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Analyse des Inventaires')),
+      appBar: AppBar(
+        title: const Text('Analyse des Inventaires'),
+        actions: [
+          if (_products.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.print_outlined),
+              tooltip: 'Imprimer l\'analyse',
+              onPressed: _printAnalysis,
+            )
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // --- Sélecteurs ---
             _buildSelectors(),
             const SizedBox(height: 24),
-            // --- Résultats ---
             if (_isLoading)
               const Expanded(child: Center(child: CircularProgressIndicator()))
             else if (_products.isNotEmpty)
@@ -173,6 +269,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     final double positiveRate = total > 0 ? (_positiveCount / total) * 100 : 0;
     final double negativeRate = total > 0 ? (_negativeCount / total) * 100 : 0;
     final double correctRate = total > 0 ? (_correctCount / total) * 100 : 0;
+    final ecartColor = _valeurEcart >= 0 ? Colors.green : Colors.red;
 
     return SingleChildScrollView(
       child: Column(
@@ -180,9 +277,22 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           Text('Analyse de l\'emplacement: ${_selectedRayon?.displayName ?? ''}', style: Theme.of(context).textTheme.titleLarge),
           Text('Nombre total d\'articles: $total', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 24),
-          SizedBox(
-            height: 200,
-            child: _buildPieChart(positiveRate, negativeRate, correctRate),
+          Row(
+            children: [
+              Expanded(child: _buildValueCard('Valeur Avant', _valeurStockAvant, Colors.blueGrey)),
+              const SizedBox(width: 8),
+              Expanded(child: _buildValueCard('Valeur Après', _valeurStockApres, Colors.blue)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _buildValueCard('Écart Total', _valeurEcart, ecartColor, isFullWidth: true),
+          const Divider(height: 40),
+          RepaintBoundary(
+            key: _chartKey,
+            child: SizedBox(
+              height: 200,
+              child: _buildPieChart(positiveRate, negativeRate, correctRate),
+            ),
           ),
           const SizedBox(height: 24),
           _buildLegend('Écarts Positifs', _positiveCount, positiveRate, Colors.green),
@@ -193,7 +303,30 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     );
   }
 
+  Widget _buildValueCard(String title, double value, Color color, {bool isFullWidth = false}) {
+    return Card(
+      // ignore: deprecated_member_use
+      color: color.withOpacity(0.1),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 8),
+            Text(
+              numberFormat.format(value),
+              style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPieChart(double pos, double neg, double correct) {
+    if (pos + neg + correct == 0) {
+      return const Center(child: Text('Aucune donnée à afficher dans le graphique.'));
+    }
     return PieChart(
       PieChartData(
         sectionsSpace: 2,

@@ -10,35 +10,38 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  
+
   http: ^1.2.1
   provider: ^6.1.2
   shared_preferences: ^2.2.3
   mobile_scanner: ^5.1.1
   fl_chart: ^0.68.0
+  intl: ^0.19.0 # Ajouté pour le formatage des nombres
   cupertino_icons: ^1.0.2
+  dart_ping: ^9.0.1
+  pdf: ^3.11.0
+  printing: ^5.12.0
+
+  # CORRECTION : On déplace le package ici
+  flutter_native_splash: ^2.4.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  
+
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.13.1
+  # La ligne était ici, elle a été déplacée dans la section dependencies ci-dessus
 
-# -------------------------------------------------
-# La section flutter s'arrête ici
+# ... Le reste du fichier (flutter: et flutter_native_splash:) ne change pas
+
 flutter:
   uses-material-design: true
   assets:
     - assets/images/
 
-# -------------------------------------------------
-# La section flutter_launcher_icons commence ici,
-# au même niveau d'indentation que la section 'flutter' ci-dessus.
-# Elle ne doit PAS être décalée vers la droite.
-flutter_launcher_icons:
-  android: "launcher_icon"
+flutter_native_splash:
+  color: "#002D42"
+  image: assets/images/icon.png
+  android: true
   ios: true
-  image_path: "assets/images/icon.png"
-  min_sdk_android: 21
-# -------------------------------------------------
