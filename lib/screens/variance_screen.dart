@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/product.dart';
-import 'package:prestinv/widgets/numeric_keyboard.dart';
-import 'package:provider/provider.dart';
+import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/screens/barcode_scanner_screen.dart';
+import 'package:prestinv/widgets/numeric_keyboard.dart';
+import 'package:prestinv/utils/app_utils.dart';
+import 'package:provider/provider.dart';
 
 class VarianceScreen extends StatefulWidget {
   final String inventoryId;
@@ -28,7 +30,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
   final _searchController = TextEditingController();
   final _quantityController = TextEditingController();
 
-  List<Product> _allProducts = [];
+  List<Product> _productsWithVariance = [];
   List<Product> _filteredProducts = [];
   Product? _selectedProduct;
   bool _isLoading = true;
@@ -39,155 +41,67 @@ class _VarianceScreenState extends State<VarianceScreen> {
   @override
   void initState() {
     super.initState();
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _apiService = ApiService(
-        baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl);
+      baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
+      sessionCookie: authProvider.sessionCookie,
+    );
     _fetchAndSetupProducts();
     _searchController.addListener(_filterProducts);
   }
 
-  Future<void> _scanBarcode() async {
-    try {
-      final scannedCode = await Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (context) => const BarcodeScannerScreen()),
-      );
-
-      if (scannedCode == null) return;
-
-      // On recherche le produit correspondant au code scanné
-      final foundProduct = _allProducts.firstWhere(
-            (p) => p.produitCip == scannedCode,
-        // MODIFICATION: Ajout des paramètres manquants pour le produit factice
-        orElse: () => Product(
-          id: -1,
-          produitCip: '',
-          produitName: 'NOT_FOUND',
-          produitPrixAchat: 0,
-          produitPrixUni: 0,
-          quantiteInitiale: 0,
-          quantiteSaisie: 0,
-        ),
-      );
-
-      if (foundProduct.id != -1) {
-        _selectProduct(foundProduct);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Produit non trouvé dans cet emplacement.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur du scanner: $e')),
-      );
-    }
-  }
-
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Correction Écarts - ${widget.rayonName}'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code_scanner),
-            tooltip: 'Scanner un code-barres',
-            onPressed: _scanBarcode,
-          ),
-          IconButton(
-            icon: const Icon(Icons.send),
-            tooltip: 'Envoyer les modifications',
-            onPressed: _sendDataToServer,
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                labelText: 'Rechercher par CIP ou Désignation',
-                prefixIcon: const Icon(Icons.search),
-                border: const OutlineInputBorder(),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    _searchController.clear();
-                  },
-                )
-                    : null,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Stack(
-              children: [
-                if (_selectedProduct != null && !_showSearchResults)
-                  buildProductView(_selectedProduct!),
-                if (_showSearchResults)
-                  Container(
-                    color: Colors.white,
-                    child: ListView.builder(
-                      itemCount: _filteredProducts.length,
-                      itemBuilder: (context, index) {
-                        final product = _filteredProducts[index];
-                        return ListTile(
-                          title: Text(product.produitName),
-                          subtitle: Text('CIP: ${product.produitCip}'),
-                          onTap: () => _selectProduct(product),
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          if (!_showSearchResults) NumericKeyboard(onKeyPressed: _onKeyPressed),
-        ],
-      ),
-    );
+  void dispose() {
+    _searchController.dispose();
+    _quantityController.dispose();
+    super.dispose();
   }
-
-  // Le reste du fichier est identique à la version précédente.
-  // J'inclus les méthodes pour que le fichier soit complet.
 
   Future<void> _fetchAndSetupProducts() async {
     setState(() => _isLoading = true);
     try {
-      _allProducts =
-      await _apiService.fetchProducts(widget.inventoryId, widget.rayonId);
-      if (_allProducts.isNotEmpty) {
-        _selectProduct(_allProducts.first);
+      List<Product> allProductsFromServer = await _apiService.fetchProducts(widget.inventoryId, widget.rayonId);
+
+      // FILTRAGE : On ne garde que les produits qui ont fait l'objet d'une saisie et qui présentent un écart.
+      _productsWithVariance = allProductsFromServer
+          .where((p) => p.quantiteSaisie != p.quantiteInitiale)
+          .toList();
+
+      if (_productsWithVariance.isNotEmpty) {
+        _selectProduct(_productsWithVariance.first);
       }
     } catch (e) {
-      // Gérer l'erreur
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur de chargement des produits: $e')),
+        );
+      }
     }
-    setState(() => _isLoading = false);
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
   }
 
   void _filterProducts() {
     final query = _searchController.text.toLowerCase();
     if (query.isEmpty) {
-      setState(() {
-        _filteredProducts = [];
-        _showSearchResults = false;
-      });
+      if (mounted) {
+        setState(() {
+          _filteredProducts = [];
+          _showSearchResults = false;
+        });
+      }
       return;
     }
-    setState(() {
-      _filteredProducts = _allProducts.where((product) {
-        return product.produitCip.toLowerCase().contains(query) ||
-            product.produitName.toLowerCase().contains(query);
-      }).toList();
-      _showSearchResults = true;
-    });
+    if (mounted) {
+      setState(() {
+        _filteredProducts = _productsWithVariance.where((product) {
+          return product.produitCip.toLowerCase().contains(query) ||
+              product.produitName.toLowerCase().contains(query);
+        }).toList();
+        _showSearchResults = true;
+      });
+    }
   }
 
   void _selectProduct(Product product) {
@@ -234,64 +148,142 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }
   }
 
-  Future<void> _sendDataToServer() async {
-    final unsyncedProducts = _allProducts.where((p) => !p.isSynced).toList();
+  Future<void> _scanBarcode() async {
+    if (!mounted) {
+      return;
+    }
+    try {
+      final scannedCode = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (context) => const BarcodeScannerScreen()),
+      );
+      if (scannedCode == null || !mounted) {
+        return;
+      }
 
+      final foundProduct = _productsWithVariance.firstWhere(
+            (p) => p.produitCip == scannedCode,
+        orElse: () => Product(id: -1, produitCip: '', produitName: 'NOT_FOUND', produitPrixAchat: 0, produitPrixUni: 0, quantiteInitiale: 0, quantiteSaisie: 0),
+      );
+
+      if (foundProduct.id != -1) {
+        _selectProduct(foundProduct);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ce produit ne fait pas partie des écarts.'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur du scanner: $e')));
+      }
+    }
+  }
+
+  Future<void> _sendDataToServer() async {
+    if (!mounted) return;
+
+    final unsyncedProducts = _productsWithVariance.where((p) => !p.isSynced).toList();
     if (unsyncedProducts.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Aucune modification à envoyer.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Aucune modification à envoyer.')));
       return;
     }
 
     final ValueNotifier<String> progressNotifier = ValueNotifier('Préparation de l\'envoi...');
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          content: ValueListenableBuilder<String>(
-            valueListenable: progressNotifier,
-            builder: (context, value, child) {
-              return Row(
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(width: 20),
-                  Text(value),
-                ],
-              );
-            },
-          ),
-        );
-      },
-    );
+    showProgressDialog(context, progressNotifier);
 
     int successCount = 0;
-    for (final product in unsyncedProducts) {
-      progressNotifier.value = 'Envoi... (${successCount + 1}/${unsyncedProducts.length})';
-      final success = await _apiService.updateProductQuantity(
-          product.id, product.quantiteSaisie);
-      if (success) {
-        setState(() {
-          product.isSynced = true;
-        });
-        successCount++;
+    try {
+      for (final product in unsyncedProducts) {
+        progressNotifier.value = 'Envoi... (${successCount + 1}/${unsyncedProducts.length})';
+        try {
+          await _apiService.updateProductQuantity(product.id, product.quantiteSaisie);
+          if (mounted) {
+            setState(() => product.isSynced = true);
+          }
+          successCount++;
+        } catch (e) {
+          // L'échec d'un produit n'arrête pas la boucle
+        }
+      }
+      progressNotifier.value = '$successCount sur ${unsyncedProducts.length} envoyé(s).';
+      await Future.delayed(const Duration(seconds: 2));
+
+    } catch (e) {
+      progressNotifier.value = 'Une erreur est survenue !';
+      await Future.delayed(const Duration(seconds: 2));
+    } finally {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
       }
     }
-
-    progressNotifier.value = '$successCount sur ${unsyncedProducts.length} envoyé(s).';
-
-    await Future.delayed(const Duration(seconds: 2));
-
-    Navigator.of(context).pop();
   }
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    _quantityController.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Correction Écarts - ${widget.rayonName}'),
+        actions: [
+          IconButton(icon: const Icon(Icons.qr_code_scanner), tooltip: 'Scanner un code-barres', onPressed: _scanBarcode),
+          IconButton(icon: const Icon(Icons.send), tooltip: 'Envoyer les modifications', onPressed: _sendDataToServer),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : (_productsWithVariance.isEmpty && !_isLoading)
+          ? const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Text(
+            "Aucun produit avec un écart de stock n'a été trouvé dans cet emplacement.",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16),
+          ),
+        ),
+      )
+          : Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: 'Rechercher un produit avec écart',
+                prefixIcon: const Icon(Icons.search),
+                border: const OutlineInputBorder(),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(icon: const Icon(Icons.clear), onPressed: () => _searchController.clear())
+                    : null,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Stack(
+              children: [
+                if (_selectedProduct != null && !_showSearchResults)
+                  buildProductView(_selectedProduct!),
+                if (_showSearchResults)
+                  Container(
+                    color: const Color(0xF2FFFFFF),
+                    child: _filteredProducts.isEmpty
+                        ? const Center(child: Text("Ce produit ne fait pas partie des écarts."))
+                        : ListView.builder(
+                      itemCount: _filteredProducts.length,
+                      itemBuilder: (context, index) {
+                        final product = _filteredProducts[index];
+                        return ListTile(
+                          title: Text(product.produitName),
+                          subtitle: Text('CIP: ${product.produitCip}'),
+                          onTap: () => _selectProduct(product),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (!_showSearchResults) NumericKeyboard(onKeyPressed: _onKeyPressed),
+        ],
+      ),
+    );
   }
 
   Widget buildProductView(Product product) {
@@ -307,7 +299,14 @@ class _VarianceScreenState extends State<VarianceScreen> {
           const SizedBox(height: 10),
           Text('CIP: ${product.produitCip}'),
           const SizedBox(height: 10),
-          Text('Stock Théorique: ${product.quantiteInitiale}'),
+          Consumer<AppConfig>(
+            builder: (context, appConfig, child) {
+              return Visibility(
+                visible: appConfig.showTheoreticalStock,
+                child: Text('Stock Théorique: ${product.quantiteInitiale}'),
+              );
+            },
+          ),
           const SizedBox(height: 20),
           TextField(
             controller: _quantityController,
