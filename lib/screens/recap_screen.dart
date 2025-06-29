@@ -92,7 +92,7 @@ class _RecapScreenState extends State<RecapScreen> {
         final ecart = p.quantiteSaisie - p.quantiteInitiale;
         final valo = ecart * p.produitPrixAchat;
         return [ p.produitName, p.quantiteInitiale.toString(), p.quantiteSaisie.toString(), ecart.toString(), numberFormat.format(valo)];
-      }).toList()
+      })
     ];
 
     doc.addPage(
@@ -244,8 +244,9 @@ class _RecapScreenState extends State<RecapScreen> {
                         final ecart = product.quantiteSaisie - product.quantiteInitiale;
                         final valorisationEcart = ecart * product.produitPrixAchat;
                         Color ecartColor = Colors.grey.shade700;
-                        if (ecart > 0) ecartColor = Colors.green;
-                        else if (ecart < 0) ecartColor = Colors.red;
+                        if (ecart > 0) {
+                          ecartColor = Colors.green;
+                        } else if (ecart < 0) ecartColor = Colors.red;
                         return DataRow(cells: [
                           DataCell(ConstrainedBox(constraints: const BoxConstraints(maxWidth: 250), child: Text(product.produitName, overflow: TextOverflow.ellipsis))),
                           DataCell(Text(product.quantiteInitiale.toString())),
