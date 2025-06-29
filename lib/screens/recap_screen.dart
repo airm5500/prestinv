@@ -1,15 +1,24 @@
 // lib/screens/recap_screen.dart
 
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+
+// Imports pour la génération PDF et l'impression
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
+// Imports pour la génération et le partage du CSV
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
 
 class RecapScreen extends StatefulWidget {
   final String inventoryId;
@@ -29,11 +38,13 @@ class RecapScreen extends StatefulWidget {
 
 class _RecapScreenState extends State<RecapScreen> {
   late Future<List<Product>> _productsFuture;
+  // Variables d'état pour stocker les totaux calculés
   double _totalAchat = 0;
   double _totalVente = 0;
   double _totalEcartValorise = 0;
-
   late ApiService _apiService;
+
+  // Formatteur de nombres pour un affichage plus lisible
   final numberFormat = NumberFormat.currency(locale: 'fr_FR', symbol: 'F', decimalDigits: 0);
 
   @override
@@ -54,6 +65,7 @@ class _RecapScreenState extends State<RecapScreen> {
     });
   }
 
+  /// Calcule tous les totaux nécessaires pour l'écran.
   void _calculateTotals(List<Product> products) {
     double tempAchat = 0, tempVente = 0, tempEcart = 0;
     for (var product in products) {
@@ -101,7 +113,7 @@ class _RecapScreenState extends State<RecapScreen> {
           pw.Divider(height: 30),
           pw.Text('Total Achat: ${numberFormat.format(_totalAchat)}'),
           pw.Text('Total Vente: ${numberFormat.format(_totalVente)}'),
-          pw.Text('Total Écart Valorisé: ${numberFormat.format(_totalEcartValorise)}', style: pw.TextStyle(color: _totalEcartValorise >= 0 ? PdfColors.green : PdfColors.red)),
+          pw.Text('Total Écart Valorisé: ${numberFormat.format(_totalEcartValorise)}', style: pw.TextStyle(color: _totalEcartValorise >= 0 ? PdfColors.green : PdfColors.red, fontWeight: pw.FontWeight.bold)),
         ],
       ),
     );
@@ -109,22 +121,73 @@ class _RecapScreenState extends State<RecapScreen> {
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save());
   }
 
-  /// Demande la génération du fichier CSV au serveur.
-  Future<void> _generateCsv() async {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demande de génération du fichier CSV envoyée...')));
-
-    bool success = await _apiService.requestCsvGeneration(widget.rayonId);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success ? 'Fichier généré avec succès sur le serveur.' : 'Échec de la génération du fichier.'),
-          backgroundColor: success ? Colors.green : Colors.red,
-        ),
-      );
+  /// Crée le contenu textuel du fichier CSV selon le format demandé.
+  String _generateCsvContent(List<Product> products) {
+    final StringBuffer csvContent = StringBuffer();
+    // Pas d'en-tête, pas de guillemets
+    for (final product in products) {
+      csvContent.writeln('${product.produitCip},${product.quantiteSaisie}');
     }
+    return csvContent.toString();
+  }
+
+  /// Partage le fichier CSV généré via le menu natif.
+  Future<void> _shareCsvFile(String csvContent) async {
+    final appConfig = Provider.of<AppConfig>(context, listen: false);
+    final timestamp = DateFormat('yyyy-MM-dd_HHmmss').format(DateTime.now());
+
+    final String pathPrefix = appConfig.networkExportPath.isNotEmpty
+        ? '${appConfig.networkExportPath.replaceAll('\\', '_')}_'
+        : '';
+
+    final cleanRayonName = widget.rayonName.replaceAll(RegExp(r'[^\w\s]+'),'').replaceAll(' ', '_');
+    final fileName = '$pathPrefix${cleanRayonName}_$timestamp.csv';
+
+    final directory = await getTemporaryDirectory();
+    final filePath = '${directory.path}/$fileName';
+    final file = File(filePath);
+    await file.writeAsString(csvContent);
+
+    final xFile = XFile(filePath);
+    await Share.shareXFiles([xFile], text: 'Export CSV pour l\'emplacement ${widget.rayonName}');
+  }
+
+  /// Copie le contenu CSV dans le presse-papiers.
+  void _copyCsvToClipboard(String csvContent) {
+    Clipboard.setData(ClipboardData(text: csvContent));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Contenu du CSV copié dans le presse-papiers !')),
+    );
+  }
+
+  /// Affiche une boîte de dialogue pour choisir l'action d'export CSV.
+  void _showExportDialog(List<Product> products) {
+    final csvContent = _generateCsvContent(products);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Exporter les données CSV'),
+        content: const Text('Comment voulez-vous exporter les données ?'),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.copy),
+            label: const Text('Copier le contenu'),
+            onPressed: () {
+              Navigator.of(context).pop();
+              _copyCsvToClipboard(csvContent);
+            },
+          ),
+          TextButton.icon(
+            icon: const Icon(Icons.share),
+            label: const Text('Partager le fichier'),
+            onPressed: () {
+              Navigator.of(context).pop();
+              _shareCsvFile(csvContent);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -136,19 +199,21 @@ class _RecapScreenState extends State<RecapScreen> {
         title: Text('Récap: ${widget.rayonName}'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.download_outlined),
-            tooltip: 'Générer CSV sur le serveur',
-            onPressed: _generateCsv,
+            icon: const Icon(Icons.upload_file),
+            tooltip: 'Exporter en CSV',
+            onPressed: () {
+              _productsFuture.then((products) {
+                if(products.isNotEmpty) _showExportDialog(products);
+              });
+            },
           ),
           IconButton(
             icon: const Icon(Icons.print_outlined),
             tooltip: 'Imprimer le récapitulatif',
             onPressed: () {
-              if (_productsFuture != null) {
-                _productsFuture.then((products) {
-                  if (products.isNotEmpty) _printRecap(products);
-                });
-              }
+              _productsFuture.then((products) {
+                if (products.isNotEmpty) _printRecap(products);
+              });
             },
           )
         ],
