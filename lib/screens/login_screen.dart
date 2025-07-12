@@ -27,10 +27,8 @@ class _LoginScreenState extends State<LoginScreen> {
     _loadCredentials();
   }
 
-  /// Charge les identifiants depuis le stockage si "Rester connecté" était coché.
   Future<void> _loadCredentials() async {
     final prefs = await SharedPreferences.getInstance();
-    // On utilise `mounted` pour s'assurer que le widget existe toujours
     if (!mounted) return;
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
@@ -47,9 +45,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  /// Gère la logique de connexion lors du clic sur le bouton.
   void _handleLogin() async {
-    // On vérifie que le widget est toujours monté avant d'utiliser son context
     if (!mounted) return;
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final appConfig = Provider.of<AppConfig>(context, listen: false);
@@ -79,78 +75,106 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        // Fond d'écran avec la nouvelle couleur primaire
-        decoration: const BoxDecoration(
-          color: AppColors.primary,
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(32.0),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Card(
-                // Le CardTheme du main.dart s'applique ici
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
-                  child: Consumer<AuthProvider>(
-                    builder: (context, auth, child) {
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.inventory_2_outlined, size: 64, color: AppColors.accent),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Prestige Inv',
-                            style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: AppColors.primary),
-                          ),
-                          const SizedBox(height: 32),
-                          TextField(
-                            controller: _loginController,
-                            decoration: const InputDecoration(
-                              labelText: 'Identifiant',
-                              prefixIcon: Icon(Icons.person_outline),
-                            ),
-                            onSubmitted: (_) => _handleLogin(),
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: _passwordController,
-                            obscureText: !_isPasswordVisible,
-                            decoration: InputDecoration(
-                              labelText: 'Mot de passe',
-                              prefixIcon: const Icon(Icons.lock_outline),
-                              suffixIcon: IconButton(
-                                icon: Icon(_isPasswordVisible ? Icons.visibility_off : Icons.visibility),
-                                onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
-                              ),
-                            ),
-                            onSubmitted: (_) => _handleLogin(),
-                          ),
-                          CheckboxListTile(
-                            title: const Text('Rester connecté'),
-                            value: auth.rememberMe,
-                            onChanged: (bool? value) => auth.setRememberMe(value ?? false),
-                            controlAffinity: ListTileControlAffinity.leading,
-                            contentPadding: EdgeInsets.zero,
-                          ),
-                          const SizedBox(height: 24),
-                          auth.isLoading
-                              ? const CircularProgressIndicator()
-                              : SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              // Le style vient du ElevatedButtonTheme dans main.dart
-                              onPressed: _handleLogin,
-                              child: const Text('CONNEXION'),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
+      backgroundColor: AppColors.background,
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.inventory_2_outlined, size: 80, color: AppColors.primary),
+                const SizedBox(height: 20),
+                const Text('Prestinv', style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                const SizedBox(height: 40),
+
+                TextField(
+                  controller: _loginController,
+                  decoration: const InputDecoration(
+                    labelText: 'Identifiant',
+                    prefixIcon: Icon(Icons.person_outline),
                   ),
+                  onSubmitted: (_) => _handleLogin(),
                 ),
-              ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _passwordController,
+                  obscureText: !_isPasswordVisible,
+                  decoration: InputDecoration(
+                    labelText: 'Mot de passe',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(_isPasswordVisible ? Icons.visibility_off : Icons.visibility),
+                      onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+                    ),
+                  ),
+                  onSubmitted: (_) => _handleLogin(),
+                ),
+
+                Consumer<AuthProvider>(
+                  builder: (context, auth, child) {
+                    return CheckboxListTile(
+                      title: const Text('Rester connecté'),
+                      value: auth.rememberMe,
+                      onChanged: (bool? value) => auth.setRememberMe(value ?? false),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // NOUVEAU : Le sélecteur de mode de connexion est maintenant ici
+                Consumer<AppConfig>(
+                  builder: (context, appConfig, child) {
+                    return Card(
+                      elevation: 1,
+                      color: Colors.white,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Mode de connexion :'),
+                            Row(
+                              children: [
+                                Text(
+                                  appConfig.apiMode == ApiMode.local ? 'Local' : 'Distant',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary),
+                                ),
+                                Switch(
+                                  activeColor: AppColors.accent,
+                                  value: appConfig.apiMode == ApiMode.local,
+                                  onChanged: (value) {
+                                    appConfig.setApiMode(value ? ApiMode.local : ApiMode.distant);
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 24),
+
+                Consumer<AuthProvider>(
+                    builder: (context, auth, child) {
+                      return auth.isLoading
+                          ? const CircularProgressIndicator()
+                          : SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _handleLogin,
+                          child: const Text('CONNEXION'),
+                        ),
+                      );
+                    }
+                ),
+              ],
             ),
           ),
         ),

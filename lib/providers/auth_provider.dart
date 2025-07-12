@@ -29,10 +29,6 @@ class AuthProvider with ChangeNotifier {
   Future<void> loadUserFromStorage() async {
     final prefs = await SharedPreferences.getInstance();
     _rememberMe = prefs.getBool('rememberMe') ?? false;
-
-    // NOTE: On ne charge plus de session au démarrage.
-    // L'utilisateur devra toujours se reconnecter.
-    // Cette méthode ne sert plus qu'à pré-charger l'état de "rememberMe".
     notifyListeners();
   }
 
@@ -41,7 +37,8 @@ class AuthProvider with ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    final url = Uri.parse('${appConfig.currentApiUrl}/laborex/api/v1/user/auth');
+    // CORRECTION : On retire "/laborex" qui est maintenant dans currentApiUrl
+    final url = Uri.parse('${appConfig.currentApiUrl}/api/v1/user/auth');
 
     try {
       final response = await http.post(
@@ -55,7 +52,7 @@ class AuthProvider with ChangeNotifier {
         if (responseData['success'] == true) {
           _user = AppUser.fromJson(responseData);
           _isLoggedIn = true;
-          _parseAndSetCookie(response); // On met le cookie en mémoire, sans le sauvegarder
+          _parseAndSetCookie(response);
 
           final prefs = await SharedPreferences.getInstance();
           if (_rememberMe) {
@@ -84,7 +81,6 @@ class AuthProvider with ChangeNotifier {
     return false;
   }
 
-  // La méthode ne sauvegarde plus le cookie, elle le met juste en mémoire
   void _parseAndSetCookie(http.Response response) {
     final rawCookie = response.headers['set-cookie'];
     if (rawCookie != null) {
@@ -104,7 +100,8 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<void> logout(AppConfig appConfig) async {
-    final url = Uri.parse('${appConfig.currentApiUrl}/laborex/api/v1/user/logout');
+    // CORRECTION : On retire "/laborex" qui est maintenant dans currentApiUrl
+    final url = Uri.parse('${appConfig.currentApiUrl}/api/v1/user/logout');
     if (_sessionCookie != null) {
       await http.post(url, headers: {'Cookie': _sessionCookie!});
     }
@@ -113,8 +110,8 @@ class AuthProvider with ChangeNotifier {
     _sessionCookie = null;
     _isLoggedIn = false;
 
-    // On ne supprime plus de cookie du stockage car il n'y est plus
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('sessionCookie');
     if (!rememberMe) {
       await prefs.remove('savedLogin');
       await prefs.remove('savedPassword');

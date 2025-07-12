@@ -16,6 +16,7 @@ class AppConfig with ChangeNotifier {
   String _distantApiAddress = '';
   String _distantApiPort = '8080';
   ApiMode _apiMode = ApiMode.local;
+  String _appName = 'laborex';
 
   // --- Paramètres de l'Application ---
   int _maxResult = 3;
@@ -32,6 +33,7 @@ class AppConfig with ChangeNotifier {
   String get distantApiAddress => _distantApiAddress;
   String get distantApiPort => _distantApiPort;
   ApiMode get apiMode => _apiMode;
+  String get appName => _appName;
   int get maxResult => _maxResult;
   bool get showTheoreticalStock => _showTheoreticalStock;
   int get largeValueThreshold => _largeValueThreshold;
@@ -62,6 +64,11 @@ class AppConfig with ChangeNotifier {
       url += ':$port';
     }
 
+    // On ajoute le nom de l'application (contexte) à la fin
+    if (_appName.isNotEmpty) {
+      url += '/$_appName';
+    }
+
     return url;
   }
 
@@ -73,6 +80,7 @@ class AppConfig with ChangeNotifier {
     _localApiPort = _prefs.getString('localApiPort') ?? '8080';
     _distantApiAddress = _prefs.getString('distantApiAddress') ?? '';
     _distantApiPort = _prefs.getString('distantApiPort') ?? '8080';
+    _appName = _prefs.getString('appName') ?? 'laborex';
 
     _maxResult = _prefs.getInt('maxResult') ?? 3;
     _showTheoreticalStock = _prefs.getBool('showTheoreticalStock') ?? true;
@@ -89,17 +97,20 @@ class AppConfig with ChangeNotifier {
   /// Sauvegarde les paramètres de connexion API.
   Future<void> setApiConfig({
     String? localAddress, String? localPort,
-    String? distantAddress, String? distantPort
+    String? distantAddress, String? distantPort,
+    String? appName,
   }) async {
     _localApiAddress = localAddress ?? _localApiAddress;
     _localApiPort = localPort ?? _localApiPort;
     _distantApiAddress = distantAddress ?? _distantApiAddress;
     _distantApiPort = distantPort ?? _distantApiPort;
+    _appName = appName ?? _appName;
 
     await _prefs.setString('localApiAddress', _localApiAddress);
     await _prefs.setString('localApiPort', _localApiPort);
     await _prefs.setString('distantApiAddress', _distantApiAddress);
     await _prefs.setString('distantApiPort', _distantApiPort);
+    await _prefs.setString('appName', _appName);
 
     notifyListeners();
   }

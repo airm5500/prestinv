@@ -20,6 +20,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
   final _localPortController = TextEditingController();
   final _distantAddressController = TextEditingController();
   final _distantPortController = TextEditingController();
+  final _appNameController = TextEditingController();
   final _maxResultController = TextEditingController();
   final _largeValueController = TextEditingController();
   final _autoLogoutController = TextEditingController();
@@ -28,6 +29,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   // Variables d'état
   late bool _showStockValue;
+  bool _isAppNameEditable = false;
   bool _isTestingConnection = false;
 
   @override
@@ -40,6 +42,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _localPortController.text = appConfig.localApiPort;
     _distantAddressController.text = appConfig.distantApiAddress;
     _distantPortController.text = appConfig.distantApiPort;
+    _appNameController.text = appConfig.appName;
     _maxResultController.text = appConfig.maxResult.toString();
     _largeValueController.text = appConfig.largeValueThreshold.toString();
     _autoLogoutController.text = appConfig.autoLogoutMinutes.toString();
@@ -55,6 +58,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _localPortController.dispose();
     _distantAddressController.dispose();
     _distantPortController.dispose();
+    _appNameController.dispose();
     _maxResultController.dispose();
     _largeValueController.dispose();
     _autoLogoutController.dispose();
@@ -119,6 +123,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       localPort: _localPortController.text.trim(),
       distantAddress: _distantAddressController.text.trim(),
       distantPort: _distantPortController.text.trim(),
+      appName: _appNameController.text.trim(),
     );
 
     final int maxResult = int.tryParse(_maxResultController.text) ?? 3;
@@ -179,6 +184,29 @@ class _ConfigScreenState extends State<ConfigScreen> {
                 const SizedBox(width: 8),
                 SizedBox(width: 90, child: TextFormField(controller: _distantPortController, decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly])),
                 IconButton(icon: Icon(Icons.network_ping, color: _isTestingConnection ? Colors.grey : Theme.of(context).primaryColor), tooltip: 'Tester la connexion', onPressed: _isTestingConnection ? null : () => _testConnectivity(_distantAddressController.text, _distantPortController.text)),
+              ],
+            ),
+            const SizedBox(height: 24),
+            const Text('Nom de l\'Application (contexte URL)', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _appNameController,
+                    readOnly: !_isAppNameEditable,
+                    decoration: InputDecoration(
+                      border: const OutlineInputBorder(),
+                      filled: !_isAppNameEditable,
+                      fillColor: Colors.grey.shade200,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(_isAppNameEditable ? Icons.save_alt_outlined : Icons.edit_outlined),
+                  tooltip: _isAppNameEditable ? 'Enregistrer' : 'Modifier',
+                  onPressed: () => setState(() => _isAppNameEditable = !_isAppNameEditable),
+                )
               ],
             ),
             const Divider(height: 40),
