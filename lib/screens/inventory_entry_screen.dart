@@ -31,12 +31,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   late ApiService _apiService;
 
-  // Variables pour la notification personnalisée
   String? _notificationMessage;
   Color? _notificationColor;
   Timer? _notificationTimer;
 
-  // Timer pour le rappel d'envoi en mode collecte
   Timer? _sendReminderTimer;
 
   @override
@@ -66,7 +64,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     super.dispose();
   }
 
-  /// Affiche une notification temporaire dans la zone dédiée.
   void _showNotification(String message, Color color) {
     _notificationTimer?.cancel();
     setState(() {
@@ -82,7 +79,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     });
   }
 
-  /// Démarre ou réinitialise le minuteur de rappel d'envoi.
   void _resetSendReminderTimer() {
     _sendReminderTimer?.cancel();
 
@@ -121,7 +117,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   Future<void> _sendDataToServer() async {
-    _sendReminderTimer?.cancel();
     if (!mounted) return;
 
     final provider = Provider.of<EntryProvider>(context, listen: false);
@@ -145,6 +140,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     });
 
     progressNotifier.value = '$unsyncedCount article(s) traité(s).';
+    _sendReminderTimer?.cancel();
     await Future.delayed(const Duration(seconds: 2));
 
     if (mounted) {
@@ -225,14 +221,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  Future<void> _handleBackNavigation() async {
+  Future<bool> _onWillPop() async {
     _sendReminderTimer?.cancel();
     final provider = Provider.of<EntryProvider>(context, listen: false);
     if (!provider.hasUnsyncedData) {
-      if (mounted) Navigator.of(context).pop();
-      return;
+      return true;
     }
-    if (!mounted) return;
+    if (!mounted) return false;
     final bool? sendAndLeave = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -245,12 +240,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         ],
       ),
     );
-    if (!mounted) return;
+    if (!mounted) return false;
     if (sendAndLeave == true) {
       await _sendDataToServer();
-      if (mounted) Navigator.of(context).pop();
+      return true;
     } else {
       _resetSendReminderTimer();
+      return false;
     }
   }
 
@@ -276,7 +272,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
-  /// Logique de changement d'emplacement mise à jour
   void _onLocationChanged(Rayon? newValue) async {
     if (newValue == null) return;
 
@@ -310,13 +305,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      // ignore: deprecated_member_use
-      onPopInvoked: (bool didPop) {
-        if (didPop) return;
-        _handleBackNavigation();
-      },
+    return WillPopScope(
+      onWillPop: _onWillPop,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Saisie Inventaire'),
@@ -373,7 +363,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                   padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: AppColors.primary.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(8.0),
                   ),
                   child: DropdownButtonHideUnderline(
@@ -413,7 +403,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       },
       child: _notificationMessage == null
           ? const SizedBox(height: 48, key: ValueKey('empty'))
-          : SizedBox(
+          : Container(
         key: const ValueKey('notification'),
         height: 48,
         child: Center(
@@ -428,110 +418,109 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   Widget buildProductView(EntryProvider provider) {
     final Product product = provider.currentProduct!;
-    const boldBlueStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary);
     const textFieldBorderColor = Colors.deepPurple;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text('${provider.currentProductIndex + 1} / ${provider.totalProducts}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 8),
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+      children: [
+        const SizedBox(height: 8),
+        Text('${provider.currentProductIndex + 1} / ${provider.totalProducts}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(height: 8),
 
-          ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 50),
-            child: Text(
-              product.produitName,
-              style: boldBlueStyle.copyWith(fontSize: 20, color: AppColors.primary),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            '${product.produitCip} - ${product.produitName}',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primary),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 16),
+        ),
+        const SizedBox(height: 12),
 
-          Text('CIP: ${product.produitCip}', style: boldBlueStyle),
-          const SizedBox(height: 12),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Prix Achat: ${product.produitPrixAchat} F', style: const TextStyle(fontSize: 18, color: Colors.orange, fontWeight: FontWeight.w500)),
-                Text('Prix Vente: ${product.produitPrixUni} F', style: const TextStyle(fontSize: 18, color: AppColors.accent, fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          Consumer<AppConfig>(
-            builder: (context, appConfig, child) {
-              return Visibility(
-                visible: appConfig.showTheoreticalStock,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 16.0),
-                  child: Text(
-                    'Stock Théorique: ${product.quantiteInitiale}',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: product.quantiteInitiale < 0 ? Colors.red.shade700 : const Color(0xFF1B5E20)),
-                  ),
-                ),
-              );
-            },
-          ),
-
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              SizedBox(
-                width: 72,
-                height: 72,
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    shape: const CircleBorder(),
-                    padding: const EdgeInsets.all(16),
-                    side: const BorderSide(color: textFieldBorderColor, width: 2),
-                  ),
-                  onPressed: provider.previousProduct,
-                  child: const Icon(Icons.chevron_left, size: 32, color: textFieldBorderColor),
-                ),
-              ),
-              const SizedBox(width: 8),
-
-              Expanded(
-                child: TextField(
-                  controller: _quantityController,
-                  focusNode: _quantityFocusNode,
-                  decoration: const InputDecoration(
-                    labelText: 'Quantité Comptée',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(12))
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide(color: textFieldBorderColor, width: 2),
-                    ),
-                  ),
-                  keyboardType: TextInputType.none,
-                  readOnly: true,
-                  textAlign: TextAlign.center,
-                  cursorColor: textFieldBorderColor,
-                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: textFieldBorderColor),
-                ),
-              ),
-              const SizedBox(width: 72),
+              Text('Prix Achat: ${product.produitPrixAchat} F', style: const TextStyle(fontSize: 16, color: Colors.orange, fontWeight: FontWeight.w500)),
+              Text('Prix Vente: ${product.produitPrixUni} F', style: const TextStyle(fontSize: 16, color: AppColors.accent, fontWeight: FontWeight.w500)),
             ],
           ),
-          const SizedBox(height: 10),
-          TextButton.icon(
-            onPressed: () => provider.goToFirstProduct(),
-            icon: const Icon(Icons.first_page),
-            label: const Text('Retour au premier article'),
-          ),
-          _buildNotificationArea(),
-        ],
-      ),
+        ),
+        const SizedBox(height: 8),
+
+        Consumer<AppConfig>(
+          builder: (context, appConfig, child) {
+            return Visibility(
+              visible: appConfig.showTheoreticalStock,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Text(
+                  'Stock Théorique: ${product.quantiteInitiale}',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: product.quantiteInitiale < 0 ? Colors.red.shade700 : const Color(0xFF1B5E20)),
+                ),
+              ),
+            );
+          },
+        ),
+
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 64,
+              height: 64,
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  shape: const CircleBorder(),
+                  padding: const EdgeInsets.all(12),
+                  side: const BorderSide(color: textFieldBorderColor, width: 2),
+                ),
+                onPressed: provider.previousProduct,
+                child: const Icon(Icons.chevron_left, size: 30, color: textFieldBorderColor),
+              ),
+            ),
+            const SizedBox(width: 8),
+
+            Expanded(
+              child: TextField(
+                controller: _quantityController,
+                focusNode: _quantityFocusNode,
+                decoration: const InputDecoration(
+                  labelText: 'Quantité Comptée',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                    borderSide: BorderSide(color: textFieldBorderColor, width: 2),
+                  ),
+                ),
+                keyboardType: TextInputType.none,
+                readOnly: true,
+                textAlign: TextAlign.center,
+                cursorColor: textFieldBorderColor,
+                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: textFieldBorderColor),
+              ),
+            ),
+
+            // CORRECTION : Le bouton "Retour au premier" est maintenant ici
+            SizedBox(
+              width: 64,
+              height: 64,
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  shape: const CircleBorder(),
+                  padding: const EdgeInsets.all(12),
+                  side: const BorderSide(color: Colors.red, width: 2),
+                ),
+                onPressed: () => provider.goToFirstProduct(),
+                child: const Icon(Icons.first_page, size: 30, color: Colors.red),
+              ),
+            ),
+          ],
+        ),
+        _buildNotificationArea(),
+      ],
     );
   }
 }

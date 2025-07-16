@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
+import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/providers/auth_provider.dart';
@@ -42,7 +43,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
   bool _isNewEntry = true;
   late ApiService _apiService;
 
-  // NOUVEAU : Variables pour gérer la notification personnalisée
   String? _notificationMessage;
   Color? _notificationColor;
   Timer? _notificationTimer;
@@ -64,7 +64,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
     _searchController.dispose();
     _quantityController.dispose();
     _quantityFocusNode.dispose();
-    _notificationTimer?.cancel(); // On annule le timer s'il existe
+    _notificationTimer?.cancel();
     super.dispose();
   }
 
@@ -109,9 +109,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
   void _filterProducts() {
     final query = _searchController.text.toLowerCase();
     if (query.isEmpty) {
-      if (mounted) {
-        setState(() { _filteredProducts = []; _showSearchResults = false; });
-      }
+      if (mounted) { setState(() { _filteredProducts = []; _showSearchResults = false; }); }
       return;
     }
     if (mounted) {
@@ -152,8 +150,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
   void _onKeyPressed(String value) {
     if (value == 'DEL') {
       if (_quantityController.text.isNotEmpty) {
-        _quantityController.text =
-            _quantityController.text.substring(0, _quantityController.text.length - 1);
+        _quantityController.text = _quantityController.text.substring(0, _quantityController.text.length - 1);
       }
       _isNewEntry = false;
     } else if (value == 'OK') {
@@ -168,7 +165,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }
   }
 
-  /// Met à jour la quantité, envoie DIRECTEMENT au serveur et passe au produit suivant.
   void _updateQuantityAndSend() async {
     if (_productsWithVariance.isEmpty || !mounted) return;
 
@@ -183,7 +179,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
       await _apiService.updateProductQuantity(product.id, newQuantity);
       if (mounted) {
         _showNotification('Correction envoyée !', Colors.green);
-        _nextProduct(); // On passe au suivant après le succès
+        _nextProduct();
       }
     } catch (e) {
       if (mounted) {
@@ -192,19 +188,14 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }
   }
 
-  /// Affiche une notification temporaire à l'écran.
   void _showNotification(String message, Color color) {
-    _notificationTimer?.cancel(); // Annule le timer précédent s'il existe
+    _notificationTimer?.cancel();
     setState(() {
       _notificationMessage = message;
       _notificationColor = color;
     });
     _notificationTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() {
-          _notificationMessage = null;
-        });
-      }
+      if (mounted) { setState(() => _notificationMessage = null); }
     });
   }
 
@@ -293,7 +284,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
               ],
             ),
           ),
-          // NOUVEAU WIDGET : Zone de notification
           _buildNotificationArea(),
           if (!_showSearchResults) NumericKeyboard(onKeyPressed: _onKeyPressed),
         ],
@@ -301,25 +291,22 @@ class _VarianceScreenState extends State<VarianceScreen> {
     );
   }
 
-  /// Construit la zone de notification personnalisée.
   Widget _buildNotificationArea() {
-    if (_notificationMessage == null) {
-      // Retourne un conteneur vide avec une hauteur fixe pour ne pas décaler l'UI
-      return const SizedBox(height: 50);
-    }
-    return Container(
-      height: 50,
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: _notificationColor?.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _notificationColor ?? Colors.transparent),
-      ),
-      child: Center(
-        child: Text(
-          _notificationMessage!,
-          style: TextStyle(color: _notificationColor, fontWeight: FontWeight.bold),
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      transitionBuilder: (Widget child, Animation<double> animation) {
+        return FadeTransition(opacity: animation, child: child);
+      },
+      child: _notificationMessage == null
+          ? const SizedBox(height: 50, key: ValueKey('empty'))
+          : Container(
+        key: const ValueKey('notification'),
+        height: 50,
+        child: Center(
+          child: Text(
+            _notificationMessage!,
+            style: TextStyle(color: _notificationColor, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
         ),
       ),
     );
@@ -336,41 +323,74 @@ class _VarianceScreenState extends State<VarianceScreen> {
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 50),
+
+          Align(
+            alignment: Alignment.centerLeft,
             child: Text(
-              product.produitName,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueAccent),
-              textAlign: TextAlign.center,
+              '${product.produitCip} - ${product.produitName}',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primary),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           const SizedBox(height: 10),
-          Text('CIP: ${product.produitCip}'),
-          const SizedBox(height: 10),
+
           Consumer<AppConfig>(
             builder: (context, appConfig, child) => Visibility(
               visible: appConfig.showTheoreticalStock,
-              child: Text('Stock Théorique: ${product.quantiteInitiale}'),
+              child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Stock Théorique: ${product.quantiteInitiale}')
+              ),
             ),
           ),
           const SizedBox(height: 20),
-          TextField(
-            controller: _quantityController,
-            focusNode: _quantityFocusNode,
-            decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
-            keyboardType: TextInputType.none,
-            readOnly: true,
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
+
+          // CORRECTION : Nouvelle disposition pour la saisie
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              ElevatedButton.icon(onPressed: _currentProductIndex > 0 ? _previousProduct : null, icon: const Icon(Icons.chevron_left), label: const Text('Précédent')),
-              ElevatedButton.icon(onPressed: _currentProductIndex < _productsWithVariance.length - 1 ? _nextProduct : null, label: const Text('Suivant'), icon: const Icon(Icons.chevron_right)),
+              SizedBox(
+                width: 64,
+                height: 64,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    shape: const CircleBorder(),
+                    padding: const EdgeInsets.all(12),
+                    side: BorderSide(color: Theme.of(context).colorScheme.secondary, width: 2),
+                  ),
+                  onPressed: _currentProductIndex > 0 ? _previousProduct : null,
+                  child: Icon(Icons.chevron_left, size: 30, color: Theme.of(context).colorScheme.secondary),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              Expanded(
+                child: TextField(
+                  controller: _quantityController,
+                  focusNode: _quantityFocusNode,
+                  decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
+                  keyboardType: TextInputType.none,
+                  readOnly: true,
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              SizedBox(
+                width: 64,
+                height: 64,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    shape: const CircleBorder(),
+                    padding: const EdgeInsets.all(12),
+                    side: BorderSide(color: Theme.of(context).colorScheme.secondary, width: 2),
+                  ),
+                  onPressed: _currentProductIndex < _productsWithVariance.length - 1 ? _nextProduct : null,
+                  child: Icon(Icons.chevron_right, size: 30, color: Theme.of(context).colorScheme.secondary),
+                ),
+              ),
             ],
           )
         ],
