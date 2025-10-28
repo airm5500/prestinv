@@ -235,9 +235,11 @@ class _RecapScreenState extends State<RecapScreen> {
                       columnSpacing: 20,
                       columns: const [
                         DataColumn(label: Text('Désignation', style: TextStyle(fontWeight: FontWeight.bold))),
-                        DataColumn(label: Text('Stock Théo.'), numeric: true),
+                        // --- MODIFICATION ICI ---
+                        DataColumn(label: Text('Écart Qté'), numeric: true), // Anciennement "Stock Théo."
                         DataColumn(label: Text('Stock Compté'), numeric: true),
-                        DataColumn(label: Text('Écart Qté'), numeric: true),
+                        DataColumn(label: Text('Stock Théo.'), numeric: true), // Anciennement "Écart Qté"
+                        // --- FIN MODIFICATION ---
                         DataColumn(label: Text('Valorisation Écart', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
                       ],
                       rows: products.map((product) {
@@ -249,9 +251,11 @@ class _RecapScreenState extends State<RecapScreen> {
                         } else if (ecart < 0) ecartColor = Colors.red;
                         return DataRow(cells: [
                           DataCell(ConstrainedBox(constraints: const BoxConstraints(maxWidth: 250), child: Text(product.produitName, overflow: TextOverflow.ellipsis))),
-                          DataCell(Text(product.quantiteInitiale.toString())),
+                          // --- MODIFICATION ICI ---
+                          DataCell(Text(ecart.toString(), style: TextStyle(color: ecartColor, fontWeight: FontWeight.bold))), // Anciennement "Stock Théo."
                           DataCell(Text(product.quantiteSaisie.toString())),
-                          DataCell(Text(ecart.toString(), style: TextStyle(color: ecartColor, fontWeight: FontWeight.bold))),
+                          DataCell(Text(product.quantiteInitiale.toString())), // Anciennement "Écart Qté"
+                          // --- FIN MODIFICATION ---
                           DataCell(Text(numberFormat.format(valorisationEcart), style: TextStyle(color: ecartColor, fontWeight: FontWeight.bold))),
                         ]);
                       }).toList(),
