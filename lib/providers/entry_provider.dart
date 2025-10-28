@@ -5,45 +5,73 @@ import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
+// NOUVEAU
+import 'package:prestinv/models/product_filter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class EntryProvider with ChangeNotifier {
   List<Rayon> _rayons = [];
-  List<Product> _products = [];
   Rayon? _selectedRayon;
-  int _currentProductIndex = 0;
   bool _isLoading = false;
   String? _error;
+
+  // MODIFIÉ : _products est renommé _allProducts (source de vérité)
+  List<Product> _allProducts = [];
+  // NOUVEAU : La liste que l'UI va réellement afficher
+  List<Product> _filteredProducts = [];
+
+  // NOUVEAU : Gère le filtre actif
+  ProductFilter _activeFilter = ProductFilter();
+
+  // MODIFIÉ : L'index est maintenant géré par emplacement
+  int _currentProductIndex = 0;
+  final Map<String, int> _lastIndexByRayon = {};
 
   // Pour gérer la session non envoyée
   bool _hasPendingSession = false;
 
   // --- Getters publics pour l'interface utilisateur ---
   List<Rayon> get rayons => _rayons;
-  List<Product> get products => _products;
   Rayon? get selectedRayon => _selectedRayon;
-  Product? get currentProduct => _products.isNotEmpty && _currentProductIndex < _products.length ? _products[_currentProductIndex] : null;
-  int get currentProductIndex => _currentProductIndex;
-  int get totalProducts => _products.length;
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasPendingSession => _hasPendingSession;
 
-  /// Indique s'il y a des produits dont la quantité a été modifiée mais pas encore envoyée.
-  bool get hasUnsyncedData => _products.any((p) => !p.isSynced);
+  // NOUVEAU : Le filtre actif
+  ProductFilter get activeFilter => _activeFilter;
 
-  // --- PERSISTANCE DES DONNÉES LOCALES ---
+  // MODIFIÉ : 'products' retourne maintenant la liste FILTRÉE
+  List<Product> get products => _filteredProducts;
 
-  /// Sauvegarde uniquement les produits non synchronisés dans le stockage local.
+  // MODIFIÉ : 'totalProducts' est le total des produits FILTRÉS
+  int get totalProducts => _filteredProducts.length;
+
+  // NOUVEAU : Le total des produits de l'emplacement (pour le badge)
+  int get totalProductsInRayon => _allProducts.length;
+
+  // MODIFIÉ : 'currentProductIndex' est maintenant un getter
+  int get currentProductIndex => _currentProductIndex;
+
+  Product? get currentProduct => _filteredProducts.isNotEmpty && _currentProductIndex < _filteredProducts.length
+      ? _filteredProducts[_currentProductIndex]
+      : null;
+
+  // MODIFIÉ : Vérifie la liste complète
+  bool get hasUnsyncedData => _allProducts.any((p) => !p.isSynced);
+
+  // --- PERSISTANCE DES DONNÉES LOCALES (Filtres et Index) ---
+
+  /// Sauvegarde uniquement les produits non synchronisés (fonctionne sur _allProducts)
   Future<void> _saveUnsyncedData() async {
     if (_selectedRayon == null) return;
     final prefs = await SharedPreferences.getInstance();
     final key = 'unsynced_data_${_selectedRayon!.id}';
 
-    final unsyncedProducts = _products.where((p) => !p.isSynced).toList();
+    // MODIFIÉ : Utilise _allProducts
+    final unsyncedProducts = _allProducts.where((p) => !p.isSynced).toList();
 
     if (unsyncedProducts.isEmpty) {
-      await prefs.remove(key); // On nettoie s'il n'y a plus rien à synchroniser
+      await prefs.remove(key);
     } else {
       final dataToSave = unsyncedProducts.map((p) => p.toJson()).toList();
       await prefs.setString(key, json.encode(dataToSave));
@@ -88,8 +116,86 @@ class EntryProvider with ChangeNotifier {
   /// Sauvegarde la position actuelle pour l'emplacement en cours.
   void _saveCurrentIndex() async {
     if (_selectedRayon != null) {
+      _lastIndexByRayon[_selectedRayon!.id] = _currentProductIndex;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('lastIndex_${_selectedRayon!.id}', _currentProductIndex);
+    }
+  }
+
+  // NOUVEAU : Sauvegarde le filtre pour l'emplacement en cours
+  Future<void> _saveFilter() async {
+    if (_selectedRayon != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('filter_${_selectedRayon!.id}', _activeFilter.toRawJson());
+    }
+  }
+
+  // NOUVEAU : Charge le filtre pour l'emplacement en cours
+  Future<ProductFilter> _loadFilter(String rayonId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final rawJson = prefs.getString('filter_$rayonId') ?? '';
+    return ProductFilter.fromRawJson(rawJson);
+  }
+
+  // --- LOGIQUE DE FILTRAGE ---
+
+  // NOUVEAU : Applique le filtre et réinitialise l'index
+  Future<void> applyFilter(ProductFilter newFilter) async {
+    _activeFilter = newFilter;
+    await _saveFilter();
+    _runFilterLogic();
+    // Réinitialise l'index au début de la nouvelle liste filtrée
+    _currentProductIndex = 0;
+    _saveCurrentIndex();
+    notifyListeners();
+  }
+
+  // NOUVEAU : Exécute la logique de filtrage
+  void _runFilterLogic() {
+    if (!_activeFilter.isActive) {
+      _filteredProducts = List.from(_allProducts);
+      return;
+    }
+
+    switch (_activeFilter.type) {
+      case FilterType.numeric:
+        try {
+          // 'De' (1-based index) -> 0-based index
+          int from = int.parse(_activeFilter.from) - 1;
+          int to = int.parse(_activeFilter.to); // 'to' est inclusif
+
+          // Validation des bornes
+          if (from < 0) from = 0;
+          if (to > _allProducts.length) to = _allProducts.length;
+          if (from >= to) {
+            _filteredProducts = []; // Ou gérer comme une erreur
+            return;
+          }
+
+          _filteredProducts = _allProducts.sublist(from, to);
+        } catch (e) {
+          _filteredProducts = []; // Erreur de parsing
+        }
+        break;
+
+      case FilterType.alphabetic:
+        try {
+          final from = _activeFilter.from.toLowerCase();
+          final to = _activeFilter.to.toLowerCase();
+
+          _filteredProducts = _allProducts.where((p) {
+            final name = p.produitName.toLowerCase();
+            return name.compareTo(from) >= 0 && name.compareTo(to) <= 0;
+          }).toList();
+        } catch(e) {
+          _filteredProducts = [];
+        }
+        break;
+
+      case FilterType.none:
+      default:
+        _filteredProducts = List.from(_allProducts);
+        break;
     }
   }
 
@@ -98,11 +204,13 @@ class EntryProvider with ChangeNotifier {
   /// Réinitialise l'état du provider.
   void reset() {
     _rayons = [];
-    _products = [];
+    _allProducts = [];
+    _filteredProducts = []; // MODIFIÉ
     _selectedRayon = null;
     _currentProductIndex = 0;
     _error = null;
     _hasPendingSession = false;
+    _activeFilter = ProductFilter(); // MODIFIÉ
     notifyListeners();
   }
 
@@ -123,19 +231,29 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Charge les produits pour un emplacement et restaure la position.
+  /// Charge les produits pour un emplacement et restaure la position et le filtre.
   Future<void> fetchProducts(ApiService api, String inventoryId, String rayonId) async {
     _isLoading = true;
     _error = null;
     _selectedRayon = _rayons.firstWhere((r) => r.id == rayonId);
     notifyListeners();
+
     try {
       final apiProducts = await api.fetchProducts(inventoryId, rayonId);
-      _products = await _loadAndMergeUnsyncedData(rayonId, apiProducts);
+      // MODIFIÉ : Charge dans _allProducts
+      _allProducts = await _loadAndMergeUnsyncedData(rayonId, apiProducts);
 
-      final prefs = await SharedPreferences.getInstance();
-      final lastIndex = prefs.getInt('lastIndex_${_selectedRayon!.id}') ?? 0;
-      _currentProductIndex = (lastIndex >= 0 && lastIndex < _products.length) ? lastIndex : 0;
+      // NOUVEAU : Charge et applique le filtre
+      _activeFilter = await _loadFilter(rayonId);
+      _runFilterLogic(); // Applique le filtre pour générer _filteredProducts
+
+      // MODIFIÉ : Charge l'index
+      final lastIndex = _lastIndexByRayon[rayonId] ?? (await SharedPreferences.getInstance()).getInt('lastIndex_$rayonId') ?? 0;
+
+      // Valide l'index par rapport à la liste filtrée
+      _currentProductIndex = (lastIndex >= 0 && lastIndex < _filteredProducts.length) ? lastIndex : 0;
+      _lastIndexByRayon[rayonId] = _currentProductIndex;
+
     } catch (e) {
       _error = e.toString();
     }
@@ -148,24 +266,40 @@ class EntryProvider with ChangeNotifier {
     if (currentProduct != null) {
       final int quantity = int.tryParse(value) ?? 0;
       if (quantity >= 0) {
+
+        // MODIFIÉ : Doit mettre à jour la quantité dans les DEUX listes
+        final productId = currentProduct!.id;
+
+        // Mise à jour dans la liste filtrée (pour l'UI)
         currentProduct!.quantiteSaisie = quantity;
         currentProduct!.isSynced = false;
+
+        // Mise à jour dans la liste source (_allProducts) (pour la persistance)
+        try {
+          final productInAll = _allProducts.firstWhere((p) => p.id == productId);
+          productInAll.quantiteSaisie = quantity;
+          productInAll.isSynced = false;
+        } catch (e) {
+          // Le produit n'est pas dans la liste complète, c'est un problème
+          _error = "Erreur de synchronisation des listes.";
+        }
+
         await _saveUnsyncedData();
         notifyListeners();
       }
     }
   }
 
-  /// Passe au produit suivant.
+  /// Passe au produit suivant (dans la liste filtrée).
   void nextProduct() {
-    if (_currentProductIndex < _products.length - 1) {
+    if (_currentProductIndex < _filteredProducts.length - 1) {
       _currentProductIndex++;
       _saveCurrentIndex();
       notifyListeners();
     }
   }
 
-  /// Revient au produit précédent.
+  /// Revient au produit précédent (dans la liste filtrée).
   void previousProduct() {
     if (_currentProductIndex > 0) {
       _currentProductIndex--;
@@ -174,32 +308,32 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
-  /// Va au tout premier produit de la liste.
+  /// Va au tout premier produit (de la liste filtrée).
   void goToFirstProduct() {
-    if (_products.isNotEmpty) {
+    if (_filteredProducts.isNotEmpty) {
       _currentProductIndex = 0;
       _saveCurrentIndex();
       notifyListeners();
     }
   }
 
-  // NOUVELLE MÉTHODE À AJOUTER //
-  /// Fait "sauter" l'index actuel au produit spécifié.
+  // NOUVEAU : Fait "sauter" l'index au produit sélectionné (par la recherche)
   void jumpToProduct(Product product) {
-    // Trouve l'index du produit dans la liste principale
-    final index = _products.indexWhere((p) => p.id == product.id);
+    // MODIFIÉ : Cherche l'index dans la liste FILTRÉE
+    final index = _filteredProducts.indexWhere((p) => p.id == product.id);
 
     if (index != -1) {
-      _currentProductIndex = index; // On change l'index actuel
-      _saveCurrentIndex(); // On sauvegarde cette nouvelle position
+      _currentProductIndex = index;
+      _saveCurrentIndex();
       notifyListeners();
     }
   }
-  // FIN DE LA NOUVELLE MÉTHODE //
+
 
   /// Gère l'envoi des données au serveur.
   Future<void> sendDataToServer(ApiService api, [Function(int, int)? onProgress]) async {
-    List<Product> unsyncedProducts = _products.where((p) => !p.isSynced).toList();
+    // MODIFIÉ : Doit scanner la liste _allProducts
+    List<Product> unsyncedProducts = _allProducts.where((p) => !p.isSynced).toList();
     int total = unsyncedProducts.length;
     int sentCount = 0;
 

@@ -1,6 +1,7 @@
 // lib/screens/inventory_entry_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // NOUVEAU
 import 'package:provider/provider.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_colors.dart';
@@ -14,6 +15,9 @@ import 'package:prestinv/screens/variance_screen.dart';
 import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/models/product.dart';
 import 'dart:async';
+
+// NOUVEAU
+import 'package:prestinv/models/product_filter.dart';
 
 class InventoryEntryScreen extends StatefulWidget {
   final String inventoryId;
@@ -37,11 +41,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   Timer? _sendReminderTimer;
 
-  // NOUVELLES VARIABLES À AJOUTER (inspirées de variance_screen)
+  // NOUVELLES VARIABLES (de la réponse précédente)
   final _searchController = TextEditingController();
   List<Product> _filteredProducts = [];
   bool _showSearchResults = false;
-  // FIN DES NOUVELLES VARIABLES
 
   @override
   void initState() {
@@ -52,7 +55,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       sessionCookie: authProvider.sessionCookie,
     );
 
-    // AJOUTER CETTE LIGNE
+    // NOUVEAU
     _searchController.addListener(_filterProducts);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -70,10 +73,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     _quantityFocusNode.dispose();
     _notificationTimer?.cancel();
     _sendReminderTimer?.cancel();
-
-    // AJOUTER CETTE LIGNE
-    _searchController.dispose();
-
+    _searchController.dispose(); // NOUVEAU
     super.dispose();
   }
 
@@ -94,7 +94,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   void _resetSendReminderTimer() {
     _sendReminderTimer?.cancel();
-
     final appConfig = Provider.of<AppConfig>(context, listen: false);
     final provider = Provider.of<EntryProvider>(context, listen: false);
 
@@ -131,31 +130,25 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   Future<void> _sendDataToServer() async {
     if (!mounted) return;
-
     final provider = Provider.of<EntryProvider>(context, listen: false);
     if (!provider.hasUnsyncedData) {
       _showNotification('Aucune nouvelle saisie à envoyer.', Colors.orange);
       return;
     }
-
     final ValueNotifier<String> progressNotifier = ValueNotifier('Préparation...');
-
     if (mounted) {
       showProgressDialog(context, progressNotifier);
     } else {
       return;
     }
-
+    // MODIFIÉ : Utilise _allProducts pour compter
     int unsyncedCount = provider.products.where((p) => !p.isSynced).length;
-
     await provider.sendDataToServer(_apiService, (int current, int total) {
       progressNotifier.value = 'Envoi... ($current/$total)';
     });
-
     progressNotifier.value = '$unsyncedCount article(s) traité(s).';
     _sendReminderTimer?.cancel();
     await Future.delayed(const Duration(seconds: 2));
-
     if (mounted) {
       Navigator.of(context).pop();
     }
@@ -165,31 +158,28 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     if (!mounted) return;
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final appConfig = Provider.of<AppConfig>(context, listen: false);
-
     if (_quantityController.text.isEmpty) {
       _showNotification('Veuillez saisir une quantité.', Colors.orange);
       return;
     }
-
     final quantity = int.tryParse(_quantityController.text) ?? 0;
-
     Future<void> proceedToNext() async {
       await provider.updateQuantity(quantity.toString());
       _resetSendReminderTimer();
-
       if (appConfig.sendMode == SendMode.direct) {
         try {
           await _apiService.updateProductQuantity(provider.currentProduct!.id, quantity);
-          if(mounted) {
+          if (mounted) {
             _showNotification('Saisie envoyée !', Colors.green);
           }
-        } catch(e) {
-          if(mounted) {
+        } catch (e) {
+          if (mounted) {
             _showNotification('Erreur réseau. Saisie non envoyée.', Colors.red);
           }
         }
       }
 
+      // MODIFIÉ : totalProducts est maintenant le total filtré
       bool isLastProduct = provider.currentProductIndex >= provider.totalProducts - 1;
 
       if (isLastProduct && provider.totalProducts > 0) {
@@ -198,14 +188,20 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Fin de l\'emplacement'),
-            content: const Text('Vous avez traité le dernier produit. Voulez-vous envoyer les données au serveur ?'),
+            title: Text(provider.activeFilter.isActive ? 'Fin du filtre' : 'Fin de l\'emplacement'),
+            content: Text(provider.activeFilter.isActive
+                ? 'Vous avez traité le dernier produit du filtre.'
+                : 'Vous avez traité le dernier produit. Voulez-vous envoyer les données au serveur ?'),
             actions: [
-              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Non')),
-              TextButton(onPressed: () {
-                Navigator.of(ctx).pop();
-                _sendDataToServer();
-              }, child: const Text('Oui, envoyer')),
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
+              // On ne propose l'envoi que si c'est la fin de tout l'emplacement
+              if (!provider.activeFilter.isActive)
+                TextButton(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _sendDataToServer();
+                    },
+                    child: const Text('Oui, envoyer')),
             ],
           ),
         );
@@ -287,10 +283,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   void _onLocationChanged(Rayon? newValue) async {
     if (newValue == null) return;
-
     final provider = Provider.of<EntryProvider>(context, listen: false);
     if (newValue.id == provider.selectedRayon?.id) return;
-
     if (provider.hasUnsyncedData) {
       final bool? confirmed = await showDialog<bool>(
         context: context,
@@ -304,31 +298,38 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         ),
       );
       if (confirmed != true) return;
-
       await _sendDataToServer();
     }
-
     if (mounted) {
       _sendReminderTimer?.cancel();
+      // NOUVEAU : Réinitialise la recherche au changement de rayon
+      _searchController.clear();
+      _showSearchResults = false;
       provider.fetchProducts(_apiService, widget.inventoryId, newValue.id).then((_) {
         _resetSendReminderTimer();
       });
     }
   }
 
-  // NOUVELLES FONCTIONS À AJOUTER
+  // --- NOUVELLES FONCTIONS DE FILTRAGE ET RECHERCHE ---
+
+  /// Logique de recherche (filtre la liste DÉJÀ filtrée par le provider)
   void _filterProducts() {
-    // On récupère le provider SANS écouter, car on ne veut pas rebuild
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final query = _searchController.text.toLowerCase();
 
     if (query.isEmpty) {
-      if (mounted) { setState(() { _filteredProducts = []; _showSearchResults = false; }); }
+      if (mounted) {
+        setState(() {
+          _filteredProducts = [];
+          _showSearchResults = false;
+        });
+      }
       return;
     }
     if (mounted) {
       setState(() {
-        // La seule différence avec variance_screen : on filtre provider.products
+        // MODIFIÉ : Cherche dans provider.products (qui est la liste filtrée)
         _filteredProducts = provider.products.where((product) {
           return product.produitCip.toLowerCase().contains(query) ||
               product.produitName.toLowerCase().contains(query);
@@ -338,22 +339,158 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
+  /// Sélection d'un produit dans la liste de recherche
   void _selectProduct(Product product) {
     final provider = Provider.of<EntryProvider>(context, listen: false);
-    // On appelle notre nouvelle méthode du provider
-    provider.jumpToProduct(product);
+    provider.jumpToProduct(product); // Appelle la méthode du provider
 
     if (mounted) {
       setState(() {
         _searchController.clear();
         _showSearchResults = false;
-        FocusScope.of(context).unfocus(); // Cache le clavier
+        FocusScope.of(context).unfocus();
       });
-      // Le `build()` sera appelé, et la logique existante
-      // mettra le focus sur le champ quantité.
     }
   }
-  // FIN DES NOUVELLES FONCTIONS
+
+  /// Affiche le popup de création de filtre
+  void _showFilterDialog(BuildContext context, EntryProvider provider) {
+    // Le provider est passé en argument depuis le Consumer
+    final currentFilter = provider.activeFilter;
+    final totalProducts = provider.totalProductsInRayon;
+
+    // Contrôleurs pour le formulaire du popup
+    final _fromNumController = TextEditingController(text: currentFilter.type == FilterType.numeric ? currentFilter.from : '');
+    final _toNumController = TextEditingController(text: currentFilter.type == FilterType.numeric ? currentFilter.to : '');
+    final _fromAlphaController = TextEditingController(text: currentFilter.type == FilterType.alphabetic ? currentFilter.from : '');
+    final _toAlphaController = TextEditingController(text: currentFilter.type == FilterType.alphabetic ? currentFilter.to : '');
+
+    // Le type de filtre sélectionné dans le popup
+    FilterType selectedType = currentFilter.type;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        // StatefulBuilder pour gérer l'état interne du popup (les radio boutons)
+        return StatefulBuilder(
+          builder: (context, setPopupState) {
+            return AlertDialog(
+              title: const Text('Appliquer un filtre'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // --- Filtre Numérique ---
+                    RadioListTile<FilterType>(
+                      title: const Text('Intervalle numérique'),
+                      value: FilterType.numeric,
+                      groupValue: selectedType,
+                      onChanged: (val) => setPopupState(() => selectedType = val!),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _fromNumController,
+                            decoration: const InputDecoration(labelText: 'De (N°)', border: OutlineInputBorder()),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            enabled: selectedType == FilterType.numeric,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _toNumController,
+                            decoration: const InputDecoration(labelText: 'À (N°)', border: OutlineInputBorder()),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            enabled: selectedType == FilterType.numeric,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // --- Filtre Alphabétique ---
+                    RadioListTile<FilterType>(
+                      title: const Text('Intervalle alphabétique'),
+                      value: FilterType.alphabetic,
+                      groupValue: selectedType,
+                      onChanged: (val) => setPopupState(() => selectedType = val!),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _fromAlphaController,
+                            decoration: const InputDecoration(labelText: 'De (Texte)', border: OutlineInputBorder()),
+                            inputFormatters: [LengthLimitingTextInputFormatter(3)],
+                            enabled: selectedType == FilterType.alphabetic,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _toAlphaController,
+                            decoration: const InputDecoration(labelText: 'À (Texte)', border: OutlineInputBorder()),
+                            inputFormatters: [LengthLimitingTextInputFormatter(3)],
+                            enabled: selectedType == FilterType.alphabetic,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annuler')),
+                ElevatedButton(
+                  child: const Text('Appliquer'),
+                  onPressed: () {
+                    ProductFilter newFilter = ProductFilter(); // Filtre par défaut (none)
+
+                    if (selectedType == FilterType.numeric) {
+                      // --- Validation Numérique ---
+                      int from = int.tryParse(_fromNumController.text) ?? 0;
+                      int to = int.tryParse(_toNumController.text) ?? 0;
+                      if (from <= 0) from = 1;
+                      if (to > totalProducts) to = totalProducts;
+                      if (from > to) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erreur : "De" doit être inférieur à "À"'), backgroundColor: Colors.red));
+                        return;
+                      }
+                      newFilter = ProductFilter(type: FilterType.numeric, from: from.toString(), to: to.toString());
+
+                    } else if (selectedType == FilterType.alphabetic) {
+                      // --- Validation Alphabétique ---
+                      String from = _fromAlphaController.text.toUpperCase();
+                      String to = _toAlphaController.text.toUpperCase();
+                      if (from.isEmpty || to.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erreur : Les champs ne peuvent pas être vides'), backgroundColor: Colors.red));
+                        return;
+                      }
+                      if (from.compareTo(to) > 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erreur : "De" doit être alphabétiquement avant "À"'), backgroundColor: Colors.red));
+                        return;
+                      }
+                      newFilter = ProductFilter(type: FilterType.alphabetic, from: from, to: to);
+                    }
+
+                    // Applique le filtre et ferme le popup
+                    provider.applyFilter(newFilter);
+                    Navigator.of(ctx).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // --- FIN DES NOUVELLES FONCTIONS ---
 
   @override
   Widget build(BuildContext context) {
@@ -391,26 +528,26 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
             if (provider.isLoading && provider.rayons.isEmpty) {
               return const Center(child: CircularProgressIndicator());
             }
-
             final currentProduct = provider.currentProduct;
             if (currentProduct != null && currentProduct.id != _lastDisplayedProductId) {
               _lastDisplayedProductId = currentProduct.id;
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if(mounted) {
+                if (mounted) {
                   _quantityController.clear();
                   _quantityFocusNode.requestFocus();
                 }
               });
             }
-
             if (provider.hasPendingSession) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) _showPendingDataDialog();
               });
             }
 
+            // --- DÉBUT DE LA MODIFICATION DE L'UI ---
             return Column(
               children: [
+                // Container avec le Dropdown (inchangé)
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                   padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
@@ -431,52 +568,85 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   ),
                 ),
 
-                // NOUVEAU WIDGET : CHAMP DE RECHERCHE
-                // (Ajouté juste après le dropdown)
+                // NOUVEAU : Barre de recherche et filtres
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      labelText: 'Rechercher un produit (CIP ou Nom)',
-                      hintText: 'Commencez à taper pour filtrer...',
-                      prefixIcon: const Icon(Icons.search),
-                      border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12.0),
-                      suffixIcon: _searchController.text.isNotEmpty
-                          ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          FocusScope.of(context).unfocus();
-                        },
-                      )
-                          : null,
-                    ),
+                  padding: const EdgeInsets.fromLTRB(16.0, 4.0, 16.0, 8.0),
+                  child: Row(
+                    children: [
+                      // 1. Champ de recherche (réduit)
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          decoration: InputDecoration(
+                            labelText: 'Rechercher',
+                            hintText: 'CIP ou Nom...',
+                            prefixIcon: const Icon(Icons.search, size: 20),
+                            isDense: true,
+                            border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
+                            suffixIcon: _searchController.text.isNotEmpty
+                                ? IconButton(
+                              icon: const Icon(Icons.clear, size: 20),
+                              onPressed: () {
+                                _searchController.clear();
+                                FocusScope.of(context).unfocus();
+                              },
+                            )
+                                : null,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // 2. Bouton Filtre (+)
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
+                        onPressed: provider.selectedRayon == null ? null : () => _showFilterDialog(context, provider),
+                        child: const Icon(Icons.filter_alt_outlined),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // 3. Bouton Reset (🗑️)
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
+                        onPressed: (provider.selectedRayon == null || !provider.activeFilter.isActive)
+                            ? null
+                            : () => provider.applyFilter(ProductFilter(type: FilterType.none)),
+                        child: const Icon(Icons.delete_outline),
+                      ),
+                    ],
                   ),
                 ),
-                // FIN DU NOUVEAU WIDGET
 
                 const Divider(height: 1, thickness: 1),
 
-                // MODIFICATION : Remplacement de Expanded par Expanded(child: Stack(...))
+                // MODIFICATION : Ajout du Stack
                 Expanded(
                   child: Stack(
                     children: [
-                      // Enfant 1 : La vue principale (votre ancien Expanded)
+                      // Enfant 1 : La vue principale
                       (provider.isLoading && provider.products.isEmpty)
                           ? const Center(child: CircularProgressIndicator())
                           : (provider.products.isEmpty || provider.currentProduct == null)
-                          ? const Center(child: Text('Aucun produit. Sélectionnez un emplacement.'))
+                          ? Center(
+                          child: Text(
+                              provider.activeFilter.isActive
+                                  ? 'Aucun produit dans cet intervalle.'
+                                  : 'Aucun produit. Sélectionnez un emplacement.'
+                          )
+                      )
                           : buildProductView(provider),
 
-                      // Enfant 2 : La liste des résultats (logique de variance_screen)
+                      // Enfant 2 : La liste des résultats de recherche
                       if (_showSearchResults)
                         Container(
-                          // Fond semi-transparent pour cacher la vue principale
-                          color: AppColors.background.withOpacity(0.95),
+                          color: AppColors.background.withOpacity(0.98),
                           child: _filteredProducts.isEmpty
-                              ? const Center(child: Text("Aucun produit ne correspond à votre recherche."))
+                              ? Center(
+                              child: Text(
+                                  "Aucun produit ne correspond à votre recherche ${provider.activeFilter.isActive ? 'dans ce filtre.' : ''}"
+                              )
+                          )
                               : ListView.builder(
                             itemCount: _filteredProducts.length,
                             itemBuilder: (context, index) {
@@ -495,7 +665,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                     ],
                   ),
                 ),
-                // FIN DE LA MODIFICATION,
+
                 NumericKeyboard(onKeyPressed: _onKeyPressed),
               ],
             );
@@ -534,7 +704,36 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
       children: [
         const SizedBox(height: 8),
-        Text('${provider.currentProductIndex + 1} / ${provider.totalProducts}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+
+        // MODIFIÉ : Affichage du compteur avec badge
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Compteur total
+            Text(
+              '${provider.currentProductIndex + 1} / ${provider.totalProductsInRayon}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+
+            // NOUVEAU : Badge de filtre actif
+            if (provider.activeFilter.isActive)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                    color: Colors.blue.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.shade300)
+                ),
+                child: Text(
+                  'Filtré: ${provider.currentProductIndex + 1} / ${provider.totalProducts}',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blue.shade800),
+                ),
+              ),
+          ],
+        ),
+        // FIN DE LA MODIFICATION DU COMPTEUR
+
         const SizedBox(height: 8),
 
         Align(
