@@ -37,6 +37,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   Timer? _sendReminderTimer;
 
+  // NOUVELLES VARIABLES À AJOUTER (inspirées de variance_screen)
+  final _searchController = TextEditingController();
+  List<Product> _filteredProducts = [];
+  bool _showSearchResults = false;
+  // FIN DES NOUVELLES VARIABLES
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +51,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
       sessionCookie: authProvider.sessionCookie,
     );
+
+    // AJOUTER CETTE LIGNE
+    _searchController.addListener(_filterProducts);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -61,6 +70,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     _quantityFocusNode.dispose();
     _notificationTimer?.cancel();
     _sendReminderTimer?.cancel();
+
+    // AJOUTER CETTE LIGNE
+    _searchController.dispose();
+
     super.dispose();
   }
 
@@ -303,6 +316,45 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
+  // NOUVELLES FONCTIONS À AJOUTER
+  void _filterProducts() {
+    // On récupère le provider SANS écouter, car on ne veut pas rebuild
+    final provider = Provider.of<EntryProvider>(context, listen: false);
+    final query = _searchController.text.toLowerCase();
+
+    if (query.isEmpty) {
+      if (mounted) { setState(() { _filteredProducts = []; _showSearchResults = false; }); }
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        // La seule différence avec variance_screen : on filtre provider.products
+        _filteredProducts = provider.products.where((product) {
+          return product.produitCip.toLowerCase().contains(query) ||
+              product.produitName.toLowerCase().contains(query);
+        }).toList();
+        _showSearchResults = true;
+      });
+    }
+  }
+
+  void _selectProduct(Product product) {
+    final provider = Provider.of<EntryProvider>(context, listen: false);
+    // On appelle notre nouvelle méthode du provider
+    provider.jumpToProduct(product);
+
+    if (mounted) {
+      setState(() {
+        _searchController.clear();
+        _showSearchResults = false;
+        FocusScope.of(context).unfocus(); // Cache le clavier
+      });
+      // Le `build()` sera appelé, et la logique existante
+      // mettra le focus sur le champ quantité.
+    }
+  }
+  // FIN DES NOUVELLES FONCTIONS
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -378,14 +430,72 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                     ),
                   ),
                 ),
-                const Divider(height: 1, thickness: 1),
-                Expanded(
-                  child: (provider.isLoading && provider.products.isEmpty)
-                      ? const Center(child: CircularProgressIndicator())
-                      : (provider.products.isEmpty || provider.currentProduct == null)
-                      ? const Center(child: Text('Aucun produit. Sélectionnez un emplacement.'))
-                      : buildProductView(provider),
+
+                // NOUVEAU WIDGET : CHAMP DE RECHERCHE
+                // (Ajouté juste après le dropdown)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      labelText: 'Rechercher un produit (CIP ou Nom)',
+                      hintText: 'Commencez à taper pour filtrer...',
+                      prefixIcon: const Icon(Icons.search),
+                      border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12.0),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          FocusScope.of(context).unfocus();
+                        },
+                      )
+                          : null,
+                    ),
+                  ),
                 ),
+                // FIN DU NOUVEAU WIDGET
+
+                const Divider(height: 1, thickness: 1),
+
+                // MODIFICATION : Remplacement de Expanded par Expanded(child: Stack(...))
+                Expanded(
+                  child: Stack(
+                    children: [
+                      // Enfant 1 : La vue principale (votre ancien Expanded)
+                      (provider.isLoading && provider.products.isEmpty)
+                          ? const Center(child: CircularProgressIndicator())
+                          : (provider.products.isEmpty || provider.currentProduct == null)
+                          ? const Center(child: Text('Aucun produit. Sélectionnez un emplacement.'))
+                          : buildProductView(provider),
+
+                      // Enfant 2 : La liste des résultats (logique de variance_screen)
+                      if (_showSearchResults)
+                        Container(
+                          // Fond semi-transparent pour cacher la vue principale
+                          color: AppColors.background.withOpacity(0.95),
+                          child: _filteredProducts.isEmpty
+                              ? const Center(child: Text("Aucun produit ne correspond à votre recherche."))
+                              : ListView.builder(
+                            itemCount: _filteredProducts.length,
+                            itemBuilder: (context, index) {
+                              final product = _filteredProducts[index];
+                              return Card(
+                                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                child: ListTile(
+                                  title: Text(product.produitName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                  subtitle: Text('CIP: ${product.produitCip} / Stock Théo: ${product.quantiteInitiale}'),
+                                  onTap: () => _selectProduct(product),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // FIN DE LA MODIFICATION,
                 NumericKeyboard(onKeyPressed: _onKeyPressed),
               ],
             );

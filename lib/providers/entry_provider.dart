@@ -183,6 +183,20 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
+  // NOUVELLE MÉTHODE À AJOUTER //
+  /// Fait "sauter" l'index actuel au produit spécifié.
+  void jumpToProduct(Product product) {
+    // Trouve l'index du produit dans la liste principale
+    final index = _products.indexWhere((p) => p.id == product.id);
+
+    if (index != -1) {
+      _currentProductIndex = index; // On change l'index actuel
+      _saveCurrentIndex(); // On sauvegarde cette nouvelle position
+      notifyListeners();
+    }
+  }
+  // FIN DE LA NOUVELLE MÉTHODE //
+
   /// Gère l'envoi des données au serveur.
   Future<void> sendDataToServer(ApiService api, [Function(int, int)? onProgress]) async {
     List<Product> unsyncedProducts = _products.where((p) => !p.isSynced).toList();
