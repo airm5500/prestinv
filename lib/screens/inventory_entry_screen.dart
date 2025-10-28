@@ -1,7 +1,7 @@
 // lib/screens/inventory_entry_screen.dart
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // NOUVEAU
+import 'package:flutter/services.dart'; // Import pour les InputFormatters
 import 'package:provider/provider.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_colors.dart';
@@ -16,7 +16,7 @@ import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/models/product.dart';
 import 'dart:async';
 
-// NOUVEAU
+// Import pour le modèle de filtre
 import 'package:prestinv/models/product_filter.dart';
 
 class InventoryEntryScreen extends StatefulWidget {
@@ -41,7 +41,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   Timer? _sendReminderTimer;
 
-  // NOUVELLES VARIABLES (de la réponse précédente)
+  // Variables pour la recherche
   final _searchController = TextEditingController();
   List<Product> _filteredProducts = [];
   bool _showSearchResults = false;
@@ -55,7 +55,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       sessionCookie: authProvider.sessionCookie,
     );
 
-    // NOUVEAU
     _searchController.addListener(_filterProducts);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -73,7 +72,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     _quantityFocusNode.dispose();
     _notificationTimer?.cancel();
     _sendReminderTimer?.cancel();
-    _searchController.dispose(); // NOUVEAU
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -141,11 +140,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     } else {
       return;
     }
-    // MODIFIÉ : Utilise _allProducts pour compter
+
     int unsyncedCount = provider.products.where((p) => !p.isSynced).length;
+
     await provider.sendDataToServer(_apiService, (int current, int total) {
       progressNotifier.value = 'Envoi... ($current/$total)';
     });
+
     progressNotifier.value = '$unsyncedCount article(s) traité(s).';
     _sendReminderTimer?.cancel();
     await Future.delayed(const Duration(seconds: 2));
@@ -163,6 +164,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       return;
     }
     final quantity = int.tryParse(_quantityController.text) ?? 0;
+
     Future<void> proceedToNext() async {
       await provider.updateQuantity(quantity.toString());
       _resetSendReminderTimer();
@@ -179,7 +181,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         }
       }
 
-      // MODIFIÉ : totalProducts est maintenant le total filtré
       bool isLastProduct = provider.currentProductIndex >= provider.totalProducts - 1;
 
       if (isLastProduct && provider.totalProducts > 0) {
@@ -194,8 +195,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 : 'Vous avez traité le dernier produit. Voulez-vous envoyer les données au serveur ?'),
             actions: [
               TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
-              // On ne propose l'envoi que si c'est la fin de tout l'emplacement
-              if (!provider.activeFilter.isActive)
+              if (!provider.activeFilter.isActive) // On ne propose l'envoi que si c'est la fin de tout l'emplacement
                 TextButton(
                     onPressed: () {
                       Navigator.of(ctx).pop();
@@ -302,7 +302,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
     if (mounted) {
       _sendReminderTimer?.cancel();
-      // NOUVEAU : Réinitialise la recherche au changement de rayon
       _searchController.clear();
       _showSearchResults = false;
       provider.fetchProducts(_apiService, widget.inventoryId, newValue.id).then((_) {
@@ -311,9 +310,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  // --- NOUVELLES FONCTIONS DE FILTRAGE ET RECHERCHE ---
-
-  /// Logique de recherche (filtre la liste DÉJÀ filtrée par le provider)
+  // --- Logique de recherche (filtre la liste DÉJÀ filtrée par le provider) ---
   void _filterProducts() {
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final query = _searchController.text.toLowerCase();
@@ -329,7 +326,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
     if (mounted) {
       setState(() {
-        // MODIFIÉ : Cherche dans provider.products (qui est la liste filtrée)
         _filteredProducts = provider.products.where((product) {
           return product.produitCip.toLowerCase().contains(query) ||
               product.produitName.toLowerCase().contains(query);
@@ -342,7 +338,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   /// Sélection d'un produit dans la liste de recherche
   void _selectProduct(Product product) {
     final provider = Provider.of<EntryProvider>(context, listen: false);
-    provider.jumpToProduct(product); // Appelle la méthode du provider
+    provider.jumpToProduct(product);
 
     if (mounted) {
       setState(() {
@@ -355,23 +351,19 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   /// Affiche le popup de création de filtre
   void _showFilterDialog(BuildContext context, EntryProvider provider) {
-    // Le provider est passé en argument depuis le Consumer
     final currentFilter = provider.activeFilter;
     final totalProducts = provider.totalProductsInRayon;
 
-    // Contrôleurs pour le formulaire du popup
     final _fromNumController = TextEditingController(text: currentFilter.type == FilterType.numeric ? currentFilter.from : '');
     final _toNumController = TextEditingController(text: currentFilter.type == FilterType.numeric ? currentFilter.to : '');
     final _fromAlphaController = TextEditingController(text: currentFilter.type == FilterType.alphabetic ? currentFilter.from : '');
     final _toAlphaController = TextEditingController(text: currentFilter.type == FilterType.alphabetic ? currentFilter.to : '');
 
-    // Le type de filtre sélectionné dans le popup
     FilterType selectedType = currentFilter.type;
 
     showDialog(
       context: context,
       builder: (ctx) {
-        // StatefulBuilder pour gérer l'état interne du popup (les radio boutons)
         return StatefulBuilder(
           builder: (context, setPopupState) {
             return AlertDialog(
@@ -380,7 +372,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // --- Filtre Numérique ---
                     RadioListTile<FilterType>(
                       title: const Text('Intervalle numérique'),
                       value: FilterType.numeric,
@@ -412,7 +403,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // --- Filtre Alphabétique ---
                     RadioListTile<FilterType>(
                       title: const Text('Intervalle alphabétique'),
                       value: FilterType.alphabetic,
@@ -448,14 +438,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 ElevatedButton(
                   child: const Text('Appliquer'),
                   onPressed: () {
-                    ProductFilter newFilter = ProductFilter(); // Filtre par défaut (none)
+                    ProductFilter newFilter = ProductFilter();
 
                     if (selectedType == FilterType.numeric) {
-                      // --- Validation Numérique ---
                       int from = int.tryParse(_fromNumController.text) ?? 0;
                       int to = int.tryParse(_toNumController.text) ?? 0;
                       if (from <= 0) from = 1;
                       if (to > totalProducts) to = totalProducts;
+                      if (to == 0) to = totalProducts; // Si "À" est vide, prendre le total
                       if (from > to) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erreur : "De" doit être inférieur à "À"'), backgroundColor: Colors.red));
                         return;
@@ -463,7 +453,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       newFilter = ProductFilter(type: FilterType.numeric, from: from.toString(), to: to.toString());
 
                     } else if (selectedType == FilterType.alphabetic) {
-                      // --- Validation Alphabétique ---
                       String from = _fromAlphaController.text.toUpperCase();
                       String to = _toAlphaController.text.toUpperCase();
                       if (from.isEmpty || to.isEmpty) {
@@ -477,7 +466,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       newFilter = ProductFilter(type: FilterType.alphabetic, from: from, to: to);
                     }
 
-                    // Applique le filtre et ferme le popup
                     provider.applyFilter(newFilter);
                     Navigator.of(ctx).pop();
                   },
@@ -489,8 +477,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       },
     );
   }
-
-  // --- FIN DES NOUVELLES FONCTIONS ---
 
   @override
   Widget build(BuildContext context) {
@@ -544,10 +530,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               });
             }
 
-            // --- DÉBUT DE LA MODIFICATION DE L'UI ---
             return Column(
               children: [
-                // Container avec le Dropdown (inchangé)
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                   padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
@@ -568,12 +552,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   ),
                 ),
 
-                // NOUVEAU : Barre de recherche et filtres
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16.0, 4.0, 16.0, 8.0),
                   child: Row(
                     children: [
-                      // 1. Champ de recherche (réduit)
                       Expanded(
                         child: TextField(
                           controller: _searchController,
@@ -598,7 +580,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       ),
                       const SizedBox(width: 8),
 
-                      // 2. Bouton Filtre (+)
                       OutlinedButton(
                         style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
                         onPressed: provider.selectedRayon == null ? null : () => _showFilterDialog(context, provider),
@@ -606,7 +587,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       ),
                       const SizedBox(width: 8),
 
-                      // 3. Bouton Reset (🗑️)
                       OutlinedButton(
                         style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
                         onPressed: (provider.selectedRayon == null || !provider.activeFilter.isActive)
@@ -620,11 +600,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
                 const Divider(height: 1, thickness: 1),
 
-                // MODIFICATION : Ajout du Stack
                 Expanded(
                   child: Stack(
                     children: [
-                      // Enfant 1 : La vue principale
                       (provider.isLoading && provider.products.isEmpty)
                           ? const Center(child: CircularProgressIndicator())
                           : (provider.products.isEmpty || provider.currentProduct == null)
@@ -637,7 +615,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       )
                           : buildProductView(provider),
 
-                      // Enfant 2 : La liste des résultats de recherche
                       if (_showSearchResults)
                         Container(
                           color: AppColors.background.withOpacity(0.98),
@@ -705,7 +682,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       children: [
         const SizedBox(height: 8),
 
-        // MODIFIÉ : Affichage du compteur avec badge
+        // MODIFIÉ ET CORRIGÉ : Affichage du compteur avec badge (version 1 ligne)
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -718,21 +695,47 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
             // NOUVEAU : Badge de filtre actif
             if (provider.activeFilter.isActive)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                    color: Colors.blue.shade100,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue.shade300)
-                ),
-                child: Text(
-                  'Filtré: ${provider.currentProductIndex + 1} / ${provider.totalProducts}',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blue.shade800),
+            // On ajoute Flexible pour éviter l'overflow si le texte est trop long
+              Flexible(
+                child: Builder(
+                    builder: (context) {
+                      // On crée la chaîne de caractères pour le rappel du filtre
+                      String filterDetails = '';
+                      final filter = provider.activeFilter;
+
+                      if (filter.type == FilterType.numeric) {
+                        filterDetails = 'N° ${filter.from} à ${filter.to}';
+                      } else if (filter.type == FilterType.alphabetic) {
+                        filterDetails = 'De ${filter.from} à ${filter.to}';
+                      }
+
+                      // Le widget du badge
+                      return Container(
+                        margin: const EdgeInsets.only(left: 8), // Marge pour séparer du compteur
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), // Padding ajusté
+                        decoration: BoxDecoration(
+                            color: Colors.blue.shade100,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.blue.shade300)
+                        ),
+                        // MODIFIÉ : Remplacé Column par un seul Text
+                        child: Text(
+                          'Filtre: $filterDetails  |  Pos: ${provider.currentProductIndex + 1}/${provider.totalProducts}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14, // Police agrandie
+                            color: Colors.blue.shade900,
+                          ),
+                          overflow: TextOverflow.ellipsis, // Sécurité en cas de débordement
+                          softWrap: false, // Force la ligne unique
+                        ),
+                      );
+                    }
                 ),
               ),
           ],
         ),
-        // FIN DE LA MODIFICATION DU COMPTEUR
+        // FIN DE LA CORRECTION DU COMPTEUR
 
         const SizedBox(height: 8),
 
@@ -812,7 +815,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               ),
             ),
 
-            // CORRECTION : Le bouton "Retour au premier" est maintenant ici
             SizedBox(
               width: 64,
               height: 64,
