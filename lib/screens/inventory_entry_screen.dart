@@ -673,61 +673,86 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
+  // lib/screens/inventory_entry_screen.dart
+
   Widget buildProductView(EntryProvider provider) {
     final Product product = provider.currentProduct!;
     const textFieldBorderColor = Colors.deepPurple;
+
+    // --- LOGIQUE ADAPTATIVE ---
+    final screenHeight = MediaQuery.of(context).size.height;
+    final bool isSmallScreen = screenHeight < 700;
+
+    // Tailles pour un grand écran (par défaut)
+    double titleFontSize = 16;
+    double priceFontSize = 16;
+    double stockFontSize = 16;
+    double badgeFontSize = 14;
+    double quantityFontSize = 26;
+    double buttonSize = 64;
+    double buttonIconSize = 30;
+
+    // Ajustement si l'écran est petit
+    if (isSmallScreen) {
+      titleFontSize = 14;
+      priceFontSize = 13;
+      stockFontSize = 14;
+      badgeFontSize = 12;
+      quantityFontSize = 22;
+      buttonSize = 56;
+      buttonIconSize = 28;
+    }
+    // --- FIN DE LA LOGIQUE ADAPTATIVE ---
+
+    // --- NOUVELLE LOGIQUE DE HAUTEUR FIXE ---
+    // Calcule une hauteur fixe approximative pour 2 lignes de titre
+    // (basé sur la taille de la police * un facteur de hauteur de ligne * 2 lignes)
+    final double twoLineTitleHeight = (titleFontSize * 1.4) * 2;
+    // --- FIN ---
+
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
       children: [
         const SizedBox(height: 8),
 
-        // MODIFIÉ ET CORRIGÉ : Affichage du compteur avec badge (version 1 ligne)
+        // Compteur avec badge (inchangé)
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Compteur total
             Text(
               '${provider.currentProductIndex + 1} / ${provider.totalProductsInRayon}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: stockFontSize),
             ),
-
-            // NOUVEAU : Badge de filtre actif
             if (provider.activeFilter.isActive)
-            // On ajoute Flexible pour éviter l'overflow si le texte est trop long
               Flexible(
                 child: Builder(
                     builder: (context) {
-                      // On crée la chaîne de caractères pour le rappel du filtre
                       String filterDetails = '';
                       final filter = provider.activeFilter;
-
                       if (filter.type == FilterType.numeric) {
                         filterDetails = 'N° ${filter.from} à ${filter.to}';
                       } else if (filter.type == FilterType.alphabetic) {
                         filterDetails = 'De ${filter.from} à ${filter.to}';
                       }
-
-                      // Le widget du badge
                       return Container(
-                        margin: const EdgeInsets.only(left: 8), // Marge pour séparer du compteur
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), // Padding ajusté
+                        margin: const EdgeInsets.only(left: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
                             color: Colors.blue.shade100,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: Colors.blue.shade300)
                         ),
-                        // MODIFIÉ : Remplacé Column par un seul Text
                         child: Text(
                           'Filtre: $filterDetails  |  Pos: ${provider.currentProductIndex + 1}/${provider.totalProducts}',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 14, // Police agrandie
+                            fontSize: badgeFontSize,
                             color: Colors.blue.shade900,
                           ),
-                          overflow: TextOverflow.ellipsis, // Sécurité en cas de débordement
-                          softWrap: false, // Force la ligne unique
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
                         ),
                       );
                     }
@@ -735,28 +760,34 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               ),
           ],
         ),
-        // FIN DE LA CORRECTION DU COMPTEUR
 
         const SizedBox(height: 8),
 
-        Align(
-          alignment: Alignment.centerLeft,
+        // --- MODIFICATION ICI ---
+        // On remplace 'Align' par un 'Container' avec une hauteur fixe
+        // pour réserver l'espace de 2 lignes et empêcher le "sautillement".
+        Container(
+          height: twoLineTitleHeight, // Hauteur fixe
+          alignment: Alignment.centerLeft, // Remplace le widget Align
           child: Text(
             '${product.produitCip} - ${product.produitName}',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primary),
-            maxLines: 2,
+            style: TextStyle(fontSize: titleFontSize, fontWeight: FontWeight.bold, color: AppColors.primary),
+            maxLines: 2, // Garde la limite à 2 lignes
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        // --- FIN DE LA MODIFICATION ---
+
         const SizedBox(height: 12),
 
+        // Reste du code (inchangé)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Prix Achat: ${product.produitPrixAchat} F', style: const TextStyle(fontSize: 16, color: Colors.orange, fontWeight: FontWeight.w500)),
-              Text('Prix Vente: ${product.produitPrixUni} F', style: const TextStyle(fontSize: 16, color: AppColors.accent, fontWeight: FontWeight.w500)),
+              Text('Prix Achat: ${product.produitPrixAchat} F', style: TextStyle(fontSize: priceFontSize, color: Colors.orange, fontWeight: FontWeight.w500)),
+              Text('Prix Vente: ${product.produitPrixUni} F', style: TextStyle(fontSize: priceFontSize, color: AppColors.accent, fontWeight: FontWeight.w500)),
             ],
           ),
         ),
@@ -770,7 +801,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 padding: const EdgeInsets.only(bottom: 8.0),
                 child: Text(
                   'Stock Théorique: ${product.quantiteInitiale}',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: product.quantiteInitiale < 0 ? Colors.red.shade700 : const Color(0xFF1B5E20)),
+                  style: TextStyle(fontSize: stockFontSize, fontWeight: FontWeight.bold, color: product.quantiteInitiale < 0 ? Colors.red.shade700 : const Color(0xFF1B5E20)),
                 ),
               ),
             );
@@ -781,8 +812,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             SizedBox(
-              width: 64,
-              height: 64,
+              width: buttonSize,
+              height: buttonSize,
               child: OutlinedButton(
                 style: OutlinedButton.styleFrom(
                   shape: const CircleBorder(),
@@ -790,7 +821,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   side: const BorderSide(color: textFieldBorderColor, width: 2),
                 ),
                 onPressed: provider.previousProduct,
-                child: const Icon(Icons.chevron_left, size: 30, color: textFieldBorderColor),
+                child: Icon(Icons.chevron_left, size: buttonIconSize, color: textFieldBorderColor),
               ),
             ),
             const SizedBox(width: 8),
@@ -811,13 +842,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 readOnly: true,
                 textAlign: TextAlign.center,
                 cursorColor: textFieldBorderColor,
-                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: textFieldBorderColor),
+                style: TextStyle(fontSize: quantityFontSize, fontWeight: FontWeight.bold, color: textFieldBorderColor),
               ),
             ),
 
             SizedBox(
-              width: 64,
-              height: 64,
+              width: buttonSize,
+              height: buttonSize,
               child: OutlinedButton(
                 style: OutlinedButton.styleFrom(
                   shape: const CircleBorder(),
@@ -825,7 +856,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   side: const BorderSide(color: Colors.red, width: 2),
                 ),
                 onPressed: () => provider.goToFirstProduct(),
-                child: const Icon(Icons.first_page, size: 30, color: Colors.red),
+                child: Icon(Icons.first_page, size: buttonIconSize, color: Colors.red),
               ),
             ),
           ],

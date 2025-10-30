@@ -30,7 +30,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         //versionName = flutter.versionName
-        versionName = "1.2.0"
+        versionName = "2.0.1"
     }
 
     // Ajouter ce bloc pour renommer les fichiers de sortie
