@@ -49,9 +49,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   // Variables pour la recherche
   final _searchController = TextEditingController();
-  // NOUVEAU : FocusNode pour le champ de recherche
   final _searchFocusNode = FocusNode();
-
   List<Product> _filteredProducts = [];
   bool _showSearchResults = false;
 
@@ -82,7 +80,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     _notificationTimer?.cancel();
     _sendReminderTimer?.cancel();
     _searchController.dispose();
-    _searchFocusNode.dispose(); // Ne pas oublier de disposer le FocusNode
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -385,14 +383,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   // Logique SCAN-TO-ACTION Globale
-  // lib/screens/inventory_entry_screen.dart
-
   void _handleScanOrSearch(String query) {
     if (query.isEmpty) return;
 
     final provider = Provider.of<EntryProvider>(context, listen: false);
 
-    // Recherche dans TOUS les produits
+    // Recherche dans TOUS les produits (ignorer filtre)
     final matches = provider.allProducts.where((p) {
       final q = query.toLowerCase();
       return p.produitCip.toLowerCase().contains(q) ||
@@ -400,7 +396,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }).toList();
 
     if (matches.length == 1) {
-      // SUCCÈS : Produit unique
       _openQuickEntryDialog(matches.first);
 
       _searchController.clear();
@@ -410,7 +405,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       FocusScope.of(context).unfocus();
 
     } else if (matches.length > 1) {
-      // PLUSIEURS RÉSULTATS
       setState(() {
         _filteredProducts = matches;
         _showSearchResults = true;
@@ -418,17 +412,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       FocusScope.of(context).unfocus();
 
     } else {
-      // ÉCHEC : Aucun résultat
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Produit non trouvé dans cet emplacement.'), backgroundColor: Colors.red),
       );
 
-      // --- MODIFICATION ICI ---
-      // 1. On redonne le focus au champ de recherche
+      // Retour du focus et sélection du texte erroné
       _searchFocusNode.requestFocus();
-
-      // 2. On sélectionne tout le texte existant (le "mauvais" code)
-      // Le délai est parfois nécessaire pour que le clavier/focus soit bien actif avant la sélection
       Future.delayed(const Duration(milliseconds: 50), () {
         if (mounted && _searchController.text.isNotEmpty) {
           _searchController.selection = TextSelection(
@@ -437,7 +426,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           );
         }
       });
-      // ------------------------
     }
   }
 
@@ -507,11 +495,17 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                         final int qty = int.tryParse(quickQtyController.text) ?? 0;
                         _saveScannedQuantity(product, qty);
                         Navigator.of(ctx).pop();
-                        // AMELIORATION 2 : Focus retour automatique sur la recherche
+
+                        // GESTION DU RETOUR DE FOCUS SELON LE MODE
                         if (widget.isQuickMode) {
-                          // Petit délai pour s'assurer que le dialog est bien fermé
+                          // Mode Rapide : Focus sur la recherche pour le prochain scan
                           Future.delayed(const Duration(milliseconds: 100), () {
                             if (mounted) _searchFocusNode.requestFocus();
+                          });
+                        } else {
+                          // Mode Normal : Focus sur le champ de quantité principal
+                          Future.delayed(const Duration(milliseconds: 100), () {
+                            if (mounted) _quantityFocusNode.requestFocus();
                           });
                         }
                       } else if (key == 'DEL') {
@@ -545,7 +539,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     product.quantiteSaisie = quantity;
     product.isSynced = false;
 
-    // Hack pour forcer la sauvegarde globale
     await provider.updateQuantity(provider.currentProduct?.quantiteSaisie.toString() ?? "0");
 
     if (mounted) {
@@ -565,7 +558,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final provider = Provider.of<EntryProvider>(context, listen: false);
 
     if (widget.isQuickMode) {
-      // Mode Rapide : Sélection = Ouverture Popup Saisie
       _openQuickEntryDialog(product);
       _searchController.clear();
       setState(() {
@@ -573,7 +565,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       });
       FocusScope.of(context).unfocus();
     } else {
-      // Mode Normal : Sélection = Navigation vers le produit
       provider.jumpToProduct(product);
       if (mounted) {
         setState(() {
@@ -816,7 +807,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                               icon: const Icon(Icons.clear, size: 20),
                               onPressed: () {
                                 _searchController.clear();
-                                // AMELIORATION 1 : Retour du focus après effacement
+                                // Retour du focus après effacement
                                 _searchFocusNode.requestFocus();
                               },
                             )
@@ -824,7 +815,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                           ),
                         ),
                       ),
-                      // AMELIORATION 3 : Masquer les filtres en mode rapide
+                      // Masquer les filtres en mode rapide
                       if (!widget.isQuickMode) ...[
                         const SizedBox(width: 8),
                         OutlinedButton(
