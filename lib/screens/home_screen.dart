@@ -26,13 +26,13 @@ class HomeScreen extends StatelessWidget {
         automaticallyImplyLeading: false,
         actions: [
           IconButton(icon: const Icon(Icons.analytics_outlined), tooltip: 'Analyse', onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalysisScreen()))),
-          IconButton(icon: const Icon(Icons.settings_outlined), tooltip: 'Configuration', onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConfigScreen()))),
           IconButton(icon: const Icon(Icons.logout), tooltip: 'Déconnexion', onPressed: () => performLogout(context)),
-
+          IconButton(icon: const Icon(Icons.settings_outlined), tooltip: 'Configuration', onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConfigScreen()))),
         ],
       ),
       body: Column(
         children: [
+          // ... (Zone configuration API inchangée) ...
           Container(
             color: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -82,14 +82,44 @@ class HomeScreen extends StatelessWidget {
                         ),
                       ),
                     const SizedBox(height: 40),
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.inventory_2_outlined),
-                      label: const Text('COMMENCER L\'INVENTAIRE'),
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const InventoryListScreen()),
-                        );
-                      },
+
+                    // BOUTON 1 : INVENTAIRE CLASSIQUE
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.inventory_2_outlined, size: 28),
+                        label: const Text('COMMENCER L\'INVENTAIRE\n(Mode Guidé)', textAlign: TextAlign.center),
+                        style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: false)),
+                          );
+                        },
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // BOUTON 2 : SAISIE RAPIDE (NOUVEAU)
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.qr_code_scanner, size: 28),
+                        label: const Text('SAISIE RAPIDE\n(Mode Scan)', textAlign: TextAlign.center),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange.shade800, // Couleur distincte
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: true)),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),

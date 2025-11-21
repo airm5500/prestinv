@@ -7,12 +7,14 @@ import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/providers/inventory_provider.dart';
 import 'package:prestinv/screens/inventory_entry_screen.dart';
-
-// CORRECTION : Ajout de l'import manquant pour EntryProvider
 import 'package:prestinv/providers/entry_provider.dart';
 
 class InventoryListScreen extends StatefulWidget {
-  const InventoryListScreen({super.key});
+  // NOUVEAU : Paramètre pour savoir si on est en mode "Saisie Rapide"
+  final bool isQuickMode;
+
+  // Constructeur mis à jour pour accepter le paramètre (par défaut à false)
+  const InventoryListScreen({super.key, this.isQuickMode = false});
 
   @override
   State<InventoryListScreen> createState() => _InventoryListScreenState();
@@ -28,7 +30,6 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
   }
 
   Future<void> _refreshInventories() async {
-    // On s'assure que le widget est toujours dans l'arbre avant d'utiliser son context
     if (!mounted) return;
 
     final appConfig = Provider.of<AppConfig>(context, listen: false);
@@ -37,7 +38,6 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
       baseUrl: appConfig.currentApiUrl,
       sessionCookie: authProvider.sessionCookie,
     );
-    // Le provider est appelé avec listen: false car on est dans initState
     await Provider.of<InventoryProvider>(context, listen: false)
         .fetchInventories(apiService, maxResult: appConfig.maxResult);
   }
@@ -46,7 +46,8 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Choisir un inventaire'),
+        // Le titre change selon le mode
+        title: Text(widget.isQuickMode ? 'Choisir un inventaire (Scan)' : 'Choisir un inventaire'),
       ),
       body: RefreshIndicator(
         onRefresh: _refreshInventories,
@@ -80,12 +81,15 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                   title: Text(provider.inventories[i].libelle),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () {
-                    // Cet appel fonctionne car l'import est maintenant présent
+                    // On réinitialise le provider d'entrée avant d'y aller
                     Provider.of<EntryProvider>(context, listen: false).reset();
+
                     Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => InventoryEntryScreen(
                           inventoryId: provider.inventories[i].id,
+                          // IMPORTANT : On transmet le mode choisi à l'écran suivant
+                          isQuickMode: widget.isQuickMode,
                         ),
                       ),
                     );

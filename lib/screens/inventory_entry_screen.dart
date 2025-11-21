@@ -21,8 +21,14 @@ import 'package:prestinv/models/product_filter.dart';
 
 class InventoryEntryScreen extends StatefulWidget {
   final String inventoryId;
+  // Paramètre pour le mode "Saisie Rapide"
+  final bool isQuickMode;
 
-  const InventoryEntryScreen({super.key, required this.inventoryId});
+  const InventoryEntryScreen({
+    super.key,
+    required this.inventoryId,
+    this.isQuickMode = false,
+  });
 
   @override
   State<InventoryEntryScreen> createState() => _InventoryEntryScreenState();
@@ -76,9 +82,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     super.dispose();
   }
 
-  // --- NOUVEAU : Fonction de navigation avec chargement ---
+  // --- Navigation vers Récap avec Chargement (Anti-Crash) ---
   void _navigateToRecap() async {
-    // 1. Afficher le loader
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -95,32 +100,25 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
     try {
       final provider = Provider.of<EntryProvider>(context, listen: false);
-
-      // 2. Récupérer les données (simule le chargement du serveur)
-      // On utilise l'API service pour avoir des données fraîches comme le faisait le RecapScreen
+      // On charge les données fraîches
       final products = await _apiService.fetchProducts(widget.inventoryId, provider.selectedRayon!.id);
 
       if (!mounted) return;
+      Navigator.of(context).pop(); // Fermer le loader
 
-      // 3. Fermer le loader
-      Navigator.of(context).pop();
-
-      // 4. Naviguer vers l'écran Récap avec les données
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecapScreen(
         inventoryId: widget.inventoryId,
         rayonId: provider.selectedRayon!.id,
         rayonName: provider.selectedRayon!.libelle,
-        preloadedProducts: products, // On passe les produits chargés
+        preloadedProducts: products,
       )));
-
     } catch (e) {
       if (mounted) {
-        Navigator.of(context).pop(); // En cas d'erreur, on ferme le loader
+        Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: $e"), backgroundColor: Colors.red));
       }
     }
   }
-  // --- FIN ---
 
   void _showNotification(String message, Color color) {
     _notificationTimer?.cancel();
@@ -382,11 +380,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
+  // Logique SCAN-TO-ACTION Globale
   void _handleScanOrSearch(String query) {
     if (query.isEmpty) return;
 
     final provider = Provider.of<EntryProvider>(context, listen: false);
 
+    // Recherche dans TOUS les produits (ignorer filtre)
     final matches = provider.allProducts.where((p) {
       final q = query.toLowerCase();
       return p.produitCip.toLowerCase().contains(q) ||
@@ -395,7 +395,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
     if (matches.length == 1) {
       _openQuickEntryDialog(matches.first);
-
       _searchController.clear();
       setState(() {
         _showSearchResults = false;
@@ -416,8 +415,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
+  // Popup de Saisie Rapide (Scan)
   void _openQuickEntryDialog(Product product) {
     final quickQtyController = TextEditingController();
+    // Champ vide (pas de pré-remplissage)
 
     showDialog(
       context: context,
@@ -431,6 +432,27 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               const SizedBox(height: 4),
               Text(product.produitName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               Text('CIP: ${product.produitCip}', style: const TextStyle(fontSize: 14)),
+              const Divider(),
+              // Affichage des infos détaillées
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('PA: ${product.produitPrixAchat.toStringAsFixed(0)} F', style: const TextStyle(fontSize: 13, color: Colors.orange)),
+                  Text('PV: ${product.produitPrixUni.toStringAsFixed(0)} F', style: const TextStyle(fontSize: 13, color: AppColors.accent)),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Consumer<AppConfig>(
+                builder: (context, appConfig, child) {
+                  return Visibility(
+                    visible: appConfig.showTheoreticalStock,
+                    child: Text(
+                      'Stock Théo: ${product.quantiteInitiale}',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: product.quantiteInitiale < 0 ? Colors.red : Colors.green),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
           content: SizedBox(
@@ -448,7 +470,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   ),
                   readOnly: true,
                   autofocus: true,
-                  showCursor: true,
+                  showCursor: true, // Curseur visible sur le popup
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -490,6 +512,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     product.quantiteSaisie = quantity;
     product.isSynced = false;
 
+    // Hack pour forcer la sauvegarde globale
     await provider.updateQuantity(provider.currentProduct?.quantiteSaisie.toString() ?? "0");
 
     if (mounted) {
@@ -507,14 +530,25 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   void _selectProduct(Product product) {
     final provider = Provider.of<EntryProvider>(context, listen: false);
-    provider.jumpToProduct(product);
 
-    if (mounted) {
+    if (widget.isQuickMode) {
+      // Mode Rapide : Sélection = Ouverture Popup Saisie
+      _openQuickEntryDialog(product);
+      _searchController.clear();
       setState(() {
-        _searchController.clear();
         _showSearchResults = false;
-        FocusScope.of(context).unfocus();
       });
+      FocusScope.of(context).unfocus();
+    } else {
+      // Mode Normal : Sélection = Navigation vers le produit
+      provider.jumpToProduct(product);
+      if (mounted) {
+        setState(() {
+          _searchController.clear();
+          _showSearchResults = false;
+          FocusScope.of(context).unfocus();
+        });
+      }
     }
   }
 
@@ -570,7 +604,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-
                     RadioListTile<FilterType>(
                       title: const Text('Intervalle alphabétique'),
                       value: FilterType.alphabetic,
@@ -652,7 +685,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       onWillPop: _onWillPop,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Saisie Inventaire'),
+          // Titre dynamique selon le mode
+          title: Text(widget.isQuickMode ? 'Saisie Rapide (Scan)' : 'Saisie Inventaire'),
           actions: [
             IconButton(icon: const Icon(Icons.send), tooltip: 'Envoyer les données', onPressed: _sendDataToServer),
             Consumer<EntryProvider>(
@@ -660,7 +694,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 if (provider.selectedRayon == null) return const SizedBox.shrink();
                 return Row(
                   children: [
-                    // MODIFIÉ : Appel à la nouvelle fonction _navigateToRecap
+                    // Navigation sécurisée vers Récap
                     IconButton(icon: const Icon(Icons.list_alt_outlined), tooltip: 'Récapitulatif', onPressed: () {
                       if (!mounted) return;
                       _navigateToRecap();
@@ -684,7 +718,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               return const Center(child: CircularProgressIndicator());
             }
             final currentProduct = provider.currentProduct;
-            if (currentProduct != null && currentProduct.id != _lastDisplayedProductId) {
+
+            // En mode normal, on pré-remplit le champ
+            if (!widget.isQuickMode && currentProduct != null && currentProduct.id != _lastDisplayedProductId) {
               _lastDisplayedProductId = currentProduct.id;
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) {
@@ -730,6 +766,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                           controller: _searchController,
                           onSubmitted: (value) => _handleScanOrSearch(value),
                           textInputAction: TextInputAction.search,
+                          // Focus auto sur la recherche en mode Rapide
+                          autofocus: widget.isQuickMode,
                           decoration: InputDecoration(
                             labelText: 'Rechercher / Scanner',
                             hintText: 'CIP, Nom ou Scan...',
@@ -784,6 +822,23 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                   : 'Aucun produit. Sélectionnez un emplacement.'
                           )
                       )
+                      // INTERFACE ADAPTATIVE SELON LE MODE
+                          : widget.isQuickMode
+                          ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.qr_code_scanner, size: 80, color: Colors.grey.shade300),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Mode Saisie Rapide Activé',
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text('Scannez un produit pour saisir sa quantité', style: TextStyle(color: Colors.grey)),
+                          ],
+                        ),
+                      )
                           : buildProductView(provider),
 
                       if (_showSearchResults)
@@ -814,7 +869,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   ),
                 ),
 
-                NumericKeyboard(onKeyPressed: _onKeyPressed),
+                // Le clavier principal n'est affiché qu'en mode Normal
+                if (!widget.isQuickMode) NumericKeyboard(onKeyPressed: _onKeyPressed),
               ],
             );
           },
@@ -997,7 +1053,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 ),
                 keyboardType: TextInputType.none,
                 readOnly: true,
-                showCursor: true,
+                showCursor: true, // Curseur visible
                 textAlign: TextAlign.center,
                 cursorColor: textFieldBorderColor,
                 style: TextStyle(fontSize: quantityFontSize, fontWeight: FontWeight.bold, color: textFieldBorderColor),
