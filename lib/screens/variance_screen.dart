@@ -43,6 +43,9 @@ class _VarianceScreenState extends State<VarianceScreen> {
   bool _isNewEntry = true;
   late ApiService _apiService;
 
+  // AJOUT : Variable pour empêcher le double-clic sur l'impression
+  bool _isPrinting = false;
+
   String? _notificationMessage;
   Color? _notificationColor;
   Timer? _notificationTimer;
@@ -199,36 +202,81 @@ class _VarianceScreenState extends State<VarianceScreen> {
     });
   }
 
+  // MODIFIÉ : Fonction d'impression sécurisée (Anti-ANR)
   Future<void> _printVariances() async {
-    final doc = pw.Document();
+    // 1. Sécurité : Empêcher les clics multiples
+    if (_isPrinting) return;
 
-    final tableData = <List<String>>[
-      ['Désignation', 'CIP', 'Stock Théo.', 'Stock Corrigé', 'Écart'],
-      ..._productsWithVariance.map((p) => [
-        p.produitName,
-        p.produitCip,
-        p.quantiteInitiale.toString(),
-        p.quantiteSaisie.toString(),
-        (p.quantiteSaisie - p.quantiteInitiale).toString(),
-      ])
-    ];
+    setState(() {
+      _isPrinting = true;
+    });
 
-    doc.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        header: (context) => pw.Header(level: 0, text: 'Rapport des Écarts - ${widget.rayonName}'),
-        build: (context) => [
-          pw.TableHelper.fromTextArray(
-            context: context,
-            data: tableData,
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-            cellAlignments: {1: pw.Alignment.center, 2: pw.Alignment.center, 3: pw.Alignment.center},
-          )
-        ],
-      ),
+    // 2. Afficher le loader
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Text("Génération du PDF..."),
+            ],
+          ),
+        );
+      },
     );
 
-    await Printing.layoutPdf(onLayout: (format) => doc.save());
+    // Petit délai pour laisser l'UI s'afficher
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    try {
+      final doc = pw.Document();
+
+      final tableData = <List<String>>[
+        ['Désignation', 'CIP', 'Stock Théo.', 'Stock Corrigé', 'Écart'],
+        ..._productsWithVariance.map((p) => [
+          p.produitName,
+          p.produitCip,
+          p.quantiteInitiale.toString(),
+          p.quantiteSaisie.toString(),
+          (p.quantiteSaisie - p.quantiteInitiale).toString(),
+        ])
+      ];
+
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          header: (context) => pw.Header(level: 0, text: 'Rapport des Écarts - ${widget.rayonName}'),
+          build: (context) => [
+            pw.TableHelper.fromTextArray(
+              context: context,
+              data: tableData,
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignments: {1: pw.Alignment.center, 2: pw.Alignment.center, 3: pw.Alignment.center},
+            )
+          ],
+        ),
+      );
+
+      await Printing.layoutPdf(onLayout: (format) => doc.save());
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur lors de l\'impression : $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      // 3. Nettoyage : Fermer le loader et déverrouiller
+      if (mounted) {
+        Navigator.of(context).pop(); // Ferme le dialog
+        setState(() {
+          _isPrinting = false;
+        });
+      }
+    }
   }
 
   @override
@@ -240,7 +288,10 @@ class _VarianceScreenState extends State<VarianceScreen> {
           IconButton(
             icon: const Icon(Icons.print_outlined),
             tooltip: 'Imprimer les écarts',
-            onPressed: _productsWithVariance.isEmpty ? null : _printVariances,
+            // MODIFIÉ : Désactive le bouton si impression en cours
+            onPressed: (_productsWithVariance.isEmpty || _isPrinting)
+                ? null
+                : _printVariances,
           ),
         ],
       ),
@@ -371,7 +422,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                   decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
                   keyboardType: TextInputType.none,
                   readOnly: true,
-                  showCursor: true, // <--- Ajouté ici également pour la cohérence
+                  showCursor: true, // On garde aussi l'amélioration du curseur
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
