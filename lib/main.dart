@@ -130,7 +130,7 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
           WidgetsBinding.instance.addPostFrameCallback((_) => _resetInactivityTimer(context));
 
           return MaterialApp(
-            title: 'Prestinv',
+            title: 'Prestige Inventaire',
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
                 primaryColor: AppColors.primary,

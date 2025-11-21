@@ -86,7 +86,7 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 const Icon(Icons.inventory_2_outlined, size: 80, color: AppColors.primary),
                 const SizedBox(height: 20),
-                const Text('Prestinv', style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                const Text('Prestige Inventaire', style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: AppColors.primary)),
                 const SizedBox(height: 40),
 
                 TextField(

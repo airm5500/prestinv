@@ -64,7 +64,7 @@ class _RecapScreenState extends State<RecapScreen> {
 
     // Logique hybride (Pré-chargé OU Téléchargement)
     if (widget.preloadedProducts != null) {
-      // CORRECTION ICI : Ajout du '!' pour garantir que la liste n'est pas nulle
+      // On utilise le '!' car on a vérifié que ce n'est pas null
       _productsFuture = Future.value(widget.preloadedProducts!).then((products) {
         if (mounted) {
           _calculateTotals(products);
@@ -102,17 +102,15 @@ class _RecapScreenState extends State<RecapScreen> {
 
   /// Génère le document PDF et lance l'impression avec protection anti-plantage.
   Future<void> _printRecap(List<Product> products) async {
-    // 1. Sécurité : Si déjà en cours d'impression, on ne fait rien
     if (_isPrinting) return;
 
     setState(() {
       _isPrinting = true;
     });
 
-    // 2. Feedback Visuel : On affiche un popup de chargement
     showDialog(
       context: context,
-      barrierDismissible: false, // L'utilisateur ne peut pas fermer en cliquant à côté
+      barrierDismissible: false,
       builder: (BuildContext context) {
         return const AlertDialog(
           content: Row(
@@ -126,7 +124,6 @@ class _RecapScreenState extends State<RecapScreen> {
       },
     );
 
-    // Petit délai pour laisser le temps au popup de s'afficher correctement avant que le CPU ne sature
     await Future.delayed(const Duration(milliseconds: 100));
 
     try {
@@ -171,7 +168,6 @@ class _RecapScreenState extends State<RecapScreen> {
         ),
       );
 
-      // Lancement de l'impression
       await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save());
 
     } catch (e) {
@@ -181,7 +177,6 @@ class _RecapScreenState extends State<RecapScreen> {
         );
       }
     } finally {
-      // 3. Nettoyage : On ferme le popup et on déverrouille le bouton
       if (mounted) {
         Navigator.of(context).pop(); // Ferme le dialog de chargement
         setState(() {
@@ -194,32 +189,34 @@ class _RecapScreenState extends State<RecapScreen> {
   /// Crée le contenu textuel du fichier CSV selon le format demandé.
   String _generateCsvContent(List<Product> products) {
     final StringBuffer csvContent = StringBuffer();
-    // Pas d'en-tête, pas de guillemets
+    // Génération locale : CIP,Quantité
     for (final product in products) {
       csvContent.writeln('${product.produitCip},${product.quantiteSaisie}');
     }
     return csvContent.toString();
   }
 
-  /// Partage le fichier CSV généré via le menu natif.
+  /// Génère le fichier localement et lance le menu de partage/sauvegarde.
   Future<void> _shareCsvFile(String csvContent) async {
-    final appConfig = Provider.of<AppConfig>(context, listen: false);
-    final timestamp = DateFormat('yyyy-MM-dd_HHmmss').format(DateTime.now());
+    final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
 
-    final String pathPrefix = appConfig.networkExportPath.isNotEmpty
-        ? '${appConfig.networkExportPath.replaceAll('\\', '_')}_'
-        : '';
-
+    // Nettoyage du nom du rayon pour le nom de fichier
     final cleanRayonName = widget.rayonName.replaceAll(RegExp(r'[^\w\s]+'),'').replaceAll(' ', '_');
-    final fileName = '$pathPrefix${cleanRayonName}_$timestamp.csv';
 
+    // Nom du fichier : inventaire_NOMRAYON_DATE_HEURE.csv
+    final fileName = 'inventaire_${cleanRayonName}_$timestamp.csv';
+
+    // Récupération du dossier temporaire de l'application
     final directory = await getTemporaryDirectory();
     final filePath = '${directory.path}/$fileName';
     final file = File(filePath);
+
+    // Écriture du fichier sur le disque du terminal
     await file.writeAsString(csvContent);
 
+    // Ouverture du menu de partage (permet de sauvegarder, envoyer par mail, bluetooth...)
     final xFile = XFile(filePath);
-    await Share.shareXFiles([xFile], text: 'Export CSV pour l\'emplacement ${widget.rayonName}');
+    await Share.shareXFiles([xFile], text: 'Export CSV : ${widget.rayonName}');
   }
 
   /// Copie le contenu CSV dans le presse-papiers.
@@ -233,23 +230,25 @@ class _RecapScreenState extends State<RecapScreen> {
   /// Affiche une boîte de dialogue pour choisir l'action d'export CSV.
   void _showExportDialog(List<Product> products) {
     final csvContent = _generateCsvContent(products);
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Exporter les données CSV'),
-        content: const Text('Comment voulez-vous exporter les données ?'),
+        content: const Text('Générer le fichier CSV à partir des données affichées ?'),
         actions: [
           TextButton.icon(
             icon: const Icon(Icons.copy),
-            label: const Text('Copier le contenu'),
+            label: const Text('Copier le texte'),
             onPressed: () {
               Navigator.of(context).pop();
               _copyCsvToClipboard(csvContent);
             },
           ),
-          TextButton.icon(
-            icon: const Icon(Icons.share),
-            label: const Text('Partager le fichier'),
+          // Bouton principal pour générer le fichier
+          FilledButton.icon(
+            icon: const Icon(Icons.file_download),
+            label: const Text('Générer et Sauvegarder'),
             onPressed: () {
               Navigator.of(context).pop();
               _shareCsvFile(csvContent);
@@ -280,7 +279,6 @@ class _RecapScreenState extends State<RecapScreen> {
           IconButton(
             icon: const Icon(Icons.print_outlined),
             tooltip: 'Imprimer le récapitulatif',
-            // Désactive le bouton si une impression est déjà en cours
             onPressed: _isPrinting
                 ? null
                 : () {
@@ -308,12 +306,9 @@ class _RecapScreenState extends State<RecapScreen> {
                       columnSpacing: 20,
                       columns: const [
                         DataColumn(label: Text('Désignation', style: TextStyle(fontWeight: FontWeight.bold))),
-
-                        // Ordre des colonnes
                         DataColumn(label: Text('Écart Qté'), numeric: true),
                         DataColumn(label: Text('Stock Compté'), numeric: true),
                         DataColumn(label: Text('Stock Théo.'), numeric: true),
-
                         DataColumn(label: Text('Valorisation Écart', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
                       ],
                       rows: products.map((product) {
@@ -326,12 +321,9 @@ class _RecapScreenState extends State<RecapScreen> {
 
                         return DataRow(cells: [
                           DataCell(ConstrainedBox(constraints: const BoxConstraints(maxWidth: 250), child: Text(product.produitName, overflow: TextOverflow.ellipsis))),
-
-                          // Ordre des cellules
                           DataCell(Text(ecart.toString(), style: TextStyle(color: ecartColor, fontWeight: FontWeight.bold))),
                           DataCell(Text(product.quantiteSaisie.toString())),
                           DataCell(Text(product.quantiteInitiale.toString())),
-
                           DataCell(Text(numberFormat.format(valorisationEcart), style: TextStyle(color: ecartColor, fontWeight: FontWeight.bold))),
                         ]);
                       }).toList(),
