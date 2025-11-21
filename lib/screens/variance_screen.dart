@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Ajouté pour les InputFormatters si besoin
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/config/app_config.dart';
@@ -31,6 +32,8 @@ class VarianceScreen extends StatefulWidget {
 
 class _VarianceScreenState extends State<VarianceScreen> {
   final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode(); // FocusNode pour la recherche
+
   final _quantityController = TextEditingController();
   final _quantityFocusNode = FocusNode();
 
@@ -43,7 +46,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
   bool _isNewEntry = true;
   late ApiService _apiService;
 
-  // AJOUT : Variable pour empêcher le double-clic sur l'impression
   bool _isPrinting = false;
 
   String? _notificationMessage;
@@ -65,6 +67,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _quantityController.dispose();
     _quantityFocusNode.dispose();
     _notificationTimer?.cancel();
@@ -78,6 +81,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
       if (mounted) {
         setState(() {
+          // On ne garde que les produits avec écarts
           _productsWithVariance = allProductsFromServer
               .where((p) => p.quantiteSaisie != p.quantiteInitiale)
               .toList();
@@ -104,10 +108,176 @@ class _VarianceScreenState extends State<VarianceScreen> {
       _quantityController.text = _productsWithVariance[index].quantiteSaisie.toString();
       _isNewEntry = true;
     });
+    // Focus sur la quantité lors de la navigation manuelle
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _quantityFocusNode.requestFocus();
     });
   }
+
+  // --- NOUVEAU : Logique Scan-to-Action pour Variance ---
+  void _handleScanOrSearch(String query) {
+    if (query.isEmpty) return;
+
+    // Recherche dans la liste des ÉCARTS (pas tout l'inventaire, car on est dans l'écran Écarts)
+    final matches = _productsWithVariance.where((p) {
+      final q = query.toLowerCase();
+      return p.produitCip.toLowerCase().contains(q) ||
+          p.produitName.toLowerCase().contains(q);
+    }).toList();
+
+    if (matches.length == 1) {
+      // 1. Produit Unique (Succès) -> Popup Saisie
+      _openQuickEntryDialog(matches.first);
+
+      // Nettoyage
+      _searchController.clear();
+      setState(() { _showSearchResults = false; });
+      // On ne force pas le focus ici, c'est le popup qui le gère
+
+    } else if (matches.length > 1) {
+      // 2. Plusieurs résultats -> Liste filtrée
+      setState(() {
+        _filteredProducts = matches;
+        _showSearchResults = true;
+      });
+      FocusScope.of(context).unfocus(); // On laisse l'utilisateur choisir
+
+    } else {
+      // 3. Aucun résultat (Erreur)
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ce produit n\'est pas dans la liste des écarts.'), backgroundColor: Colors.red),
+      );
+
+      // AMÉLIORATION 3 : Pré-sélection de la saisie pour correction rapide
+      _searchFocusNode.requestFocus();
+      Future.delayed(const Duration(milliseconds: 50), () {
+        if (mounted && _searchController.text.isNotEmpty) {
+          _searchController.selection = TextSelection(
+            baseOffset: 0,
+            extentOffset: _searchController.text.length,
+          );
+        }
+      });
+    }
+  }
+
+  // --- NOUVEAU : Popup de Saisie Rapide pour Variance ---
+  void _openQuickEntryDialog(Product product) {
+    final quickQtyController = TextEditingController();
+    // Champ vide pour nouvelle saisie
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Correction Rapide', style: TextStyle(fontSize: 14, color: Colors.grey)),
+              const SizedBox(height: 4),
+              Text(product.produitName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text('CIP: ${product.produitCip}', style: const TextStyle(fontSize: 14)),
+              const Divider(),
+              // Infos contextuelles (Stock Théo + Écart actuel)
+              Consumer<AppConfig>(
+                builder: (context, appConfig, child) {
+                  return Visibility(
+                    visible: appConfig.showTheoreticalStock,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Théo: ${product.quantiteInitiale}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text(
+                            'Écart Actuel: ${product.quantiteSaisie - product.quantiteInitiale}',
+                            style: TextStyle(
+                                color: (product.quantiteSaisie - product.quantiteInitiale) == 0 ? Colors.green : Colors.red,
+                                fontWeight: FontWeight.bold
+                            )
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: quickQtyController,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.accent),
+                  decoration: const InputDecoration(
+                    labelText: 'Nouvelle Qté',
+                    border: OutlineInputBorder(),
+                  ),
+                  readOnly: true,
+                  autofocus: true,
+                  showCursor: true, // Curseur visible
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 280,
+                  child: NumericKeyboard(
+                    onKeyPressed: (key) {
+                      if (key == 'OK') {
+                        final int qty = int.tryParse(quickQtyController.text) ?? 0;
+                        // On valide et on ferme
+                        _applyQuickCorrection(product, qty);
+                        Navigator.of(ctx).pop();
+
+                        // AMÉLIORATION 2 : Retour focus sur zone quantité (Principal)
+                        Future.delayed(const Duration(milliseconds: 100), () {
+                          if (mounted) _quantityFocusNode.requestFocus();
+                        });
+
+                      } else if (key == 'DEL') {
+                        if (quickQtyController.text.isNotEmpty) {
+                          quickQtyController.text = quickQtyController.text.substring(0, quickQtyController.text.length - 1);
+                        }
+                      } else {
+                        quickQtyController.text += key;
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Annuler', style: TextStyle(color: Colors.red))
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _applyQuickCorrection(Product product, int newQuantity) async {
+    // 1. Mise à jour visuelle immédiate
+    setState(() {
+      product.quantiteSaisie = newQuantity;
+      // Si c'est le produit affiché en fond, on met à jour son champ aussi
+      if (_productsWithVariance[_currentProductIndex].id == product.id) {
+        _quantityController.text = newQuantity.toString();
+      }
+    });
+
+    // 2. Envoi API
+    try {
+      await _apiService.updateProductQuantity(product.id, newQuantity);
+      if (mounted) _showNotification('Correction enregistrée !', Colors.green);
+    } catch (e) {
+      if (mounted) _showNotification('Erreur sauvegarde: $e', Colors.red);
+    }
+  }
+  // ---------------------------------------------------------
 
   void _filterProducts() {
     final query = _searchController.text.toLowerCase();
@@ -133,7 +303,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
       setState(() {
         _searchController.clear();
         _showSearchResults = false;
-        FocusScope.of(context).unfocus();
+        // Focus sur la quantité quand on sélectionne manuellement
+        FocusScope.of(context).requestFocus(_quantityFocusNode);
       });
     }
   }
@@ -202,16 +373,11 @@ class _VarianceScreenState extends State<VarianceScreen> {
     });
   }
 
-  // MODIFIÉ : Fonction d'impression sécurisée (Anti-ANR)
   Future<void> _printVariances() async {
-    // 1. Sécurité : Empêcher les clics multiples
     if (_isPrinting) return;
 
-    setState(() {
-      _isPrinting = true;
-    });
+    setState(() { _isPrinting = true; });
 
-    // 2. Afficher le loader
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -228,7 +394,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
       },
     );
 
-    // Petit délai pour laisser l'UI s'afficher
     await Future.delayed(const Duration(milliseconds: 100));
 
     try {
@@ -269,12 +434,9 @@ class _VarianceScreenState extends State<VarianceScreen> {
         );
       }
     } finally {
-      // 3. Nettoyage : Fermer le loader et déverrouiller
       if (mounted) {
-        Navigator.of(context).pop(); // Ferme le dialog
-        setState(() {
-          _isPrinting = false;
-        });
+        Navigator.of(context).pop();
+        setState(() { _isPrinting = false; });
       }
     }
   }
@@ -288,7 +450,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
           IconButton(
             icon: const Icon(Icons.print_outlined),
             tooltip: 'Imprimer les écarts',
-            // MODIFIÉ : Désactive le bouton si impression en cours
             onPressed: (_productsWithVariance.isEmpty || _isPrinting)
                 ? null
                 : _printVariances,
@@ -305,11 +466,23 @@ class _VarianceScreenState extends State<VarianceScreen> {
             padding: const EdgeInsets.all(8.0),
             child: TextField(
               controller: _searchController,
+              focusNode: _searchFocusNode, // FocusNode pour la recherche
+              // MODIFIÉ : Déclenchement du Scan-to-Action
+              onSubmitted: (value) => _handleScanOrSearch(value),
+              textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                labelText: 'Rechercher un produit avec écart',
+                labelText: 'Rechercher / Scanner un produit avec écart',
                 prefixIcon: const Icon(Icons.search),
                 border: const OutlineInputBorder(),
-                suffixIcon: _searchController.text.isNotEmpty ? IconButton(icon: const Icon(Icons.clear), onPressed: () => _searchController.clear()) : null,
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () {
+                      _searchController.clear();
+                      _searchFocusNode.requestFocus(); // Retour du focus après effacement
+                    }
+                )
+                    : null,
               ),
             ),
           ),
@@ -422,7 +595,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                   decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
                   keyboardType: TextInputType.none,
                   readOnly: true,
-                  showCursor: true, // On garde aussi l'amélioration du curseur
+                  showCursor: true, // Curseur activé
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
