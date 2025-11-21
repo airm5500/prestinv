@@ -76,6 +76,52 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     super.dispose();
   }
 
+  // --- NOUVEAU : Fonction de navigation avec chargement ---
+  void _navigateToRecap() async {
+    // 1. Afficher le loader
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Text("Chargement du récap..."),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final provider = Provider.of<EntryProvider>(context, listen: false);
+
+      // 2. Récupérer les données (simule le chargement du serveur)
+      // On utilise l'API service pour avoir des données fraîches comme le faisait le RecapScreen
+      final products = await _apiService.fetchProducts(widget.inventoryId, provider.selectedRayon!.id);
+
+      if (!mounted) return;
+
+      // 3. Fermer le loader
+      Navigator.of(context).pop();
+
+      // 4. Naviguer vers l'écran Récap avec les données
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecapScreen(
+        inventoryId: widget.inventoryId,
+        rayonId: provider.selectedRayon!.id,
+        rayonName: provider.selectedRayon!.libelle,
+        preloadedProducts: products, // On passe les produits chargés
+      )));
+
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop(); // En cas d'erreur, on ferme le loader
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: $e"), backgroundColor: Colors.red));
+      }
+    }
+  }
+  // --- FIN ---
+
   void _showNotification(String message, Color color) {
     _notificationTimer?.cancel();
     setState(() {
@@ -372,7 +418,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   void _openQuickEntryDialog(Product product) {
     final quickQtyController = TextEditingController();
-    // Plus de pré-remplissage ici comme demandé précédemment, champ vide.
 
     showDialog(
       context: context,
@@ -403,7 +448,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   ),
                   readOnly: true,
                   autofocus: true,
-                  showCursor: true, // Le curseur est bien présent sur le popup
+                  showCursor: true,
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -615,9 +660,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 if (provider.selectedRayon == null) return const SizedBox.shrink();
                 return Row(
                   children: [
+                    // MODIFIÉ : Appel à la nouvelle fonction _navigateToRecap
                     IconButton(icon: const Icon(Icons.list_alt_outlined), tooltip: 'Récapitulatif', onPressed: () {
                       if (!mounted) return;
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecapScreen(inventoryId: widget.inventoryId, rayonId: provider.selectedRayon!.id, rayonName: provider.selectedRayon!.libelle)));
+                      _navigateToRecap();
                     }),
                     IconButton(icon: const Icon(Icons.edit_note_outlined), tooltip: 'Correction écarts', onPressed: () {
                       if (!mounted) return;
@@ -951,7 +997,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 ),
                 keyboardType: TextInputType.none,
                 readOnly: true,
-                showCursor: true, // Le curseur est aussi activé sur le champ principal
+                showCursor: true,
                 textAlign: TextAlign.center,
                 cursorColor: textFieldBorderColor,
                 style: TextStyle(fontSize: quantityFontSize, fontWeight: FontWeight.bold, color: textFieldBorderColor),

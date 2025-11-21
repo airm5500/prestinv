@@ -24,12 +24,15 @@ class RecapScreen extends StatefulWidget {
   final String inventoryId;
   final String rayonId;
   final String rayonName;
+  // Paramètre optionnel pour recevoir les données pré-chargées
+  final List<Product>? preloadedProducts;
 
   const RecapScreen({
     super.key,
     required this.inventoryId,
     required this.rayonId,
     required this.rayonName,
+    this.preloadedProducts,
   });
 
   @override
@@ -44,6 +47,9 @@ class _RecapScreenState extends State<RecapScreen> {
   double _totalEcartValorise = 0;
   late ApiService _apiService;
 
+  // Variable pour empêcher le double-clic et le plantage ANR
+  bool _isPrinting = false;
+
   // Formatteur de nombres pour un affichage plus lisible
   final numberFormat = NumberFormat.currency(locale: 'fr_FR', symbol: 'F', decimalDigits: 0);
 
@@ -56,13 +62,25 @@ class _RecapScreenState extends State<RecapScreen> {
       sessionCookie: authProvider.sessionCookie,
     );
 
-    _productsFuture = _apiService.fetchProducts(widget.inventoryId, widget.rayonId)
-        .then((products) {
-      if (mounted) {
-        _calculateTotals(products);
-      }
-      return products;
-    });
+    // Logique hybride (Pré-chargé OU Téléchargement)
+    if (widget.preloadedProducts != null) {
+      // CORRECTION ICI : Ajout du '!' pour garantir que la liste n'est pas nulle
+      _productsFuture = Future.value(widget.preloadedProducts!).then((products) {
+        if (mounted) {
+          _calculateTotals(products);
+        }
+        return products;
+      });
+    } else {
+      // Sinon, on télécharge comme avant (comportement par défaut)
+      _productsFuture = _apiService.fetchProducts(widget.inventoryId, widget.rayonId)
+          .then((products) {
+        if (mounted) {
+          _calculateTotals(products);
+        }
+        return products;
+      });
+    }
   }
 
   /// Calcule tous les totaux nécessaires pour l'écran.
@@ -82,43 +100,95 @@ class _RecapScreenState extends State<RecapScreen> {
     }
   }
 
-  /// Génère le document PDF et lance l'impression.
+  /// Génère le document PDF et lance l'impression avec protection anti-plantage.
   Future<void> _printRecap(List<Product> products) async {
-    final doc = pw.Document();
+    // 1. Sécurité : Si déjà en cours d'impression, on ne fait rien
+    if (_isPrinting) return;
 
-    final List<List<String>> tableData = [
-      ['Désignation', 'Stock Théo.', 'Stock Compté', 'Écart', 'Valorisation'],
-      ...products.map((p) {
-        final ecart = p.quantiteSaisie - p.quantiteInitiale;
-        final valo = ecart * p.produitPrixAchat;
-        return [ p.produitName, p.quantiteInitiale.toString(), p.quantiteSaisie.toString(), ecart.toString(), numberFormat.format(valo)];
-      })
-    ];
+    setState(() {
+      _isPrinting = true;
+    });
 
-    doc.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        header: (pw.Context context) => pw.Header(level: 0, text: 'Récapitulatif - ${widget.rayonName}'),
-        footer: (pw.Context context) => pw.Align(
-          alignment: pw.Alignment.centerRight,
-          child: pw.Text('Page ${context.pageNumber} sur ${context.pagesCount}', style: const pw.TextStyle(fontSize: 10)),
-        ),
-        build: (pw.Context context) => [
-          pw.Table.fromTextArray(
-            data: tableData,
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-            cellAlignment: pw.Alignment.centerLeft,
-            cellAlignments: {1: pw.Alignment.center, 2: pw.Alignment.center, 3: pw.Alignment.center, 4: pw.Alignment.centerRight},
+    // 2. Feedback Visuel : On affiche un popup de chargement
+    showDialog(
+      context: context,
+      barrierDismissible: false, // L'utilisateur ne peut pas fermer en cliquant à côté
+      builder: (BuildContext context) {
+        return const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Text("Génération du PDF..."),
+            ],
           ),
-          pw.Divider(height: 30),
-          pw.Text('Total Achat: ${numberFormat.format(_totalAchat)}'),
-          pw.Text('Total Vente: ${numberFormat.format(_totalVente)}'),
-          pw.Text('Total Écart Valorisé: ${numberFormat.format(_totalEcartValorise)}', style: pw.TextStyle(color: _totalEcartValorise >= 0 ? PdfColors.green : PdfColors.red, fontWeight: pw.FontWeight.bold)),
-        ],
-      ),
+        );
+      },
     );
 
-    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save());
+    // Petit délai pour laisser le temps au popup de s'afficher correctement avant que le CPU ne sature
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    try {
+      final doc = pw.Document();
+
+      // Préparation des données pour le PDF
+      final List<List<String>> tableData = [
+        ['Désignation', 'Écart Qté', 'Stock Compté', 'Stock Théo.', 'Valorisation'],
+        ...products.map((p) {
+          final ecart = p.quantiteSaisie - p.quantiteInitiale;
+          final valo = ecart * p.produitPrixAchat;
+          return [
+            p.produitName,
+            ecart.toString(),
+            p.quantiteSaisie.toString(),
+            p.quantiteInitiale.toString(),
+            numberFormat.format(valo)
+          ];
+        })
+      ];
+
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          header: (pw.Context context) => pw.Header(level: 0, text: 'Récapitulatif - ${widget.rayonName}'),
+          footer: (pw.Context context) => pw.Align(
+            alignment: pw.Alignment.centerRight,
+            child: pw.Text('Page ${context.pageNumber} sur ${context.pagesCount}', style: const pw.TextStyle(fontSize: 10)),
+          ),
+          build: (pw.Context context) => [
+            pw.Table.fromTextArray(
+              data: tableData,
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignment: pw.Alignment.centerLeft,
+              cellAlignments: {1: pw.Alignment.center, 2: pw.Alignment.center, 3: pw.Alignment.center, 4: pw.Alignment.centerRight},
+            ),
+            pw.Divider(height: 30),
+            pw.Text('Total Achat: ${numberFormat.format(_totalAchat)}'),
+            pw.Text('Total Vente: ${numberFormat.format(_totalVente)}'),
+            pw.Text('Total Écart Valorisé: ${numberFormat.format(_totalEcartValorise)}', style: pw.TextStyle(color: _totalEcartValorise >= 0 ? PdfColors.green : PdfColors.red, fontWeight: pw.FontWeight.bold)),
+          ],
+        ),
+      );
+
+      // Lancement de l'impression
+      await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save());
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur lors de l\'impression : $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      // 3. Nettoyage : On ferme le popup et on déverrouille le bouton
+      if (mounted) {
+        Navigator.of(context).pop(); // Ferme le dialog de chargement
+        setState(() {
+          _isPrinting = false;
+        });
+      }
+    }
   }
 
   /// Crée le contenu textuel du fichier CSV selon le format demandé.
@@ -210,7 +280,10 @@ class _RecapScreenState extends State<RecapScreen> {
           IconButton(
             icon: const Icon(Icons.print_outlined),
             tooltip: 'Imprimer le récapitulatif',
-            onPressed: () {
+            // Désactive le bouton si une impression est déjà en cours
+            onPressed: _isPrinting
+                ? null
+                : () {
               _productsFuture.then((products) {
                 if (products.isNotEmpty) _printRecap(products);
               });
@@ -235,11 +308,12 @@ class _RecapScreenState extends State<RecapScreen> {
                       columnSpacing: 20,
                       columns: const [
                         DataColumn(label: Text('Désignation', style: TextStyle(fontWeight: FontWeight.bold))),
-                        // --- MODIFICATION ICI ---
-                        DataColumn(label: Text('Écart Qté'), numeric: true), // Anciennement "Stock Théo."
+
+                        // Ordre des colonnes
+                        DataColumn(label: Text('Écart Qté'), numeric: true),
                         DataColumn(label: Text('Stock Compté'), numeric: true),
-                        DataColumn(label: Text('Stock Théo.'), numeric: true), // Anciennement "Écart Qté"
-                        // --- FIN MODIFICATION ---
+                        DataColumn(label: Text('Stock Théo.'), numeric: true),
+
                         DataColumn(label: Text('Valorisation Écart', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
                       ],
                       rows: products.map((product) {
@@ -249,13 +323,15 @@ class _RecapScreenState extends State<RecapScreen> {
                         if (ecart > 0) {
                           ecartColor = Colors.green;
                         } else if (ecart < 0) ecartColor = Colors.red;
+
                         return DataRow(cells: [
                           DataCell(ConstrainedBox(constraints: const BoxConstraints(maxWidth: 250), child: Text(product.produitName, overflow: TextOverflow.ellipsis))),
-                          // --- MODIFICATION ICI ---
-                          DataCell(Text(ecart.toString(), style: TextStyle(color: ecartColor, fontWeight: FontWeight.bold))), // Anciennement "Stock Théo."
+
+                          // Ordre des cellules
+                          DataCell(Text(ecart.toString(), style: TextStyle(color: ecartColor, fontWeight: FontWeight.bold))),
                           DataCell(Text(product.quantiteSaisie.toString())),
-                          DataCell(Text(product.quantiteInitiale.toString())), // Anciennement "Écart Qté"
-                          // --- FIN MODIFICATION ---
+                          DataCell(Text(product.quantiteInitiale.toString())),
+
                           DataCell(Text(numberFormat.format(valorisationEcart), style: TextStyle(color: ecartColor, fontWeight: FontWeight.bold))),
                         ]);
                       }).toList(),
