@@ -48,6 +48,9 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
   bool _isPrinting = false;
 
+  // NOUVEAU : Variable pour le mode de scan continu (Interrupteur)
+  bool _continuousScanMode = false;
+
   String? _notificationMessage;
   Color? _notificationColor;
   Timer? _notificationTimer;
@@ -114,11 +117,11 @@ class _VarianceScreenState extends State<VarianceScreen> {
     });
   }
 
-  // --- NOUVEAU : Logique Scan-to-Action pour Variance ---
+  // --- Logique Scan-to-Action pour Variance ---
   void _handleScanOrSearch(String query) {
     if (query.isEmpty) return;
 
-    // Recherche dans la liste des ÉCARTS (pas tout l'inventaire, car on est dans l'écran Écarts)
+    // Recherche dans la liste des ÉCARTS
     final matches = _productsWithVariance.where((p) {
       final q = query.toLowerCase();
       return p.produitCip.toLowerCase().contains(q) ||
@@ -132,7 +135,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
       // Nettoyage
       _searchController.clear();
       setState(() { _showSearchResults = false; });
-      // On ne force pas le focus ici, c'est le popup qui le gère
 
     } else if (matches.length > 1) {
       // 2. Plusieurs résultats -> Liste filtrée
@@ -148,7 +150,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
         const SnackBar(content: Text('Ce produit n\'est pas dans la liste des écarts.'), backgroundColor: Colors.red),
       );
 
-      // AMÉLIORATION 3 : Pré-sélection de la saisie pour correction rapide
+      // Pré-sélection de la saisie pour correction rapide
       _searchFocusNode.requestFocus();
       Future.delayed(const Duration(milliseconds: 50), () {
         if (mounted && _searchController.text.isNotEmpty) {
@@ -161,7 +163,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }
   }
 
-  // --- NOUVEAU : Popup de Saisie Rapide pour Variance ---
+  // --- Popup de Saisie Rapide pour Variance ---
   void _openQuickEntryDialog(Product product) {
     final quickQtyController = TextEditingController();
     // Champ vide pour nouvelle saisie
@@ -230,9 +232,17 @@ class _VarianceScreenState extends State<VarianceScreen> {
                         _applyQuickCorrection(product, qty);
                         Navigator.of(ctx).pop();
 
-                        // AMÉLIORATION 2 : Retour focus sur zone quantité (Principal)
+                        // MODIFIÉ : Gestion du focus selon l'interrupteur
                         Future.delayed(const Duration(milliseconds: 100), () {
-                          if (mounted) _quantityFocusNode.requestFocus();
+                          if (mounted) {
+                            if (_continuousScanMode) {
+                              // Si Mode Scan actif : Retour au champ de recherche pour le prochain
+                              _searchFocusNode.requestFocus();
+                            } else {
+                              // Sinon (par défaut) : Retour au champ quantité
+                              _quantityFocusNode.requestFocus();
+                            }
+                          }
                         });
 
                       } else if (key == 'DEL') {
@@ -464,26 +474,51 @@ class _VarianceScreenState extends State<VarianceScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode, // FocusNode pour la recherche
-              // MODIFIÉ : Déclenchement du Scan-to-Action
-              onSubmitted: (value) => _handleScanOrSearch(value),
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                labelText: 'Rechercher / Scanner un produit avec écart',
-                prefixIcon: const Icon(Icons.search),
-                border: const OutlineInputBorder(),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                    icon: const Icon(Icons.clear),
-                    onPressed: () {
-                      _searchController.clear();
-                      _searchFocusNode.requestFocus(); // Retour du focus après effacement
-                    }
-                )
-                    : null,
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    onSubmitted: (value) => _handleScanOrSearch(value),
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      labelText: 'Rechercher / Scanner',
+                      prefixIcon: const Icon(Icons.search),
+                      border: const OutlineInputBorder(),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            _searchFocusNode.requestFocus();
+                          }
+                      )
+                          : null,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+
+                // NOUVEAU : Interrupteur "Mode Scan"
+                Column(
+                  children: [
+                    Switch(
+                      value: _continuousScanMode,
+                      onChanged: (value) {
+                        setState(() {
+                          _continuousScanMode = value;
+                        });
+                        // Si on active le mode scan, on met tout de suite le focus sur la recherche
+                        if (value) {
+                          _searchFocusNode.requestFocus();
+                        }
+                      },
+                    ),
+                    const Text('Mode Scan', style: TextStyle(fontSize: 10)),
+                  ],
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -595,7 +630,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                   decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
                   keyboardType: TextInputType.none,
                   readOnly: true,
-                  showCursor: true, // Curseur activé
+                  showCursor: true,
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
