@@ -9,6 +9,8 @@ import 'package:prestinv/screens/inventory_list_screen.dart';
 import 'package:prestinv/screens/config_screen.dart';
 import 'package:prestinv/screens/analysis_screen.dart';
 import 'package:prestinv/utils/app_utils.dart';
+// NOUVEAU : Import du nouvel écran
+import 'package:prestinv/screens/collection_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -22,17 +24,17 @@ class HomeScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Prestige Inventaire - Accueil'),
+        title: const Text('Inventaire - Accueil'),
         automaticallyImplyLeading: false,
         actions: [
           IconButton(icon: const Icon(Icons.analytics_outlined), tooltip: 'Analyse', onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalysisScreen()))),
-          IconButton(icon: const Icon(Icons.logout), tooltip: 'Déconnexion', onPressed: () => performLogout(context)),
           IconButton(icon: const Icon(Icons.settings_outlined), tooltip: 'Configuration', onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConfigScreen()))),
+          IconButton(icon: const Icon(Icons.logout), tooltip: 'Déconnexion', onPressed: () => performLogout(context)),
+
         ],
       ),
       body: Column(
         children: [
-          // ... (Zone configuration API inchangée) ...
           Container(
             color: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -62,7 +64,7 @@ class HomeScreen extends StatelessWidget {
           const Divider(height: 1, thickness: 1),
           Expanded(
             child: Center(
-              child: Padding(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -103,20 +105,41 @@ class HomeScreen extends StatelessWidget {
 
                     const SizedBox(height: 20),
 
-                    // BOUTON 2 : SAISIE RAPIDE (NOUVEAU)
+                    // BOUTON 2 : SAISIE RAPIDE (MODE SCAN)
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         icon: const Icon(Icons.qr_code_scanner, size: 28),
                         label: const Text('SAISIE RAPIDE\n(Mode Scan)', textAlign: TextAlign.center),
                         style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange.shade800, // Couleur distincte
+                            backgroundColor: Colors.orange.shade800,
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
                         ),
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: true)),
+                          );
+                        },
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // NOUVEAU BOUTON 3 : COLLECTE DE DONNÉES
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.data_saver_on, size: 28),
+                        label: const Text('COLLECTE LIBRE\n(Mode Collecte)', textAlign: TextAlign.center),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.teal.shade700, // Couleur distincte (Vert/Teal)
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const CollectionScreen()),
                           );
                         },
                       ),
