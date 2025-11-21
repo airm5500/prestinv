@@ -346,7 +346,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
           ),
           const SizedBox(height: 20),
 
-          // CORRECTION : Nouvelle disposition pour la saisie
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -372,6 +371,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                   decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
                   keyboardType: TextInputType.none,
                   readOnly: true,
+                  showCursor: true, // <--- Ajouté ici également pour la cohérence
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),

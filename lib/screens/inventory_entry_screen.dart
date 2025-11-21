@@ -195,7 +195,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 : 'Vous avez traité le dernier produit. Voulez-vous envoyer les données au serveur ?'),
             actions: [
               TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
-              if (!provider.activeFilter.isActive) // On ne propose l'envoi que si c'est la fin de tout l'emplacement
+              if (!provider.activeFilter.isActive)
                 TextButton(
                     onPressed: () {
                       Navigator.of(ctx).pop();
@@ -310,7 +310,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  // --- Logique de recherche (filtre la liste DÉJÀ filtrée par le provider) ---
+  // --- Logique de recherche et Scan ---
+
   void _filterProducts() {
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final query = _searchController.text.toLowerCase();
@@ -335,7 +336,130 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  /// Sélection d'un produit dans la liste de recherche
+  void _handleScanOrSearch(String query) {
+    if (query.isEmpty) return;
+
+    final provider = Provider.of<EntryProvider>(context, listen: false);
+
+    final matches = provider.allProducts.where((p) {
+      final q = query.toLowerCase();
+      return p.produitCip.toLowerCase().contains(q) ||
+          p.produitName.toLowerCase().contains(q);
+    }).toList();
+
+    if (matches.length == 1) {
+      _openQuickEntryDialog(matches.first);
+
+      _searchController.clear();
+      setState(() {
+        _showSearchResults = false;
+      });
+      FocusScope.of(context).unfocus();
+
+    } else if (matches.length > 1) {
+      setState(() {
+        _filteredProducts = matches;
+        _showSearchResults = true;
+      });
+      FocusScope.of(context).unfocus();
+
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Produit non trouvé dans cet emplacement.'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  void _openQuickEntryDialog(Product product) {
+    final quickQtyController = TextEditingController();
+    // Plus de pré-remplissage ici comme demandé précédemment, champ vide.
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Saisie Rapide (Scan)', style: TextStyle(fontSize: 14, color: Colors.grey)),
+              const SizedBox(height: 4),
+              Text(product.produitName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text('CIP: ${product.produitCip}', style: const TextStyle(fontSize: 14)),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: quickQtyController,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.accent),
+                  decoration: const InputDecoration(
+                    labelText: 'Quantité',
+                    border: OutlineInputBorder(),
+                  ),
+                  readOnly: true,
+                  autofocus: true,
+                  showCursor: true, // Le curseur est bien présent sur le popup
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 280,
+                  child: NumericKeyboard(
+                    onKeyPressed: (key) {
+                      if (key == 'OK') {
+                        final int qty = int.tryParse(quickQtyController.text) ?? 0;
+                        _saveScannedQuantity(product, qty);
+                        Navigator.of(ctx).pop();
+                      } else if (key == 'DEL') {
+                        if (quickQtyController.text.isNotEmpty) {
+                          quickQtyController.text = quickQtyController.text.substring(0, quickQtyController.text.length - 1);
+                        }
+                      } else {
+                        quickQtyController.text += key;
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Annuler', style: TextStyle(color: Colors.red))
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _saveScannedQuantity(Product product, int quantity) async {
+    final provider = Provider.of<EntryProvider>(context, listen: false);
+    final appConfig = Provider.of<AppConfig>(context, listen: false);
+
+    product.quantiteSaisie = quantity;
+    product.isSynced = false;
+
+    await provider.updateQuantity(provider.currentProduct?.quantiteSaisie.toString() ?? "0");
+
+    if (mounted) {
+      _showNotification('Saisie enregistrée : ${product.produitName}', Colors.green);
+    }
+
+    if (appConfig.sendMode == SendMode.direct) {
+      try {
+        await _apiService.updateProductQuantity(product.id, quantity);
+      } catch (e) {
+        // Erreur silencieuse
+      }
+    }
+  }
+
   void _selectProduct(Product product) {
     final provider = Provider.of<EntryProvider>(context, listen: false);
     provider.jumpToProduct(product);
@@ -349,7 +473,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  /// Affiche le popup de création de filtre
   void _showFilterDialog(BuildContext context, EntryProvider provider) {
     final currentFilter = provider.activeFilter;
     final totalProducts = provider.totalProductsInRayon;
@@ -445,7 +568,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       int to = int.tryParse(_toNumController.text) ?? 0;
                       if (from <= 0) from = 1;
                       if (to > totalProducts) to = totalProducts;
-                      if (to == 0) to = totalProducts; // Si "À" est vide, prendre le total
+                      if (to == 0) to = totalProducts;
                       if (from > to) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erreur : "De" doit être inférieur à "À"'), backgroundColor: Colors.red));
                         return;
@@ -559,10 +682,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       Expanded(
                         child: TextField(
                           controller: _searchController,
+                          onSubmitted: (value) => _handleScanOrSearch(value),
+                          textInputAction: TextInputAction.search,
                           decoration: InputDecoration(
-                            labelText: 'Rechercher',
-                            hintText: 'CIP ou Nom...',
-                            prefixIcon: const Icon(Icons.search, size: 20),
+                            labelText: 'Rechercher / Scanner',
+                            hintText: 'CIP, Nom ou Scan...',
+                            prefixIcon: const Icon(Icons.qr_code_scanner, size: 20),
                             isDense: true,
                             border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
@@ -673,17 +798,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
-  // lib/screens/inventory_entry_screen.dart
-
   Widget buildProductView(EntryProvider provider) {
     final Product product = provider.currentProduct!;
     const textFieldBorderColor = Colors.deepPurple;
 
-    // --- LOGIQUE ADAPTATIVE ---
     final screenHeight = MediaQuery.of(context).size.height;
     final bool isSmallScreen = screenHeight < 700;
 
-    // Tailles pour un grand écran (par défaut)
     double titleFontSize = 16;
     double priceFontSize = 16;
     double stockFontSize = 16;
@@ -692,7 +813,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     double buttonSize = 64;
     double buttonIconSize = 30;
 
-    // Ajustement si l'écran est petit
     if (isSmallScreen) {
       titleFontSize = 14;
       priceFontSize = 13;
@@ -702,21 +822,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       buttonSize = 56;
       buttonIconSize = 28;
     }
-    // --- FIN DE LA LOGIQUE ADAPTATIVE ---
 
-    // --- NOUVELLE LOGIQUE DE HAUTEUR FIXE ---
-    // Calcule une hauteur fixe approximative pour 2 lignes de titre
-    // (basé sur la taille de la police * un facteur de hauteur de ligne * 2 lignes)
     final double twoLineTitleHeight = (titleFontSize * 1.4) * 2;
-    // --- FIN ---
-
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
       children: [
         const SizedBox(height: 8),
 
-        // Compteur avec badge (inchangé)
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -725,17 +838,20 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               '${provider.currentProductIndex + 1} / ${provider.totalProductsInRayon}',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: stockFontSize),
             ),
+
             if (provider.activeFilter.isActive)
               Flexible(
                 child: Builder(
                     builder: (context) {
                       String filterDetails = '';
                       final filter = provider.activeFilter;
+
                       if (filter.type == FilterType.numeric) {
                         filterDetails = 'N° ${filter.from} à ${filter.to}';
                       } else if (filter.type == FilterType.alphabetic) {
                         filterDetails = 'De ${filter.from} à ${filter.to}';
                       }
+
                       return Container(
                         margin: const EdgeInsets.only(left: 8),
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -763,24 +879,19 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
         const SizedBox(height: 8),
 
-        // --- MODIFICATION ICI ---
-        // On remplace 'Align' par un 'Container' avec une hauteur fixe
-        // pour réserver l'espace de 2 lignes et empêcher le "sautillement".
         Container(
-          height: twoLineTitleHeight, // Hauteur fixe
-          alignment: Alignment.centerLeft, // Remplace le widget Align
+          height: twoLineTitleHeight,
+          alignment: Alignment.centerLeft,
           child: Text(
             '${product.produitCip} - ${product.produitName}',
             style: TextStyle(fontSize: titleFontSize, fontWeight: FontWeight.bold, color: AppColors.primary),
-            maxLines: 2, // Garde la limite à 2 lignes
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        // --- FIN DE LA MODIFICATION ---
 
         const SizedBox(height: 12),
 
-        // Reste du code (inchangé)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0),
           child: Row(
@@ -840,6 +951,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 ),
                 keyboardType: TextInputType.none,
                 readOnly: true,
+                showCursor: true, // Le curseur est aussi activé sur le champ principal
                 textAlign: TextAlign.center,
                 cursorColor: textFieldBorderColor,
                 style: TextStyle(fontSize: quantityFontSize, fontWeight: FontWeight.bold, color: textFieldBorderColor),
