@@ -49,6 +49,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   // Variables pour la recherche
   final _searchController = TextEditingController();
+  // NOUVEAU : FocusNode pour le champ de recherche
+  final _searchFocusNode = FocusNode();
+
   List<Product> _filteredProducts = [];
   bool _showSearchResults = false;
 
@@ -79,6 +82,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     _notificationTimer?.cancel();
     _sendReminderTimer?.cancel();
     _searchController.dispose();
+    _searchFocusNode.dispose(); // Ne pas oublier de disposer le FocusNode
     super.dispose();
   }
 
@@ -381,12 +385,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   // Logique SCAN-TO-ACTION Globale
+  // lib/screens/inventory_entry_screen.dart
+
   void _handleScanOrSearch(String query) {
     if (query.isEmpty) return;
 
     final provider = Provider.of<EntryProvider>(context, listen: false);
 
-    // Recherche dans TOUS les produits (ignorer filtre)
+    // Recherche dans TOUS les produits
     final matches = provider.allProducts.where((p) {
       final q = query.toLowerCase();
       return p.produitCip.toLowerCase().contains(q) ||
@@ -394,7 +400,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }).toList();
 
     if (matches.length == 1) {
+      // SUCCÈS : Produit unique
       _openQuickEntryDialog(matches.first);
+
       _searchController.clear();
       setState(() {
         _showSearchResults = false;
@@ -402,6 +410,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       FocusScope.of(context).unfocus();
 
     } else if (matches.length > 1) {
+      // PLUSIEURS RÉSULTATS
       setState(() {
         _filteredProducts = matches;
         _showSearchResults = true;
@@ -409,9 +418,26 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       FocusScope.of(context).unfocus();
 
     } else {
+      // ÉCHEC : Aucun résultat
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Produit non trouvé dans cet emplacement.'), backgroundColor: Colors.red),
       );
+
+      // --- MODIFICATION ICI ---
+      // 1. On redonne le focus au champ de recherche
+      _searchFocusNode.requestFocus();
+
+      // 2. On sélectionne tout le texte existant (le "mauvais" code)
+      // Le délai est parfois nécessaire pour que le clavier/focus soit bien actif avant la sélection
+      Future.delayed(const Duration(milliseconds: 50), () {
+        if (mounted && _searchController.text.isNotEmpty) {
+          _searchController.selection = TextSelection(
+            baseOffset: 0,
+            extentOffset: _searchController.text.length,
+          );
+        }
+      });
+      // ------------------------
     }
   }
 
@@ -481,6 +507,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                         final int qty = int.tryParse(quickQtyController.text) ?? 0;
                         _saveScannedQuantity(product, qty);
                         Navigator.of(ctx).pop();
+                        // AMELIORATION 2 : Focus retour automatique sur la recherche
+                        if (widget.isQuickMode) {
+                          // Petit délai pour s'assurer que le dialog est bien fermé
+                          Future.delayed(const Duration(milliseconds: 100), () {
+                            if (mounted) _searchFocusNode.requestFocus();
+                          });
+                        }
                       } else if (key == 'DEL') {
                         if (quickQtyController.text.isNotEmpty) {
                           quickQtyController.text = quickQtyController.text.substring(0, quickQtyController.text.length - 1);
@@ -604,6 +637,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
+
                     RadioListTile<FilterType>(
                       title: const Text('Intervalle alphabétique'),
                       value: FilterType.alphabetic,
@@ -764,6 +798,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       Expanded(
                         child: TextField(
                           controller: _searchController,
+                          // Attacher le FocusNode
+                          focusNode: _searchFocusNode,
                           onSubmitted: (value) => _handleScanOrSearch(value),
                           textInputAction: TextInputAction.search,
                           // Focus auto sur la recherche en mode Rapide
@@ -780,29 +816,31 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                               icon: const Icon(Icons.clear, size: 20),
                               onPressed: () {
                                 _searchController.clear();
-                                FocusScope.of(context).unfocus();
+                                // AMELIORATION 1 : Retour du focus après effacement
+                                _searchFocusNode.requestFocus();
                               },
                             )
                                 : null,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
-
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
-                        onPressed: provider.selectedRayon == null ? null : () => _showFilterDialog(context, provider),
-                        child: const Icon(Icons.filter_alt_outlined),
-                      ),
-                      const SizedBox(width: 8),
-
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
-                        onPressed: (provider.selectedRayon == null || !provider.activeFilter.isActive)
-                            ? null
-                            : () => provider.applyFilter(ProductFilter(type: FilterType.none)),
-                        child: const Icon(Icons.delete_outline),
-                      ),
+                      // AMELIORATION 3 : Masquer les filtres en mode rapide
+                      if (!widget.isQuickMode) ...[
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
+                          onPressed: provider.selectedRayon == null ? null : () => _showFilterDialog(context, provider),
+                          child: const Icon(Icons.filter_alt_outlined),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
+                          onPressed: (provider.selectedRayon == null || !provider.activeFilter.isActive)
+                              ? null
+                              : () => provider.applyFilter(ProductFilter(type: FilterType.none)),
+                          child: const Icon(Icons.delete_outline),
+                        ),
+                      ],
                     ],
                   ),
                 ),
