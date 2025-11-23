@@ -48,8 +48,11 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
   bool _isPrinting = false;
 
-  // NOUVEAU : Variable pour le mode de scan continu (Interrupteur)
+  // Variable pour le mode de scan continu (Interrupteur)
   bool _continuousScanMode = false;
+
+  // AJOUT : État pour savoir si on est en train de chercher (clavier Android ouvert)
+  bool _isSearching = false;
 
   String? _notificationMessage;
   Color? _notificationColor;
@@ -65,6 +68,13 @@ class _VarianceScreenState extends State<VarianceScreen> {
     );
     _fetchAndSetupProducts();
     _searchController.addListener(_filterProducts);
+
+    // AJOUT : Écouteur pour masquer le clavier numérique lors de la recherche
+    _searchFocusNode.addListener(() {
+      setState(() {
+        _isSearching = _searchFocusNode.hasFocus;
+      });
+    });
   }
 
   @override
@@ -135,6 +145,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
       // Nettoyage
       _searchController.clear();
       setState(() { _showSearchResults = false; });
+      // On ne force pas le focus ici, c'est le popup qui le gère
 
     } else if (matches.length > 1) {
       // 2. Plusieurs résultats -> Liste filtrée
@@ -142,7 +153,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
         _filteredProducts = matches;
         _showSearchResults = true;
       });
-      FocusScope.of(context).unfocus(); // On laisse l'utilisateur choisir
+      // FocusScope.of(context).unfocus(); // On garde le focus recherche pour voir les résultats
 
     } else {
       // 3. Aucun résultat (Erreur)
@@ -232,7 +243,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                         _applyQuickCorrection(product, qty);
                         Navigator.of(ctx).pop();
 
-                        // MODIFIÉ : Gestion du focus selon l'interrupteur
+                        // Gestion du focus selon l'interrupteur
                         Future.delayed(const Duration(milliseconds: 100), () {
                           if (mounted) {
                             if (_continuousScanMode) {
@@ -307,16 +318,15 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 
   void _selectProduct(Product product) {
-    final index = _productsWithVariance.indexWhere((p) => p.id == product.id);
-    if(index != -1) {
-      _updateCurrentProduct(index);
-      setState(() {
-        _searchController.clear();
-        _showSearchResults = false;
-        // Focus sur la quantité quand on sélectionne manuellement
-        FocusScope.of(context).requestFocus(_quantityFocusNode);
-      });
-    }
+    // MODIFIÉ : Ouvre le popup de saisie au lieu de naviguer
+    _openQuickEntryDialog(product);
+
+    _searchController.clear();
+    setState(() {
+      _showSearchResults = false;
+    });
+    // On laisse le popup gérer le focus à la fermeture
+    FocusScope.of(context).unfocus();
   }
 
   void _previousProduct() {
@@ -483,7 +493,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                     onSubmitted: (value) => _handleScanOrSearch(value),
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
-                      labelText: 'Rechercher / Scanner',
+                      labelText: 'Rechercher / Scanner un produit avec écart',
                       prefixIcon: const Icon(Icons.search),
                       border: const OutlineInputBorder(),
                       suffixIcon: _searchController.text.isNotEmpty
@@ -500,7 +510,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                 ),
                 const SizedBox(width: 8),
 
-                // NOUVEAU : Interrupteur "Mode Scan"
+                // Interrupteur "Mode Scan"
                 Column(
                   children: [
                     Switch(
@@ -509,7 +519,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
                         setState(() {
                           _continuousScanMode = value;
                         });
-                        // Si on active le mode scan, on met tout de suite le focus sur la recherche
                         if (value) {
                           _searchFocusNode.requestFocus();
                         }
@@ -533,18 +542,36 @@ class _VarianceScreenState extends State<VarianceScreen> {
                         ? const Center(child: Text("Ce produit ne fait pas partie des écarts."))
                         : ListView.builder(
                       itemCount: _filteredProducts.length,
-                      itemBuilder: (context, index) => ListTile(
-                        title: Text(_filteredProducts[index].produitName),
-                        subtitle: Text('CIP: ${_filteredProducts[index].produitCip}'),
-                        onTap: () => _selectProduct(_filteredProducts[index]),
-                      ),
+                      itemBuilder: (context, index) {
+                        final product = _filteredProducts[index];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          child: ListTile(
+                            title: Text(product.produitName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                            // MODIFIÉ : Affichage du Prix
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('CIP: ${product.produitCip}'),
+                                Text(
+                                    'Prix Vente: ${product.produitPrixUni.toStringAsFixed(0)} F',
+                                    style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)
+                                ),
+                              ],
+                            ),
+                            onTap: () => _selectProduct(_filteredProducts[index]),
+                          ),
+                        );
+                      },
                     ),
                   ),
               ],
             ),
           ),
           _buildNotificationArea(),
-          if (!_showSearchResults) NumericKeyboard(onKeyPressed: _onKeyPressed),
+          // MODIFIÉ : Masquer le clavier numérique si on recherche
+          if (!_isSearching && !_showSearchResults)
+            NumericKeyboard(onKeyPressed: _onKeyPressed),
         ],
       ),
     );
@@ -630,7 +657,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                   decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
                   keyboardType: TextInputType.none,
                   readOnly: true,
-                  showCursor: true,
+                  showCursor: true, // Le curseur est bien présent
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),

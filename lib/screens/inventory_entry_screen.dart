@@ -50,6 +50,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   // Variables pour la recherche
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
+
+  // État pour savoir si on est en train de chercher (clavier Android ouvert)
+  bool _isSearching = false;
+
   List<Product> _filteredProducts = [];
   bool _showSearchResults = false;
 
@@ -63,6 +67,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
 
     _searchController.addListener(_filterProducts);
+
+    // Écouteur pour détecter quand le champ recherche a le focus
+    _searchFocusNode.addListener(() {
+      setState(() {
+        _isSearching = _searchFocusNode.hasFocus;
+      });
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -442,7 +453,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Saisie Rapide (Scan)', style: TextStyle(fontSize: 14, color: Colors.grey)),
+              const Text('Saisie Rapide', style: TextStyle(fontSize: 14, color: Colors.grey)),
               const SizedBox(height: 4),
               Text(product.produitName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               Text('CIP: ${product.produitCip}', style: const TextStyle(fontSize: 14)),
@@ -539,6 +550,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     product.quantiteSaisie = quantity;
     product.isSynced = false;
 
+    // Hack pour forcer la sauvegarde globale
     await provider.updateQuantity(provider.currentProduct?.quantiteSaisie.toString() ?? "0");
 
     if (mounted) {
@@ -555,25 +567,15 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   void _selectProduct(Product product) {
-    final provider = Provider.of<EntryProvider>(context, listen: false);
+    // MODIFIÉ : On ouvre TOUJOURS le popup pour ne pas perdre le contexte
+    _openQuickEntryDialog(product);
 
-    if (widget.isQuickMode) {
-      _openQuickEntryDialog(product);
-      _searchController.clear();
-      setState(() {
-        _showSearchResults = false;
-      });
-      FocusScope.of(context).unfocus();
-    } else {
-      provider.jumpToProduct(product);
-      if (mounted) {
-        setState(() {
-          _searchController.clear();
-          _showSearchResults = false;
-          FocusScope.of(context).unfocus();
-        });
-      }
-    }
+    _searchController.clear();
+    setState(() {
+      _showSearchResults = false;
+    });
+    // On laisse le popup gérer le focus à la fermeture
+    FocusScope.of(context).unfocus();
   }
 
   void _showFilterDialog(BuildContext context, EntryProvider provider) {
@@ -887,7 +889,18 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                 margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                 child: ListTile(
                                   title: Text(product.produitName, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  subtitle: Text('CIP: ${product.produitCip} / Stock Théo: ${product.quantiteInitiale}'),
+                                  // MODIFIÉ : Ajout du Prix dans les résultats de recherche
+                                  subtitle: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('CIP: ${product.produitCip}'),
+                                      Text(
+                                          'Prix Vente: ${product.produitPrixUni.toStringAsFixed(0)} F',
+                                          style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)
+                                      ),
+                                    ],
+                                  ),
+                                  // Clic sur la liste = Popup Saisie (Uniformisation)
                                   onTap: () => _selectProduct(product),
                                 ),
                               );
@@ -898,8 +911,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   ),
                 ),
 
-                // Le clavier principal n'est affiché qu'en mode Normal
-                if (!widget.isQuickMode) NumericKeyboard(onKeyPressed: _onKeyPressed),
+                // Le clavier principal n'est affiché qu'en mode Normal ET si on ne cherche pas
+                if (!widget.isQuickMode && !_isSearching)
+                  NumericKeyboard(onKeyPressed: _onKeyPressed),
               ],
             );
           },
