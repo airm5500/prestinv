@@ -79,7 +79,15 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       if (mounted) {
         final provider = Provider.of<EntryProvider>(context, listen: false);
         provider.reset();
-        provider.fetchRayons(_apiService, widget.inventoryId);
+
+        // Chargement initial selon le mode
+        if (widget.isQuickMode) {
+          // Mode Rapide : Chargement Global par défaut
+          provider.loadGlobalInventory(_apiService, widget.inventoryId);
+        } else {
+          // Mode Normal : Chargement des rayons (l'utilisateur devra choisir)
+          provider.fetchRayons(_apiService, widget.inventoryId);
+        }
       }
     });
   }
@@ -113,16 +121,24 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
     try {
       final provider = Provider.of<EntryProvider>(context, listen: false);
-      // On charge les données fraîches
-      final products = await _apiService.fetchProducts(widget.inventoryId, provider.selectedRayon!.id);
+
+      String targetRayonId = provider.selectedRayon?.id ?? "";
+      String targetRayonName = provider.selectedRayon?.libelle ?? "Global";
+
+      List<Product> products;
+      if (targetRayonId.isNotEmpty) {
+        products = await _apiService.fetchProducts(widget.inventoryId, targetRayonId);
+      } else {
+        products = provider.allProducts;
+      }
 
       if (!mounted) return;
       Navigator.of(context).pop(); // Fermer le loader
 
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecapScreen(
         inventoryId: widget.inventoryId,
-        rayonId: provider.selectedRayon!.id,
-        rayonName: provider.selectedRayon!.libelle,
+        rayonId: targetRayonId,
+        rayonName: targetRayonName,
         preloadedProducts: products,
       )));
     } catch (e) {
@@ -339,31 +355,44 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   void _onLocationChanged(Rayon? newValue) async {
-    if (newValue == null) return;
     final provider = Provider.of<EntryProvider>(context, listen: false);
-    if (newValue.id == provider.selectedRayon?.id) return;
-    if (provider.hasUnsyncedData) {
-      final bool? confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Changer d\'emplacement ?'),
-          content: const Text('Les données de l\'emplacement actuel seront envoyées au serveur avant de changer.'),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),
-            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Continuer')),
-          ],
-        ),
-      );
-      if (confirmed != true) return;
-      await _sendDataToServer();
-    }
-    if (mounted) {
-      _sendReminderTimer?.cancel();
-      _searchController.clear();
-      _showSearchResults = false;
-      provider.fetchProducts(_apiService, widget.inventoryId, newValue.id).then((_) {
-        _resetSendReminderTimer();
-      });
+
+    if (newValue?.id != provider.selectedRayon?.id) {
+      if (provider.hasUnsyncedData) {
+        final bool? confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Changer d\'emplacement ?'),
+            content: const Text('Les données actuelles seront envoyées au serveur avant de changer.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),
+              TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Continuer')),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+        await _sendDataToServer();
+      }
+
+      if (mounted) {
+        _sendReminderTimer?.cancel();
+        _searchController.clear();
+        _showSearchResults = false;
+
+        if (newValue == null) {
+          // Choix "TOUS"
+          provider.loadGlobalInventory(_apiService, widget.inventoryId).then((_) {
+            _resetSendReminderTimer();
+            if (mounted) _searchFocusNode.requestFocus();
+          });
+        } else {
+          // Choix Rayon spécifique
+          provider.fetchProducts(_apiService, widget.inventoryId, newValue.id).then((_) {
+            _resetSendReminderTimer();
+            if (mounted) _searchFocusNode.requestFocus();
+          });
+        }
+      }
     }
   }
 
@@ -393,13 +422,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  // Logique SCAN-TO-ACTION Globale
   void _handleScanOrSearch(String query) {
     if (query.isEmpty) return;
 
     final provider = Provider.of<EntryProvider>(context, listen: false);
 
-    // Recherche dans TOUS les produits (ignorer filtre)
     final matches = provider.allProducts.where((p) {
       final q = query.toLowerCase();
       return p.produitCip.toLowerCase().contains(q) ||
@@ -427,7 +454,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         const SnackBar(content: Text('Produit non trouvé dans cet emplacement.'), backgroundColor: Colors.red),
       );
 
-      // Retour du focus et sélection du texte erroné
       _searchFocusNode.requestFocus();
       Future.delayed(const Duration(milliseconds: 50), () {
         if (mounted && _searchController.text.isNotEmpty) {
@@ -440,10 +466,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  // Popup de Saisie Rapide (Scan)
   void _openQuickEntryDialog(Product product) {
     final quickQtyController = TextEditingController();
-    // Champ vide (pas de pré-remplissage)
 
     showDialog(
       context: context,
@@ -453,12 +477,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Saisie Rapide', style: TextStyle(fontSize: 14, color: Colors.grey)),
+              const Text('Saisie Rapide (Scan)', style: TextStyle(fontSize: 14, color: Colors.grey)),
               const SizedBox(height: 4),
               Text(product.produitName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               Text('CIP: ${product.produitCip}', style: const TextStyle(fontSize: 14)),
               const Divider(),
-              // Affichage des infos détaillées
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -495,7 +518,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   ),
                   readOnly: true,
                   autofocus: true,
-                  showCursor: true, // Curseur visible sur le popup
+                  showCursor: true,
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -507,14 +530,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                         _saveScannedQuantity(product, qty);
                         Navigator.of(ctx).pop();
 
-                        // GESTION DU RETOUR DE FOCUS SELON LE MODE
                         if (widget.isQuickMode) {
-                          // Mode Rapide : Focus sur la recherche pour le prochain scan
                           Future.delayed(const Duration(milliseconds: 100), () {
                             if (mounted) _searchFocusNode.requestFocus();
                           });
                         } else {
-                          // Mode Normal : Focus sur le champ de quantité principal
                           Future.delayed(const Duration(milliseconds: 100), () {
                             if (mounted) _quantityFocusNode.requestFocus();
                           });
@@ -550,7 +570,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     product.quantiteSaisie = quantity;
     product.isSynced = false;
 
-    // Hack pour forcer la sauvegarde globale
     await provider.updateQuantity(provider.currentProduct?.quantiteSaisie.toString() ?? "0");
 
     if (mounted) {
@@ -567,15 +586,108 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   void _selectProduct(Product product) {
-    // MODIFIÉ : On ouvre TOUJOURS le popup pour ne pas perdre le contexte
     _openQuickEntryDialog(product);
 
     _searchController.clear();
     setState(() {
       _showSearchResults = false;
     });
-    // On laisse le popup gérer le focus à la fermeture
     FocusScope.of(context).unfocus();
+  }
+
+  // --- NOUVEAU : Boîte de dialogue de sélection d'emplacement avec Design Amélioré ---
+  void _showLocationSelector(BuildContext context, EntryProvider provider) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        List<Rayon> filteredRayons = provider.rayons;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Choisir un emplacement'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Rechercher un rayon',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          // La recherche continue de fonctionner sur le code et le libellé (displayName)
+                          filteredRayons = provider.rayons
+                              .where((r) => r.displayName.toLowerCase().contains(value.toLowerCase()))
+                              .toList();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: filteredRayons.isEmpty
+                          ? const Center(child: Text("Aucun emplacement trouvé"))
+                          : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: filteredRayons.length,
+                        itemBuilder: (ctx, index) {
+                          final rayon = filteredRayons[index];
+                          final isSelected = rayon.id == provider.selectedRayon?.id;
+                          return ListTile(
+                            // AMÉLIORATION DESIGN : Icône + Sous-titre
+                            leading: CircleAvatar(
+                              backgroundColor: isSelected ? AppColors.accent.withOpacity(0.1) : AppColors.primary.withOpacity(0.1),
+                              child: Icon(Icons.location_on, color: isSelected ? AppColors.accent : AppColors.primary, size: 20),
+                            ),
+                            title: Text(
+                              rayon.libelle, // Affichage principal = Nom
+                              style: TextStyle(
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                color: isSelected ? AppColors.accent : Colors.black,
+                              ),
+                            ),
+                            subtitle: Text(
+                              rayon.code, // Affichage secondaire = Code
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            ),
+                            trailing: isSelected ? const Icon(Icons.check, color: AppColors.accent) : null,
+                            onTap: () {
+                              Navigator.of(ctx).pop();
+                              _onLocationChanged(rayon);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                    if (widget.isQuickMode)
+                      ListTile(
+                        leading: const CircleAvatar(
+                          backgroundColor: Color(0xFFE8F5E9), // Vert très clair
+                          child: Icon(Icons.public, color: Colors.green, size: 20),
+                        ),
+                        title: const Text("TOUS LES EMPLACEMENTS", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                        subtitle: const Text("Recherche globale", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          _onLocationChanged(null);
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Annuler'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _showFilterDialog(BuildContext context, EntryProvider provider) {
@@ -764,22 +876,45 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
             return Column(
               children: [
+                // Sélecteur d'emplacement (Style Dropdown mais avec recherche)
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
                   decoration: BoxDecoration(
                     color: AppColors.primary.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(8.0),
+                    border: Border.all(color: Colors.grey.shade300),
                   ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<Rayon>(
-                      isExpanded: true,
-                      hint: const Text('Sélectionner un emplacement'),
-                      value: provider.selectedRayon,
-                      icon: const Icon(Icons.touch_app_outlined, color: AppColors.primary),
-                      style: const TextStyle(color: AppColors.primary, fontSize: 16, fontWeight: FontWeight.bold),
-                      onChanged: _onLocationChanged,
-                      items: provider.rayons.map<DropdownMenuItem<Rayon>>((Rayon rayon) => DropdownMenuItem<Rayon>(value: rayon, child: Text(rayon.displayName))).toList(),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8.0),
+                      onTap: () => _showLocationSelector(context, provider),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0), // Hauteur confortable
+                        child: Row(
+                          children: [
+                            const Icon(Icons.touch_app_outlined, color: AppColors.primary),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                // MODIFIÉ : Affichage du nom uniquement
+                                provider.isGlobalMode
+                                    ? '🌍 TOUS LES EMPLACEMENTS'
+                                    : (provider.selectedRayon?.libelle ?? 'Sélectionner un emplacement'),
+                                style: TextStyle(
+                                  color: (provider.selectedRayon == null && !provider.isGlobalMode)
+                                      ? Colors.grey.shade700
+                                      : AppColors.primary,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const Icon(Icons.arrow_drop_down, color: AppColors.primary),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -889,18 +1024,17 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                 margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                 child: ListTile(
                                   title: Text(product.produitName, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  // MODIFIÉ : Ajout du Prix dans les résultats de recherche
                                   subtitle: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('CIP: ${product.produitCip}'),
+                                      Text('CIP: ${product.produitCip} / Stock Théo: ${product.quantiteInitiale}'),
+                                      // AJOUT : Affichage du Prix dans la recherche
                                       Text(
                                           'Prix Vente: ${product.produitPrixUni.toStringAsFixed(0)} F',
                                           style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)
                                       ),
                                     ],
                                   ),
-                                  // Clic sur la liste = Popup Saisie (Uniformisation)
                                   onTap: () => _selectProduct(product),
                                 ),
                               );
