@@ -10,6 +10,9 @@ class Product {
   int quantiteSaisie;
   bool isSynced;
 
+  // NOUVEAU : Pour stocker le nom de l'emplacement (utile en mode Global)
+  String? locationLabel;
+
   Product({
     required this.id,
     required this.produitCip,
@@ -19,9 +22,9 @@ class Product {
     required this.quantiteInitiale,
     required this.quantiteSaisie,
     this.isSynced = true,
+    this.locationLabel,
   });
 
-  // Constructeur pour créer un Product depuis un Map (JSON)
   factory Product.fromJson(Map<String, dynamic> json) {
     return Product(
       id: json['id'],
@@ -31,12 +34,11 @@ class Product {
       produitPrixUni: (json['produitPrixUni'] as num).toDouble(),
       quantiteInitiale: json['quantiteInitiale'],
       quantiteSaisie: json['quantiteSaisie'],
-      // On ajoute 'isSynced' pour la persistance locale
       isSynced: json['isSynced'] ?? true,
+      locationLabel: json['locationLabel'], // Récupération si sauvegardé
     );
   }
 
-  // NOUVELLE MÉTHODE: Convertit un Product en Map (JSON) pour le stockage
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -47,6 +49,7 @@ class Product {
       'quantiteInitiale': quantiteInitiale,
       'quantiteSaisie': quantiteSaisie,
       'isSynced': isSynced,
+      'locationLabel': locationLabel, // Sauvegarde
     };
   }
 }

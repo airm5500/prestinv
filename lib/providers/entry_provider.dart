@@ -14,9 +14,6 @@ class EntryProvider with ChangeNotifier {
   bool _isLoading = false;
   String? _error;
 
-  // NOUVEAU : Indicateur de mode global
-  bool _isGlobalMode = false;
-
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
 
@@ -27,15 +24,13 @@ class EntryProvider with ChangeNotifier {
 
   bool _hasPendingSession = false;
 
-  // --- Getters ---
   List<Rayon> get rayons => _rayons;
   Rayon? get selectedRayon => _selectedRayon;
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasPendingSession => _hasPendingSession;
-
-  // Getter pour l'UI
   bool get isGlobalMode => _isGlobalMode;
+  bool _isGlobalMode = false;
 
   ProductFilter get activeFilter => _activeFilter;
   List<Product> get products => _filteredProducts;
@@ -50,7 +45,7 @@ class EntryProvider with ChangeNotifier {
 
   bool get hasUnsyncedData => _allProducts.any((p) => !p.isSynced);
 
-  // --- PERSISTANCE ---
+  // ... (Méthodes de persistance _saveUnsyncedData, etc. INCHANGÉES) ...
   Future<void> _saveUnsyncedData() async {
     if (_selectedRayon == null) return;
     final prefs = await SharedPreferences.getInstance();
@@ -68,18 +63,12 @@ class EntryProvider with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final key = 'unsynced_data_$rayonId';
     final savedDataString = prefs.getString(key);
-    if (savedDataString == null) {
-      _hasPendingSession = false;
-      return apiProducts;
-    }
+    if (savedDataString == null) { _hasPendingSession = false; return apiProducts; }
     final savedProductsData = json.decode(savedDataString) as List;
     final savedProducts = savedProductsData.map((data) => Product.fromJson(data)).toList();
-    if (savedProducts.isEmpty) {
-      _hasPendingSession = false;
-      return apiProducts;
-    }
+    if (savedProducts.isEmpty) { _hasPendingSession = false; return apiProducts; }
     _hasPendingSession = true;
-    final mergedProducts = apiProducts.map((apiProduct) {
+    return apiProducts.map((apiProduct) {
       try {
         final savedVersion = savedProducts.firstWhere((p) => p.id == apiProduct.id);
         apiProduct.quantiteSaisie = savedVersion.quantiteSaisie;
@@ -87,7 +76,6 @@ class EntryProvider with ChangeNotifier {
       } catch (e) {}
       return apiProduct;
     }).toList();
-    return mergedProducts;
   }
 
   void _saveCurrentIndex() async {
@@ -110,8 +98,10 @@ class EntryProvider with ChangeNotifier {
     final rawJson = prefs.getString('filter_$rayonId') ?? '';
     return ProductFilter.fromRawJson(rawJson);
   }
+  // ... (Fin méthodes persistance) ...
 
-  // --- LOGIQUE DE FILTRAGE ---
+
+  // ... (Logique de filtrage INCHANGÉE) ...
   Future<void> applyFilter(ProductFilter newFilter) async {
     _activeFilter = newFilter;
     await _saveFilter();
@@ -153,8 +143,8 @@ class EntryProvider with ChangeNotifier {
         break;
     }
   }
+  // ... (Fin logique filtrage) ...
 
-  // --- MÉTHODES PUBLIQUES ---
   void reset() {
     _rayons = [];
     _allProducts = [];
@@ -164,7 +154,7 @@ class EntryProvider with ChangeNotifier {
     _error = null;
     _hasPendingSession = false;
     _activeFilter = ProductFilter();
-    _isGlobalMode = false; // Reset mode
+    _isGlobalMode = false;
     notifyListeners();
   }
 
@@ -187,12 +177,9 @@ class EntryProvider with ChangeNotifier {
   Future<void> fetchProducts(ApiService api, String inventoryId, String rayonId) async {
     _isLoading = true;
     _error = null;
-    // MODIFIÉ : On désactive le mode global quand on charge un rayon précis
     _isGlobalMode = false;
-
     _selectedRayon = _rayons.firstWhere((r) => r.id == rayonId, orElse: () => Rayon(id: rayonId, code: '', libelle: 'Inconnu'));
     notifyListeners();
-
     try {
       final apiProducts = await api.fetchProducts(inventoryId, rayonId);
       _allProducts = await _loadAndMergeUnsyncedData(rayonId, apiProducts);
@@ -211,48 +198,52 @@ class EntryProvider with ChangeNotifier {
   Future<void> loadGlobalInventory(ApiService api, String inventoryId) async {
     _isLoading = true;
     _error = null;
-    // MODIFIÉ : On active le mode global
     _isGlobalMode = true;
-
     _allProducts = [];
     _filteredProducts = [];
     notifyListeners();
-
     try {
       final rayons = await api.fetchRayons(inventoryId);
       _rayons = rayons;
-
-      if (rayons.isEmpty) {
-        _isLoading = false;
-        notifyListeners();
-        return;
-      }
+      if (rayons.isEmpty) { _isLoading = false; notifyListeners(); return; }
 
       final List<Future<List<Product>>> downloadTasks = rayons.map((rayon) {
         return api.fetchProducts(inventoryId, rayon.id).then((products) async {
+          // MODIFIÉ : On injecte le nom du rayon dans chaque produit
+          for (var p in products) {
+            p.locationLabel = rayon.libelle;
+          }
           return await _loadAndMergeUnsyncedData(rayon.id, products);
         });
       }).toList();
 
       final List<List<Product>> results = await Future.wait(downloadTasks);
-
       for (var list in results) {
         _allProducts.addAll(list);
       }
 
       _filteredProducts = List.from(_allProducts);
-
-      // On garde un rayon sélectionné (le premier) pour que la sauvegarde interne fonctionne
-      // mais _isGlobalMode dira à l'UI d'afficher "Tous les emplacements"
-      if (rayons.isNotEmpty) {
-        _selectedRayon = rayons.first;
-      }
+      if (rayons.isNotEmpty) { _selectedRayon = rayons.first; }
 
     } catch (e) {
       _error = "Erreur chargement global : $e";
     }
-
     _isLoading = false;
+    notifyListeners();
+  }
+
+  // --- NOUVEAU : Mettre à jour un produit spécifique (CORRECTION BUG COMPTEUR) ---
+  Future<void> updateSpecificProduct(Product productToUpdate) async {
+    // 1. Mise à jour de l'état du produit (déjà fait par référence, mais on assure)
+    productToUpdate.isSynced = false;
+
+    // 2. Sauvegarde
+    // Astuce : _saveUnsyncedData parcourt _allProducts.
+    // Comme productToUpdate est une référence d'un objet DANS _allProducts,
+    // il suffit d'appeler la sauvegarde.
+    await _saveUnsyncedData();
+
+    // 3. Notifier l'UI
     notifyListeners();
   }
 
@@ -274,37 +265,13 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
-  void nextProduct() {
-    if (_currentProductIndex < _filteredProducts.length - 1) {
-      _currentProductIndex++;
-      _saveCurrentIndex();
-      notifyListeners();
-    }
-  }
-
-  void previousProduct() {
-    if (_currentProductIndex > 0) {
-      _currentProductIndex--;
-      _saveCurrentIndex();
-      notifyListeners();
-    }
-  }
-
-  void goToFirstProduct() {
-    if (_filteredProducts.isNotEmpty) {
-      _currentProductIndex = 0;
-      _saveCurrentIndex();
-      notifyListeners();
-    }
-  }
-
+  // ... (Méthodes navigation nextProduct, etc. INCHANGÉES) ...
+  void nextProduct() { if (_currentProductIndex < _filteredProducts.length - 1) { _currentProductIndex++; _saveCurrentIndex(); notifyListeners(); } }
+  void previousProduct() { if (_currentProductIndex > 0) { _currentProductIndex--; _saveCurrentIndex(); notifyListeners(); } }
+  void goToFirstProduct() { if (_filteredProducts.isNotEmpty) { _currentProductIndex = 0; _saveCurrentIndex(); notifyListeners(); } }
   void jumpToProduct(Product product) {
     final index = _filteredProducts.indexWhere((p) => p.id == product.id);
-    if (index != -1) {
-      _currentProductIndex = index;
-      _saveCurrentIndex();
-      notifyListeners();
-    }
+    if (index != -1) { _currentProductIndex = index; _saveCurrentIndex(); notifyListeners(); }
   }
 
   Future<void> sendDataToServer(ApiService api, [Function(int, int)? onProgress]) async {
