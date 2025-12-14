@@ -45,7 +45,6 @@ class EntryProvider with ChangeNotifier {
 
   bool get hasUnsyncedData => _allProducts.any((p) => !p.isSynced);
 
-  // ... (Méthodes de persistance _saveUnsyncedData, etc. INCHANGÉES) ...
   Future<void> _saveUnsyncedData() async {
     if (_selectedRayon == null) return;
     final prefs = await SharedPreferences.getInstance();
@@ -98,10 +97,7 @@ class EntryProvider with ChangeNotifier {
     final rawJson = prefs.getString('filter_$rayonId') ?? '';
     return ProductFilter.fromRawJson(rawJson);
   }
-  // ... (Fin méthodes persistance) ...
 
-
-  // ... (Logique de filtrage INCHANGÉE) ...
   Future<void> applyFilter(ProductFilter newFilter) async {
     _activeFilter = newFilter;
     await _saveFilter();
@@ -143,7 +139,6 @@ class EntryProvider with ChangeNotifier {
         break;
     }
   }
-  // ... (Fin logique filtrage) ...
 
   void reset() {
     _rayons = [];
@@ -195,6 +190,45 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// RECHERCHE SERVEUR EXPLICITE (scan/query)
+  Future<List<Product>> searchProductOnline(ApiService api, String inventoryId, String query) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    List<Product> results = [];
+
+    try {
+      final rayonId = _selectedRayon?.id;
+
+      // Appel API : c'est api_service qui choisira entre details/detailsAll
+      // en fonction de si rayonId est null ou non.
+      results = await api.fetchProducts(inventoryId, rayonId, query: query);
+
+      if (results.isNotEmpty) {
+        if (rayonId == null) {
+          // Si on est en mode Global (pas de rayon sélectionné),
+          // on remplace la liste actuelle par le résultat de la recherche
+          _allProducts = results;
+          _filteredProducts = results;
+          _isGlobalMode = true;
+          _currentProductIndex = 0;
+        } else {
+          // Si on est dans un rayon, on peut décider de juste retourner le résultat pour popup
+          // sans écraser toute la liste du rayon (pour ne pas perdre le contexte).
+          // La méthode retourne 'results', donc l'UI saura quoi faire.
+        }
+      }
+    } catch (e) {
+      _error = "Erreur recherche: $e";
+      results = [];
+    }
+
+    _isLoading = false;
+    notifyListeners();
+    return results;
+  }
+
   Future<void> loadGlobalInventory(ApiService api, String inventoryId) async {
     _isLoading = true;
     _error = null;
@@ -209,7 +243,6 @@ class EntryProvider with ChangeNotifier {
 
       final List<Future<List<Product>>> downloadTasks = rayons.map((rayon) {
         return api.fetchProducts(inventoryId, rayon.id).then((products) async {
-          // MODIFIÉ : On injecte le nom du rayon dans chaque produit
           for (var p in products) {
             p.locationLabel = rayon.libelle;
           }
@@ -232,18 +265,9 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // --- NOUVEAU : Mettre à jour un produit spécifique (CORRECTION BUG COMPTEUR) ---
   Future<void> updateSpecificProduct(Product productToUpdate) async {
-    // 1. Mise à jour de l'état du produit (déjà fait par référence, mais on assure)
     productToUpdate.isSynced = false;
-
-    // 2. Sauvegarde
-    // Astuce : _saveUnsyncedData parcourt _allProducts.
-    // Comme productToUpdate est une référence d'un objet DANS _allProducts,
-    // il suffit d'appeler la sauvegarde.
     await _saveUnsyncedData();
-
-    // 3. Notifier l'UI
     notifyListeners();
   }
 
@@ -265,7 +289,6 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
-  // ... (Méthodes navigation nextProduct, etc. INCHANGÉES) ...
   void nextProduct() { if (_currentProductIndex < _filteredProducts.length - 1) { _currentProductIndex++; _saveCurrentIndex(); notifyListeners(); } }
   void previousProduct() { if (_currentProductIndex > 0) { _currentProductIndex--; _saveCurrentIndex(); notifyListeners(); } }
   void goToFirstProduct() { if (_filteredProducts.isNotEmpty) { _currentProductIndex = 0; _saveCurrentIndex(); notifyListeners(); } }

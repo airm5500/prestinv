@@ -60,14 +60,47 @@ class ApiService {
     }
   }
 
-  Future<List<Product>> fetchProducts(String idInventaire, String idRayon) async {
-    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/details?idInventaire=$idInventaire&idRayon=$idRayon');
+  /// Récupère les produits.
+  /// LOGIQUE DE BASCULE :
+  /// - Si [idRayon] est NULL ou VIDE => Utilise 'detailsAll' (Mode Global / Saisie Rapide)
+  /// - Si [idRayon] est RENSEIGNÉ => Utilise 'details' (Mode par Emplacement)
+  Future<List<Product>> fetchProducts(String idInventaire, String? idRayon, {String? query}) async {
+
+    // 1. Choix de l'endpoint
+    String endpoint;
+    if (idRayon != null && idRayon.isNotEmpty) {
+      endpoint = 'details';
+    } else {
+      endpoint = 'detailsAll';
+    }
+
+    // 2. Construction de l'URL de base
+    String urlStr = '$baseUrl/api/v1/ws/inventaires/$endpoint?idInventaire=$idInventaire';
+
+    // 3. Ajout du rayon (seulement si endpoint 'details')
+    if (idRayon != null && idRayon.isNotEmpty) {
+      urlStr += '&idRayon=$idRayon';
+    }
+
+    // 4. Ajout du query (Recherche CIP, EAN, Nom...)
+    if (query != null && query.isNotEmpty) {
+      urlStr += '&query=${Uri.encodeQueryComponent(query)}';
+    }
+
+    final url = Uri.parse(urlStr);
+
     try {
+      // Debug: afficher l'URL appelée dans la console
+      print("Calling API: $urlStr");
+
       final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         List<Product> products = data.map((json) => Product.fromJson(json)).toList();
+
+        // Tri alphabétique optionnel
         products.sort((a, b) => a.produitName.compareTo(b.produitName));
+
         return products;
       } else {
         throw Exception('Échec du chargement des produits (Statut: ${response.statusCode})');
@@ -98,9 +131,6 @@ class ApiService {
     }
   }
 
-  // --- MODIFICATION ICI : Ajout du paramètre destinationPath ---
-  // Dans lib/api/api_service.dart
-
   Future<bool> requestCsvGeneration(String rayonId, {String? destinationPath}) async {
     String queryString = 'rayonId=$rayonId';
     if (destinationPath != null && destinationPath.isNotEmpty) {
@@ -111,20 +141,16 @@ class ApiService {
 
     try {
       final response = await http.post(url, headers: _getHeaders()).timeout(const Duration(seconds: 30));
-
-      // AJOUT POUR LE DEBUG : Affiche le code erreur dans la console
+      // Debug simple
       if (response.statusCode != 200 && response.statusCode != 201) {
         print('ERREUR EXPORT: Code ${response.statusCode}');
-        print('REPONSE: ${response.body}');
       }
-
       return response.statusCode == 200 || response.statusCode == 201;
     } catch (e) {
       print('EXCEPTION EXPORT: $e');
       return false;
     }
   }
-  // -----------------------------------------------------------
 
   Future<List<Product>> fetchAllProductsForInventory(String inventoryId) async {
     final url = Uri.parse('$baseUrl/api/v1/inventaires/analyse_complete?idInventaire=$inventoryId');
