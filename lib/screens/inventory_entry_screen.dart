@@ -34,6 +34,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   Color? _notificationColor;
   Timer? _notificationTimer;
   Timer? _sendReminderTimer;
+
+  // Timer pour la recherche instantanée (Debounce)
+  Timer? _debounceTimer;
+
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
   bool _isSearching = false;
@@ -45,23 +49,35 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     super.initState();
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _apiService = ApiService(baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl, sessionCookie: authProvider.sessionCookie);
-    _searchController.addListener(_filterProducts);
+
+    // Détection du focus pour masquer le clavier numérique si le clavier virtuel est ouvert
     _searchFocusNode.addListener(() { setState(() { _isSearching = _searchFocusNode.hasFocus; }); });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         final provider = Provider.of<EntryProvider>(context, listen: false);
         provider.reset();
-        // Si QuickMode (Saisie Rapide), on ne charge rien au départ, on attend le scan
+
+        // En mode Saisie Guidée (pas rapide), on charge la liste des rayons
         if (!widget.isQuickMode) {
           provider.fetchRayons(_apiService, widget.inventoryId);
         }
       }
     });
   }
+
   @override
   void dispose() {
-    _quantityController.dispose(); _quantityFocusNode.dispose(); _notificationTimer?.cancel(); _sendReminderTimer?.cancel(); _searchController.dispose(); _searchFocusNode.dispose(); super.dispose();
+    _quantityController.dispose();
+    _quantityFocusNode.dispose();
+    _notificationTimer?.cancel();
+    _sendReminderTimer?.cancel();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    _debounceTimer?.cancel(); // Annulation du timer de recherche
+    super.dispose();
   }
+
   void _navigateToRecap() async {
     showDialog(context: context, barrierDismissible: false, builder: (ctx) => const AlertDialog(content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text("Chargement du récap..."),])));
     try {
@@ -69,17 +85,29 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       String targetRayonId = provider.selectedRayon?.id ?? "";
       String targetRayonName = provider.selectedRayon?.libelle ?? "Global";
       List<Product> products;
-      if (targetRayonId.isNotEmpty) { products = await _apiService.fetchProducts(widget.inventoryId, targetRayonId); } else { products = provider.allProducts; }
+      if (targetRayonId.isNotEmpty) {
+        products = await _apiService.fetchProducts(widget.inventoryId, targetRayonId);
+      } else {
+        products = provider.allProducts;
+      }
+
       if (!mounted) return;
       Navigator.of(context).pop();
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecapScreen(inventoryId: widget.inventoryId, rayonId: targetRayonId, rayonName: targetRayonName, preloadedProducts: products)));
-    } catch (e) { if (mounted) { Navigator.of(context).pop(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: $e"), backgroundColor: Colors.red)); } }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: $e"), backgroundColor: Colors.red));
+      }
+    }
   }
+
   void _showNotification(String message, Color color) {
     _notificationTimer?.cancel();
     setState(() { _notificationMessage = message; _notificationColor = color; });
     _notificationTimer = Timer(const Duration(seconds: 2), () { if (mounted) { setState(() { _notificationMessage = null; }); } });
   }
+
   void _resetSendReminderTimer() {
     _sendReminderTimer?.cancel();
     final appConfig = Provider.of<AppConfig>(context, listen: false);
@@ -88,7 +116,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       _sendReminderTimer = Timer(Duration(minutes: appConfig.sendReminderMinutes), () { if (provider.hasUnsyncedData && mounted) { _showSendReminderNotification(); } });
     }
   }
+
   void _showSendReminderNotification() { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Rappel : Vous avez des données non envoyées !'), backgroundColor: Colors.blue, duration: Duration(seconds: 5))); }
+
   void _onKeyPressed(String value) {
     if (value == 'DEL') { if (_quantityController.text.isNotEmpty) { _quantityController.text = _quantityController.text.substring(0, _quantityController.text.length - 1); } } else if (value == 'OK') { _validateAndProceed(); } else { _quantityController.text += value; }
   }
@@ -123,16 +153,29 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final appConfig = Provider.of<AppConfig>(context, listen: false);
     if (_quantityController.text.isEmpty) { _showNotification('Veuillez saisir une quantité.', Colors.orange); return; }
     final quantity = int.tryParse(_quantityController.text) ?? 0;
+
     Future<void> proceedToNext() async {
       await provider.updateQuantity(quantity.toString());
       _resetSendReminderTimer();
-      if (appConfig.sendMode == SendMode.direct) { try { await _apiService.updateProductQuantity(provider.currentProduct!.id, quantity); if (mounted) { _showNotification('Saisie envoyée !', Colors.green); } } catch (e) { if (mounted) { _showNotification('Erreur réseau. Saisie non envoyée.', Colors.red); } } }
+
+      if (appConfig.sendMode == SendMode.direct) {
+        try {
+          await _apiService.updateProductQuantity(provider.currentProduct!.id, quantity);
+          if (mounted) { _showNotification('Saisie envoyée !', Colors.green); }
+        } catch (e) {
+          if (mounted) { _showNotification('Erreur réseau. Saisie non envoyée.', Colors.red); }
+        }
+      }
+
       bool isLastProduct = provider.currentProductIndex >= provider.totalProducts - 1;
       if (isLastProduct && provider.totalProducts > 0) {
         _sendReminderTimer?.cancel(); if (!mounted) return;
         showDialog(context: context, builder: (ctx) => AlertDialog(title: Text(provider.activeFilter.isActive ? 'Fin du filtre' : 'Fin de l\'emplacement'), content: Text(provider.activeFilter.isActive ? 'Vous avez traité le dernier produit du filtre.' : 'Vous avez traité le dernier produit. Voulez-vous envoyer les données au serveur ?'), actions: [ TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')), if (!provider.activeFilter.isActive) TextButton(onPressed: () { Navigator.of(ctx).pop(); _sendDataToServer(); }, child: const Text('Oui, envoyer')), ],),);
-      } else { provider.nextProduct(); }
+      } else {
+        provider.nextProduct();
+      }
     }
+
     if (quantity > appConfig.largeValueThreshold) {
       final confirmed = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: const Text('Alerte Grande Quantité'), content: Text('La quantité saisie ($quantity) est très élevée. Voulez-vous confirmer ?'), actions: [ TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Non')), TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Oui, Confirmer')), ],),);
       if (confirmed == true) { await proceedToNext(); }
@@ -148,10 +191,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     if (!mounted) return false;
     if (sendAndLeave == true) { await _sendDataToServer(); return true; } else { _resetSendReminderTimer(); return false; }
   }
+
   void _showPendingDataDialog() {
     final provider = Provider.of<EntryProvider>(context, listen: false); provider.acknowledgedPendingSession();
     showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('Saisie non terminée'), content: const Text('Des saisies non envoyées de la dernière session ont été trouvées. Voulez-vous les envoyer maintenant ?'), actions: [ TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Non')), TextButton(onPressed: () { Navigator.of(ctx).pop(); _sendDataToServer(); }, child: const Text('Oui, envoyer')), ],),);
   }
+
   void _onLocationChanged(Rayon? newValue) async {
     final provider = Provider.of<EntryProvider>(context, listen: false);
     if (newValue?.id != provider.selectedRayon?.id) {
@@ -163,12 +208,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       if (mounted) {
         _sendReminderTimer?.cancel(); _searchController.clear(); _showSearchResults = false;
         if (newValue == null) {
-          // On passe en mode Global : on reset pour vider la liste et attendre le scan
           provider.reset();
           _resetSendReminderTimer();
           if (mounted) _searchFocusNode.requestFocus();
         } else {
-          // Mode Rayon : on charge le rayon
           provider.fetchProducts(_apiService, widget.inventoryId, newValue.id).then((_) {
             _resetSendReminderTimer();
             if (mounted) _searchFocusNode.requestFocus();
@@ -178,74 +221,82 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  void _filterProducts() {
-    // Cette méthode n'est utilisée que pour le filtre visuel si des données sont affichées.
-    final provider = Provider.of<EntryProvider>(context, listen: false);
-    final query = _searchController.text.toLowerCase();
-    if (query.isEmpty) { if (mounted) { setState(() { _filteredProducts = []; _showSearchResults = false; }); } return; }
+  // --- LOGIQUE DE RECHERCHE AMÉLIORÉE ---
 
-    // Si la liste est vide (cas Saisie Rapide avant recherche), on ne fait rien en local
-    if (provider.products.isNotEmpty && mounted) {
+  void _onSearchChanged(String query) {
+    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+
+    if (query.isEmpty) {
       setState(() {
-        _filteredProducts = provider.products.where((product) { return product.produitCip.toLowerCase().contains(query) || product.produitName.toLowerCase().contains(query); }).toList();
-        _showSearchResults = true;
+        _showSearchResults = false;
+        _filteredProducts = [];
       });
+      return;
     }
+
+    // Déclenche la recherche après 500ms d'inactivité
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      // IMPORTANT: fromTyping = true indique qu'on est en train de taper
+      // et qu'on ne veut PAS fermer le clavier ni ouvrir de popup automatiquement
+      _handleScanOrSearch(query, fromTyping: true);
+    });
   }
 
-  // --- RECHERCHE ET SCAN 100% SERVEUR (Query) ---
-  Future<void> _handleScanOrSearch(String query) async {
+  Future<void> _handleScanOrSearch(String query, {bool fromTyping = false}) async {
     if (query.isEmpty) return;
 
+    _debounceTimer?.cancel();
     final provider = Provider.of<EntryProvider>(context, listen: false);
 
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Recherche sur le serveur...'), duration: Duration(milliseconds: 500)),
-    );
+    // Pas de snackbar pendant la frappe pour éviter de polluer l'écran
+    if (!fromTyping) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Recherche...'), duration: Duration(milliseconds: 500)),
+      );
+    }
 
     try {
-      // APPEL DIRECT AU SERVEUR SANS FILTRAGE LOCAL
-      // Le provider va utiliser le bon endpoint (details/detailsAll)
       final onlineMatches = await provider.searchProductOnline(_apiService, widget.inventoryId, query);
 
       if (!mounted) return;
 
-      if (onlineMatches.length == 1) {
-        // 1 Résultat -> Popup direct
-        _openQuickEntryDialog(onlineMatches.first);
-        _searchController.clear();
-        setState(() { _showSearchResults = false; });
-        FocusScope.of(context).unfocus();
-
-      } else if (onlineMatches.length > 1) {
-        // Plusieurs résultats -> Liste
+      if (onlineMatches.isNotEmpty) {
+        // Résultats trouvés
         setState(() {
           _filteredProducts = onlineMatches;
           _showSearchResults = true;
         });
-        FocusScope.of(context).unfocus();
 
-      } else {
-        // 0 Résultat
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Produit introuvable.'), backgroundColor: Colors.red),
-        );
-        _searchFocusNode.requestFocus();
-        Future.delayed(const Duration(milliseconds: 50), () {
-          if (mounted && _searchController.text.isNotEmpty) {
-            _searchController.selection = TextSelection(
-              baseOffset: 0,
-              extentOffset: _searchController.text.length,
-            );
+        if (fromTyping) {
+          // Pendant la frappe : On affiche la liste MAIS on garde le clavier ouvert.
+          // On n'ouvre JAMAIS le popup automatiquement ici, même s'il n'y a qu'un seul résultat.
+          // L'utilisateur doit choisir le produit dans la liste.
+        } else {
+          // Validation manuelle (Touche Entrée) :
+          if (onlineMatches.length == 1) {
+            // Un seul résultat -> Popup direct et on ferme le clavier
+            _openQuickEntryDialog(onlineMatches.first);
+            _searchController.clear();
+            setState(() { _showSearchResults = false; });
+            FocusScope.of(context).unfocus();
+          } else {
+            // Plusieurs résultats -> On garde le clavier fermé pour voir la liste
+            FocusScope.of(context).unfocus();
           }
-        });
+        }
+      } else {
+        // Aucun résultat
+        if (!fromTyping) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Produit introuvable.'), backgroundColor: Colors.red),
+          );
+        }
+        // En frappe, on ne fait rien de spécial, la liste vide ou ancienne disparaît
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red)
-        );
+      if (mounted && !fromTyping) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red));
       }
     }
   }
@@ -264,10 +315,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               const SizedBox(height: 4),
               Text(product.produitName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
               Text('CIP: ${product.produitCip}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-
               if (product.locationLabel != null)
                 Text('(${product.locationLabel})', style: const TextStyle(fontSize: 14, color: Colors.blueGrey, fontStyle: FontStyle.italic)),
-
               const Divider(),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -300,6 +349,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.accent),
                   decoration: const InputDecoration(labelText: 'Quantité', border: OutlineInputBorder()),
+                  keyboardType: TextInputType.none,
                   readOnly: true,
                   autofocus: true,
                   showCursor: true,
@@ -310,11 +360,34 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   child: NumericKeyboard(
                     onKeyPressed: (key) {
                       if (key == 'OK') {
+                        if (quickQtyController.text.isEmpty) return;
+
                         final int qty = int.tryParse(quickQtyController.text) ?? 0;
                         _saveScannedQuantity(product, qty);
                         Navigator.of(ctx).pop();
-                        if (widget.isQuickMode) { Future.delayed(const Duration(milliseconds: 100), () { if (mounted) _searchFocusNode.requestFocus(); }); }
-                        else { Future.delayed(const Duration(milliseconds: 100), () { if (mounted) _quantityFocusNode.requestFocus(); }); }
+
+                        // --- GESTION DU RETOUR ET FOCUS ---
+                        _searchController.clear();
+                        setState(() {
+                          _showSearchResults = false;
+                          _filteredProducts = [];
+                        });
+
+                        if (widget.isQuickMode) {
+                          // En mode Rapide, on remet le focus sur la recherche pour le scan suivant
+                          Future.delayed(const Duration(milliseconds: 100), () {
+                            if (mounted) _searchFocusNode.requestFocus();
+                          });
+                        } else {
+                          // En mode Guidé (Rayon), on remet le focus sur la saisie de quantité principale
+                          // Cela permet de revenir "à l'écran de saisie qui était déjà en cours"
+                          Future.delayed(const Duration(milliseconds: 100), () {
+                            if (mounted) {
+                              FocusScope.of(context).unfocus(); // Ferme le clavier recherche si ouvert
+                              _quantityFocusNode.requestFocus();
+                            }
+                          });
+                        }
                       } else if (key == 'DEL') {
                         if (quickQtyController.text.isNotEmpty) { quickQtyController.text = quickQtyController.text.substring(0, quickQtyController.text.length - 1); }
                       } else { quickQtyController.text += key; }
@@ -343,9 +416,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   void _selectProduct(Product product) {
     _openQuickEntryDialog(product);
-    _searchController.clear();
-    setState(() { _showSearchResults = false; });
-    FocusScope.of(context).unfocus();
   }
 
   void _showLocationSelector(BuildContext context, EntryProvider provider) {
@@ -380,19 +450,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                             leading: CircleAvatar(backgroundColor: isSelected ? AppColors.accent.withOpacity(0.1) : AppColors.primary.withOpacity(0.1), child: Icon(Icons.location_on, color: isSelected ? AppColors.accent : AppColors.primary, size: 20)),
                             title: Text(rayon.libelle, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? AppColors.accent : Colors.black)),
                             subtitle: Text(rayon.code, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                            trailing: isSelected ? const Icon(Icons.check, color: AppColors.accent) : null,
                             onTap: () { Navigator.of(ctx).pop(); _onLocationChanged(rayon); },
                           );
                         },
                       ),
                     ),
-                    if (widget.isQuickMode)
-                      ListTile(
-                        leading: const CircleAvatar(backgroundColor: Color(0xFFE8F5E9), child: Icon(Icons.public, color: Colors.green, size: 20)),
-                        title: const Text("TOUS LES EMPLACEMENTS", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-                        subtitle: const Text("Recherche globale", style: TextStyle(fontSize: 12, color: Colors.grey)),
-                        onTap: () { Navigator.of(ctx).pop(); _onLocationChanged(null); },
-                      ),
                   ],
                 ),
               ),
@@ -404,15 +466,15 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
-  void _showFilterDialog(BuildContext context, EntryProvider provider) {
-    // ... (Code dialogue filtre existant inchangé) ...
-  }
-
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: _onWillPop,
       child: Scaffold(
+        // resizeToAvoidBottomInset est true par défaut, ce qui permet à la vue de remonter
+        // quand le clavier est ouvert, rendant la liste scrollable au-dessus.
+        resizeToAvoidBottomInset: true,
+
         appBar: AppBar(
           title: Text(widget.isQuickMode ? 'Saisie Rapide (Scan)' : 'Saisie Inventaire'),
           actions: [
@@ -432,6 +494,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         ),
         body: Consumer<EntryProvider>(
           builder: (context, provider, child) {
+
+            bool showLocationSelector = !widget.isQuickMode;
+            bool showSearchAndBody = widget.isQuickMode || provider.selectedRayon != null;
+
             if (provider.error != null) {
               return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text('Une erreur est survenue :\n${provider.error}', textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontSize: 16))));
             }
@@ -449,111 +515,120 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
             return Column(
               children: [
-                // Sélecteur d'emplacement
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(8.0),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
+                if (showLocationSelector)
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.05),
                       borderRadius: BorderRadius.circular(8.0),
-                      onTap: () => _showLocationSelector(context, provider),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.touch_app_outlined, color: AppColors.primary),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                provider.isGlobalMode
-                                    ? '🌍 TOUS LES EMPLACEMENTS'
-                                    : (provider.selectedRayon?.libelle ?? 'Sélectionner un emplacement'),
-                                style: TextStyle(
-                                  color: (provider.selectedRayon == null && !provider.isGlobalMode)
-                                      ? Colors.grey.shade700
-                                      : AppColors.primary,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8.0),
+                        onTap: () => _showLocationSelector(context, provider),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.touch_app_outlined, color: AppColors.primary),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  provider.selectedRayon?.libelle ?? 'Sélectionner un emplacement',
+                                  style: TextStyle(
+                                    color: provider.selectedRayon == null
+                                        ? Colors.grey.shade700
+                                        : AppColors.primary,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                            const Icon(Icons.arrow_drop_down, color: AppColors.primary),
-                          ],
+                              const Icon(Icons.arrow_drop_down, color: AppColors.primary),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
 
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16.0, 4.0, 16.0, 8.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _searchController,
-                          focusNode: _searchFocusNode,
-                          onSubmitted: (value) => _handleScanOrSearch(value),
-                          textInputAction: TextInputAction.search,
-                          autofocus: widget.isQuickMode,
-                          decoration: InputDecoration(
-                            labelText: 'Rechercher / Scanner', hintText: 'CIP, Nom ou Scan...', prefixIcon: const Icon(Icons.qr_code_scanner, size: 20),
-                            isDense: true, border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))), contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-                            suffixIcon: _searchController.text.isNotEmpty ? IconButton(icon: const Icon(Icons.clear, size: 20), onPressed: () { _searchController.clear(); _searchFocusNode.requestFocus(); }) : null,
+                if (showSearchAndBody)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16.0, 4.0, 16.0, 8.0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController,
+                            focusNode: _searchFocusNode,
+                            onSubmitted: (value) => _handleScanOrSearch(value, fromTyping: false),
+                            onChanged: _onSearchChanged,
+                            textInputAction: TextInputAction.search,
+                            autofocus: widget.isQuickMode,
+                            decoration: InputDecoration(
+                              labelText: 'Rechercher / Scanner', hintText: 'CIP, Nom ou Scan...', prefixIcon: const Icon(Icons.qr_code_scanner, size: 20),
+                              isDense: true, border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))), contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
+                              suffixIcon: _searchController.text.isNotEmpty ? IconButton(icon: const Icon(Icons.clear, size: 20), onPressed: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _showSearchResults = false;
+                                  _filteredProducts = [];
+                                });
+                                _searchFocusNode.requestFocus();
+                              }) : null,
+                            ),
                           ),
                         ),
-                      ),
-                      if (!widget.isQuickMode) ...[
-                        const SizedBox(width: 8),
                       ],
-                    ],
+                    ),
                   ),
-                ),
 
                 const Divider(height: 1, thickness: 1),
-                Expanded(
-                  child: Stack(
-                    children: [
-                      (provider.isLoading && provider.products.isEmpty) ? const Center(child: CircularProgressIndicator()) : (provider.products.isEmpty || provider.currentProduct == null) ? Center(child: Text(provider.activeFilter.isActive ? 'Aucun produit dans cet intervalle.' : 'Aucun produit. Sélectionnez un emplacement.'))
-                          : widget.isQuickMode
-                          ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.qr_code_scanner, size: 80, color: Colors.grey.shade300), const SizedBox(height: 16), const Text('Mode Saisie Rapide Activé', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey)), const SizedBox(height: 8), const Text('Scannez un produit pour saisir sa quantité', style: TextStyle(color: Colors.grey))]))
-                          : buildProductView(provider),
-                      if (_showSearchResults)
-                        Container(
-                          color: AppColors.background.withOpacity(0.98),
-                          child: _filteredProducts.isEmpty
-                              ? Center(child: Text("Aucun produit trouvé"))
-                              : ListView.builder(
-                            itemCount: _filteredProducts.length,
-                            itemBuilder: (context, index) {
-                              final product = _filteredProducts[index];
-                              return Card(
-                                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                child: ListTile(
-                                  title: Text(product.produitName, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  subtitle: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('CIP: ${product.produitCip} / Stock Théo: ${product.quantiteInitiale}'),
-                                      Text('Prix Vente: ${product.produitPrixUni.toStringAsFixed(0)} F', style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)),
-                                    ],
+
+                if (showSearchAndBody)
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        (provider.isLoading && provider.products.isEmpty) ? const Center(child: CircularProgressIndicator()) : (provider.products.isEmpty || provider.currentProduct == null) ? Center(child: Text(provider.activeFilter.isActive ? 'Aucun produit dans cet intervalle.' : 'Aucun produit. Commencez par scanner.'))
+                            : widget.isQuickMode
+                            ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.qr_code_scanner, size: 80, color: Colors.grey.shade300), const SizedBox(height: 16), const Text('Mode Saisie Rapide Activé', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey)), const SizedBox(height: 8), const Text('Scannez un produit pour saisir sa quantité', style: TextStyle(color: Colors.grey))]))
+                            : buildProductView(provider),
+                        if (_showSearchResults)
+                          Container(
+                            color: AppColors.background.withOpacity(0.98),
+                            child: _filteredProducts.isEmpty
+                                ? Center(child: Text("Aucun produit trouvé"))
+                                : ListView.builder(
+                              itemCount: _filteredProducts.length,
+                              itemBuilder: (context, index) {
+                                final product = _filteredProducts[index];
+                                return Card(
+                                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  child: ListTile(
+                                    title: Text(product.produitName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    subtitle: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('CIP: ${product.produitCip} / Stock Théo: ${product.quantiteInitiale}'),
+                                        Text('Prix Vente: ${product.produitPrixUni.toStringAsFixed(0)} F', style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)),
+                                      ],
+                                    ),
+                                    onTap: () => _selectProduct(product),
                                   ),
-                                  onTap: () => _selectProduct(product),
-                                ),
-                              );
-                            },
+                                );
+                              },
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
-                ),
-                if (!widget.isQuickMode && !_isSearching) NumericKeyboard(onKeyPressed: _onKeyPressed),
+                      ],
+                    ),
+                  )
+                else
+                  const Expanded(child: Center(child: Text("Veuillez sélectionner un emplacement pour commencer.", style: TextStyle(color: Colors.grey, fontSize: 16)))),
+
+                if (showSearchAndBody && !widget.isQuickMode && !_isSearching) NumericKeyboard(onKeyPressed: _onKeyPressed),
               ],
             );
           },
@@ -562,6 +637,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
+  // ... (Widgets _buildNotificationArea et buildProductView inchangés) ...
   Widget _buildNotificationArea() {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
@@ -584,8 +660,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   Widget buildProductView(EntryProvider provider) {
-    // ... (Code buildProductView identique) ...
-    // Pour lisibilité je ne le répète pas ici, mais il est inchangé
     final Product product = provider.currentProduct!;
     const textFieldBorderColor = Colors.deepPurple;
     final screenHeight = MediaQuery.of(context).size.height;

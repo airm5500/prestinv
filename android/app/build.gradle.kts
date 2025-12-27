@@ -53,6 +53,9 @@ android {
         }
     }
 }
+dependencies {
+    implementation(project(":integration_test"))
+}
 
 flutter {
     source = "../.."

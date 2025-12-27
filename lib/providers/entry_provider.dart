@@ -46,10 +46,15 @@ class EntryProvider with ChangeNotifier {
   bool get hasUnsyncedData => _allProducts.any((p) => !p.isSynced);
 
   Future<void> _saveUnsyncedData() async {
-    if (_selectedRayon == null) return;
+    // Si on est en mode global (selectedRayon == null), on utilise une clé générique ou on ne sauvegarde pas localement de la même façon.
+    // Pour simplifier ici, on garde la logique rayon si présent.
+    final String keySuffix = _selectedRayon?.id ?? 'global_${_isGlobalMode ? "quick" : "unknown"}';
+
     final prefs = await SharedPreferences.getInstance();
-    final key = 'unsynced_data_${_selectedRayon!.id}';
+    final key = 'unsynced_data_$keySuffix';
+
     final unsyncedProducts = _allProducts.where((p) => !p.isSynced).toList();
+
     if (unsyncedProducts.isEmpty) {
       await prefs.remove(key);
     } else {
@@ -63,18 +68,26 @@ class EntryProvider with ChangeNotifier {
     final key = 'unsynced_data_$rayonId';
     final savedDataString = prefs.getString(key);
     if (savedDataString == null) { _hasPendingSession = false; return apiProducts; }
-    final savedProductsData = json.decode(savedDataString) as List;
-    final savedProducts = savedProductsData.map((data) => Product.fromJson(data)).toList();
-    if (savedProducts.isEmpty) { _hasPendingSession = false; return apiProducts; }
-    _hasPendingSession = true;
-    return apiProducts.map((apiProduct) {
-      try {
-        final savedVersion = savedProducts.firstWhere((p) => p.id == apiProduct.id);
-        apiProduct.quantiteSaisie = savedVersion.quantiteSaisie;
-        apiProduct.isSynced = savedVersion.isSynced;
-      } catch (e) {}
-      return apiProduct;
-    }).toList();
+
+    try {
+      final savedProductsData = json.decode(savedDataString) as List;
+      final savedProducts = savedProductsData.map((data) => Product.fromJson(data)).toList();
+
+      if (savedProducts.isEmpty) { _hasPendingSession = false; return apiProducts; }
+
+      _hasPendingSession = true;
+      return apiProducts.map((apiProduct) {
+        try {
+          final savedVersion = savedProducts.firstWhere((p) => p.id == apiProduct.id);
+          apiProduct.quantiteSaisie = savedVersion.quantiteSaisie;
+          apiProduct.isSynced = savedVersion.isSynced;
+        } catch (e) {}
+        return apiProduct;
+      }).toList();
+    } catch (e) {
+      // En cas d'erreur de parsing, on retourne les produits API bruts
+      return apiProducts;
+    }
   }
 
   void _saveCurrentIndex() async {
@@ -190,7 +203,6 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// RECHERCHE SERVEUR EXPLICITE (scan/query)
   Future<List<Product>> searchProductOnline(ApiService api, String inventoryId, String query) async {
     _isLoading = true;
     _error = null;
@@ -200,24 +212,18 @@ class EntryProvider with ChangeNotifier {
 
     try {
       final rayonId = _selectedRayon?.id;
-
-      // Appel API : c'est api_service qui choisira entre details/detailsAll
-      // en fonction de si rayonId est null ou non.
       results = await api.fetchProducts(inventoryId, rayonId, query: query);
 
       if (results.isNotEmpty) {
         if (rayonId == null) {
-          // Si on est en mode Global (pas de rayon sélectionné),
-          // on remplace la liste actuelle par le résultat de la recherche
+          // Mode Global : On remplace la liste affichée
           _allProducts = results;
           _filteredProducts = results;
           _isGlobalMode = true;
           _currentProductIndex = 0;
-        } else {
-          // Si on est dans un rayon, on peut décider de juste retourner le résultat pour popup
-          // sans écraser toute la liste du rayon (pour ne pas perdre le contexte).
-          // La méthode retourne 'results', donc l'UI saura quoi faire.
         }
+        // Mode Rayon : On ne remplace PAS la liste affichée pour ne pas perdre le contexte.
+        // On retourne juste le résultat.
       }
     } catch (e) {
       _error = "Erreur recherche: $e";
@@ -265,8 +271,42 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // --- CORRECTION CRITIQUE POUR LA SYNCHRO ---
+  // Cette méthode met à jour la quantité d'un produit.
+  // Elle s'assure de mettre à jour l'instance présente dans _allProducts
+  // pour qu'elle soit prise en compte lors de l'envoi global.
   Future<void> updateSpecificProduct(Product productToUpdate) async {
-    productToUpdate.isSynced = false;
+    // 1. Essayer de trouver le produit dans la liste principale par son ID
+    try {
+      final index = _allProducts.indexWhere((p) => p.id == productToUpdate.id);
+
+      if (index != -1) {
+        // TROUVÉ : On met à jour l'instance originale
+        _allProducts[index].quantiteSaisie = productToUpdate.quantiteSaisie;
+        _allProducts[index].isSynced = false;
+      } else {
+        // NON TROUVÉ : Cas rare en Saisie Guidée (produit scanné absent de la liste chargée ?)
+        // Ou cas Saisie Rapide (où la liste est volatile)
+        // On l'ajoute à la liste pour qu'il soit sauvegardé
+        productToUpdate.isSynced = false;
+        _allProducts.add(productToUpdate);
+
+        // Si on est en mode global/recherche, on met aussi à jour la liste filtrée
+        if (_isGlobalMode) {
+          final filterIndex = _filteredProducts.indexWhere((p) => p.id == productToUpdate.id);
+          if (filterIndex != -1) {
+            _filteredProducts[filterIndex].quantiteSaisie = productToUpdate.quantiteSaisie;
+            _filteredProducts[filterIndex].isSynced = false;
+          } else {
+            _filteredProducts.add(productToUpdate);
+          }
+        }
+      }
+    } catch (e) {
+      print("Erreur updateSpecificProduct : $e");
+    }
+
+    // 2. Sauvegarde persistante
     await _saveUnsyncedData();
     notifyListeners();
   }
@@ -275,16 +315,9 @@ class EntryProvider with ChangeNotifier {
     if (currentProduct != null) {
       final int quantity = int.tryParse(value) ?? 0;
       if (quantity >= 0) {
-        final productId = currentProduct!.id;
+        // On utilise la nouvelle logique robuste
         currentProduct!.quantiteSaisie = quantity;
-        currentProduct!.isSynced = false;
-        try {
-          final productInAll = _allProducts.firstWhere((p) => p.id == productId);
-          productInAll.quantiteSaisie = quantity;
-          productInAll.isSynced = false;
-        } catch (e) {}
-        await _saveUnsyncedData();
-        notifyListeners();
+        await updateSpecificProduct(currentProduct!);
       }
     }
   }
