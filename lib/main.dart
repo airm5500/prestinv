@@ -2,20 +2,28 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:prestinv/api/api_service.dart';
-import 'package:prestinv/config/app_colors.dart';
-import 'package:prestinv/providers/auth_provider.dart';
-import 'package:prestinv/screens/login_screen.dart';
-import 'package:prestinv/utils/app_utils.dart';
-import 'package:provider/provider.dart';
-import 'package:prestinv/config/app_config.dart';
-import 'package:prestinv/providers/entry_provider.dart';
-import 'package:prestinv/providers/inventory_provider.dart';
-import 'package:prestinv/screens/home_screen.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:provider/provider.dart';
+
+// --- IMPORTS CONFIG & API ---
+import 'package:prestinv/config/app_config.dart';
+import 'package:prestinv/config/app_colors.dart';
+import 'package:prestinv/api/api_service.dart';
+import 'package:prestinv/utils/app_utils.dart';
+
+// --- IMPORTS PROVIDERS ---
+import 'package:prestinv/providers/auth_provider.dart';
+import 'package:prestinv/providers/inventory_provider.dart';
+import 'package:prestinv/providers/entry_provider.dart';
+import 'package:prestinv/providers/license_provider.dart'; // NOUVEAU
+
+// --- IMPORTS ÉCRANS ---
+import 'package:prestinv/screens/home_screen.dart';
+import 'package:prestinv/screens/login_screen.dart';
+import 'package:prestinv/screens/license_register_screen.dart'; // NOUVEAU
 
 void main() async {
-  // On s'assure que tout est prêt et on préserve le splash screen
+  // On s'assure que tout est prêt et on préserve le splash screen natif
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
@@ -26,23 +34,24 @@ void main() async {
   final authProvider = AuthProvider();
 
   runApp(
-    // Le MultiProvider est maintenant à la racine pour être accessible à toute l'application.
+    // Le MultiProvider est à la racine pour être accessible partout
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: appConfig),
         ChangeNotifierProvider.value(value: authProvider),
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
         ChangeNotifierProvider(create: (_) => EntryProvider()),
+        // AJOUT DU PROVIDER LICENCE
+        ChangeNotifierProvider(create: (_) => LicenseProvider()),
       ],
       child: const PrestinvApp(),
     ),
   );
 
-  // Une fois l'application prête et la première frame dessinée, on retire le splash screen
+  // Une fois l'application prête, on retire le splash screen
   FlutterNativeSplash.remove();
 }
 
-// Le widget racine est maintenant un StatefulWidget pour gérer son état et ses observers.
 class PrestinvApp extends StatefulWidget {
   const PrestinvApp({super.key});
 
@@ -57,6 +66,22 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // VÉRIFICATION LICENCE AU DÉMARRAGE
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkLicenseAtStartup();
+    });
+  }
+
+  /// Lance la vérification de la licence via le Provider dédié
+  void _checkLicenseAtStartup() {
+    final config = context.read<AppConfig>();
+    final auth = context.read<AuthProvider>();
+    // On construit une instance API temporaire avec la config actuelle
+    final api = ApiService(baseUrl: config.currentApiUrl, sessionCookie: auth.sessionCookie);
+
+    // On lance la vérification (API ou Cache)
+    context.read<LicenseProvider>().checkLicense(api);
   }
 
   @override
@@ -66,7 +91,7 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  /// Réinitialise le minuteur de déconnexion. Nécessite un context valide.
+  /// Réinitialise le minuteur de déconnexion automatique
   void _resetInactivityTimer(BuildContext context) {
     final appConfig = context.read<AppConfig>();
     final authProvider = context.read<AuthProvider>();
@@ -96,12 +121,14 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
       _resetInactivityTimer(context);
+      // Optionnel : On pourrait revérifier la licence ici au retour de l'app
     }
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       _attemptBackgroundSync();
     }
   }
 
+  /// Tente d'envoyer les données en attente quand l'app passe en arrière-plan
   void _attemptBackgroundSync() {
     final entryProvider = context.read<EntryProvider>();
     if (entryProvider.hasUnsyncedData) {
@@ -119,15 +146,40 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Le GestureDetector à la racine de l'application intercepte toutes les interactions.
+    // Le GestureDetector global intercepte les clics pour reset le timer d'inactivité
     return GestureDetector(
       onTap: () => _resetInactivityTimer(context),
       onPanDown: (_) => _resetInactivityTimer(context),
       behavior: HitTestBehavior.translucent,
-      child: Consumer<AuthProvider>(
-        builder: (context, auth, _) {
-          // On réinitialise aussi le timer quand l'état de connexion change.
+
+      // On écoute AuthProvider ET LicenseProvider pour décider quel écran afficher
+      child: Consumer2<AuthProvider, LicenseProvider>(
+        builder: (context, auth, license, _) {
+
+          // On s'assure que le timer est géré à chaque reconstruction si nécessaire
           WidgetsBinding.instance.addPostFrameCallback((_) => _resetInactivityTimer(context));
+
+          // --- LOGIQUE DE ROUTAGE ---
+          Widget homeWidget;
+
+          if (license.status == LicenseStatus.loading) {
+            // 1. Chargement de la licence en cours
+            homeWidget = const Scaffold(
+                body: Center(child: CircularProgressIndicator())
+            );
+          }
+          else if (license.status == LicenseStatus.none || license.status == LicenseStatus.expired) {
+            // 2. Pas de licence ou expirée => Écran d'enregistrement BLOQUANT
+            homeWidget = const LicenseRegisterScreen();
+          }
+          else if (auth.isLoggedIn) {
+            // 3. Licence OK et Connecté => Accueil
+            homeWidget = const HomeScreen();
+          }
+          else {
+            // 4. Licence OK mais pas connecté => Login
+            homeWidget = const LoginScreen();
+          }
 
           return MaterialApp(
             title: 'Prestige Inventaire',
@@ -178,7 +230,7 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 )
             ),
-            home: auth.isLoggedIn ? const HomeScreen() : const LoginScreen(),
+            home: homeWidget,
           );
         },
       ),

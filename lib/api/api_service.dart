@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
+import 'package:prestinv/models/license.dart';
 
 class ApiService {
   final String baseUrl;
@@ -230,4 +231,39 @@ class ApiService {
       rethrow;
     }
   }
+
+  // --- GESTION LICENCE ---
+
+  /// Enregistre une nouvelle licence
+  Future<bool> saveLicense(String key) async {
+    final url = Uri.parse('$baseUrl/api/v1/licence/save/$key');
+    try {
+      final response = await http.post(url, headers: _getHeaders()).timeout(const Duration(seconds: 15));
+      // On considère que 200 = succès
+      return response.statusCode == 200;
+    } catch (e) {
+      throw Exception("Erreur lors de l'enregistrement de la licence : $e");
+    }
+  }
+
+  /// Récupère la licence active
+  Future<License> findLicense() async {
+    final url = Uri.parse('$baseUrl/api/v1/licence/find');
+    try {
+      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        // Le serveur retourne un JSON unique, pas une liste
+        final dynamic data = json.decode(utf8.decode(response.bodyBytes));
+        return License.fromJson(data);
+      } else {
+        throw Exception('Aucune licence valide trouvée (Code ${response.statusCode})');
+      }
+    } on SocketException {
+      throw Exception('Impossible de joindre le serveur de licence (Hors-ligne ?)');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
 }

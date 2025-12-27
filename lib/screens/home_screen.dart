@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/providers/auth_provider.dart';
+import 'package:prestinv/providers/license_provider.dart'; // IMPORT
 import 'package:provider/provider.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/screens/inventory_list_screen.dart';
@@ -11,15 +12,70 @@ import 'package:prestinv/screens/analysis_screen.dart';
 import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/screens/collection_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+
+  @override
+  void initState() {
+    super.initState();
+    // Affichage des alertes de licence après le build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkLicenseWarnings();
+    });
+  }
+
+  void _checkLicenseWarnings() {
+    final license = Provider.of<LicenseProvider>(context, listen: false);
+    final days = license.daysRemaining;
+
+    // Seuils d'alerte
+    // 3 mois ~ 90j, 1 mois ~ 30j, 1 semaine = 7j, Veille = 1j
+
+    // On affiche une alerte si on tombe exactement sur ces jours (ou proche si l'app n'a pas été ouverte pile ce jour là ?)
+    // Pour simplifier et ne pas harceler, on affiche si on est DANS la zone critique.
+
+    String? message;
+    Color color = Colors.orange;
+
+    if (days <= 1) {
+      message = "ATTENTION : Votre licence expire DEMAIN !";
+      color = Colors.red;
+    } else if (days <= 7) {
+      message = "Rappel : Il vous reste moins d'une semaine de licence ($days jours).";
+      color = Colors.redAccent;
+    } else if (days == 30 || days == 29) {
+      message = "Information : Votre licence expire dans 1 mois.";
+    } else if (days == 90 || days == 89) {
+      message = "Information : Votre licence expire dans 3 mois.";
+    }
+
+    if (message != null) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Row(children: [Icon(Icons.warning_amber, color: color), SizedBox(width: 10), Text("Licence")]),
+          content: Text(message!),
+          actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text("OK"))],
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final appConfig = Provider.of<AppConfig>(context);
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final licenseProvider = Provider.of<LicenseProvider>(context); // Ecoute pour le compteur
+
     final userName = authProvider.user?.firstName ?? 'Utilisateur';
     final userOfficine = authProvider.user?.officine ?? '';
+    final int daysLeft = licenseProvider.daysRemaining;
 
     return Scaffold(
       appBar: AppBar(
@@ -33,13 +89,30 @@ class HomeScreen extends StatelessWidget {
       ),
       body: Column(
         children: [
+          // BANDEAU SUPERIEUR (Licence + Mode)
           Container(
             color: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Mode de connexion :'),
+                // Compteur Licence
+                Row(
+                  children: [
+                    Icon(Icons.timer, size: 16, color: daysLeft < 30 ? Colors.red : Colors.green),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$daysLeft j restants',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: daysLeft < 30 ? Colors.red : Colors.green,
+                          fontSize: 12
+                      ),
+                    ),
+                  ],
+                ),
+
+                // Switch Mode
                 Row(
                   children: [
                     Text(
@@ -60,6 +133,7 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
           const Divider(height: 1, thickness: 1),
+
           Expanded(
             child: Center(
               child: SingleChildScrollView(
@@ -83,15 +157,14 @@ class HomeScreen extends StatelessWidget {
                       ),
                     const SizedBox(height: 30),
 
-                    // BOUTON 1
+                    // LES BOUTONS EXISTANTS (Inchangés)
                     _buildMenuButton(
-                      context, 'SAISIE GUIDEE\n(Mode Guidé)', Icons.inventory_2_outlined,
+                      context, 'SAISIE GUIDÉE LISTE\n(Mode Guidé)', Icons.inventory_2_outlined,
                       AppColors.accent,
                           () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: false))),
                     ),
                     const SizedBox(height: 16),
 
-                    // BOUTON 2
                     _buildMenuButton(
                       context, 'SAISIE RAPIDE\n(Mode Scan)', Icons.qr_code_scanner,
                       Colors.orange.shade800,
@@ -99,7 +172,6 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 16),
 
-                    // BOUTON 3 : ECARTS
                     _buildMenuButton(
                       context, 'CORRECTION ÉCARTS\n(Scan & Liste)', Icons.rule,
                       Colors.red.shade700,
@@ -107,7 +179,6 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 16),
 
-                    // BOUTON 4 : RESTANTS (NOUVEAU)
                     _buildMenuButton(
                       context, 'RESTANTS À FAIRE\n(Produits non comptés)', Icons.hourglass_empty,
                       Colors.purple.shade700,
@@ -115,7 +186,6 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 16),
 
-                    // BOUTON 5 : COLLECTE
                     _buildMenuButton(
                       context, 'COLLECTE LIBRE\n(Mode Hors-ligne)', Icons.data_saver_on,
                       Colors.teal.shade700,
