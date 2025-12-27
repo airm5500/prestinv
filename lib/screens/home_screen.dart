@@ -9,7 +9,6 @@ import 'package:prestinv/screens/inventory_list_screen.dart';
 import 'package:prestinv/screens/config_screen.dart';
 import 'package:prestinv/screens/analysis_screen.dart';
 import 'package:prestinv/utils/app_utils.dart';
-// NOUVEAU : Import du nouvel écran
 import 'package:prestinv/screens/collection_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -30,7 +29,6 @@ class HomeScreen extends StatelessWidget {
           IconButton(icon: const Icon(Icons.analytics_outlined), tooltip: 'Analyse', onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalysisScreen()))),
           IconButton(icon: const Icon(Icons.settings_outlined), tooltip: 'Configuration', onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConfigScreen()))),
           IconButton(icon: const Icon(Icons.logout), tooltip: 'Déconnexion', onPressed: () => performLogout(context)),
-
         ],
       ),
       body: Column(
@@ -83,88 +81,45 @@ class HomeScreen extends StatelessWidget {
                           textAlign: TextAlign.center,
                         ),
                       ),
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 30),
 
-                    // BOUTON 1 : INVENTAIRE CLASSIQUE
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.inventory_2_outlined, size: 28),
-                        label: const Text('COMMENCER L\'INVENTAIRE\n(Mode Guidé)', textAlign: TextAlign.center),
-                        style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                        ),
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: false)),
-                          );
-                        },
-                      ),
+                    // BOUTON 1
+                    _buildMenuButton(
+                      context, 'SAISIE GUIDEE\n(Mode Guidé)', Icons.inventory_2_outlined,
+                      AppColors.accent,
+                          () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: false))),
                     ),
+                    const SizedBox(height: 16),
 
-                    const SizedBox(height: 20),
-
-                    // BOUTON 2 : SAISIE RAPIDE (MODE SCAN)
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.qr_code_scanner, size: 28),
-                        label: const Text('SAISIE RAPIDE\n(Mode Scan)', textAlign: TextAlign.center),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange.shade800,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                        ),
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: true)),
-                          );
-                        },
-                      ),
+                    // BOUTON 2
+                    _buildMenuButton(
+                      context, 'SAISIE RAPIDE\n(Mode Scan)', Icons.qr_code_scanner,
+                      Colors.orange.shade800,
+                          () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: true))),
                     ),
+                    const SizedBox(height: 16),
 
-                    const SizedBox(height: 20),
-
-                    // --- AJOUT DU BOUTON CORRECTION ÉCARTS ---
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.rule, size: 28), // Icône appropriée pour correction/règle
-                        label: const Text('CORRECTION ÉCARTS\n(Scan & Liste)', textAlign: TextAlign.center),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red.shade700, // Rouge pour signifier correction/urgence
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                        ),
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            // On appelle InventoryListScreen avec le nouveau mode
-                            MaterialPageRoute(builder: (_) => const InventoryListScreen(isVarianceMode: true)),
-                          );
-                        },
-                      ),
+                    // BOUTON 3 : ECARTS
+                    _buildMenuButton(
+                      context, 'CORRECTION ÉCARTS\n(Scan & Liste)', Icons.rule,
+                      Colors.red.shade700,
+                          () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InventoryListScreen(isVarianceMode: true))),
                     ),
-                    // -----------------------------------------
+                    const SizedBox(height: 16),
 
-                    const SizedBox(height: 20),
-                    
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.data_saver_on, size: 28),
-                        label: const Text('COLLECTE LIBRE\n(Mode Collecte)', textAlign: TextAlign.center),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.teal.shade700, // Couleur distincte (Vert/Teal)
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                        ),
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const CollectionScreen()),
-                          );
-                        },
-                      ),
+                    // BOUTON 4 : RESTANTS (NOUVEAU)
+                    _buildMenuButton(
+                      context, 'RESTANTS À FAIRE\n(Produits non comptés)', Icons.hourglass_empty,
+                      Colors.purple.shade700,
+                          () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InventoryListScreen(isUncountedMode: true))),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // BOUTON 5 : COLLECTE
+                    _buildMenuButton(
+                      context, 'COLLECTE LIBRE\n(Mode Hors-ligne)', Icons.data_saver_on,
+                      Colors.teal.shade700,
+                          () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CollectionScreen())),
                     ),
                   ],
                 ),
@@ -172,6 +127,22 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMenuButton(BuildContext context, String label, IconData icon, Color color, VoidCallback onPressed) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        icon: Icon(icon, size: 28),
+        label: Text(label, textAlign: TextAlign.center),
+        style: ElevatedButton.styleFrom(
+            backgroundColor: color,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+        ),
+        onPressed: onPressed,
       ),
     );
   }

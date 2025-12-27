@@ -203,4 +203,31 @@ class ApiService {
       rethrow;
     }
   }
+
+  // --- NOUVELLE MÉTHODE : Chargement des produits non inventoriés ---
+  Future<List<Product>> fetchUntouchedProducts(String idInventaire, {String? query}) async {
+    String urlStr = '$baseUrl/api/v1/ws/inventaires/detailsAllUntouched?idInventaire=$idInventaire';
+    if (query != null && query.isNotEmpty) {
+      urlStr += '&query=${Uri.encodeQueryComponent(query)}';
+    }
+    final url = Uri.parse(urlStr);
+    try {
+      print("Calling API Untouched: $urlStr");
+      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
+      if (response.statusCode == 200) {
+        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+        List<Product> products = data.map((json) => Product.fromJson(json)).toList();
+        products.sort((a, b) => a.produitName.compareTo(b.produitName));
+        return products;
+      } else {
+        throw Exception('Échec du chargement des restants (Statut: ${response.statusCode})');
+      }
+    } on SocketException {
+      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
+    } on TimeoutException {
+      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

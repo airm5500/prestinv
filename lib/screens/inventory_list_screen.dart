@@ -8,18 +8,20 @@ import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/providers/inventory_provider.dart';
 import 'package:prestinv/screens/inventory_entry_screen.dart';
 import 'package:prestinv/providers/entry_provider.dart';
-import 'package:prestinv/screens/global_variance_screen.dart'; // Assurez-vous d'avoir créé ce fichier
+import 'package:prestinv/screens/global_variance_screen.dart';
+import 'package:prestinv/screens/uncounted_screen.dart'; // NOUVEAU IMPORT
 
 class InventoryListScreen extends StatefulWidget {
-  // Paramètre pour savoir si on est en mode "Saisie Rapide"
   final bool isQuickMode;
-  // NOUVEAU : Paramètre pour le mode "Correction Écarts"
   final bool isVarianceMode;
+  // AJOUT : Nouveau mode Restants
+  final bool isUncountedMode;
 
   const InventoryListScreen({
     super.key,
     this.isQuickMode = false,
     this.isVarianceMode = false,
+    this.isUncountedMode = false,
   });
 
   @override
@@ -50,15 +52,10 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Le titre de la page s'adapte au mode sélectionné
     String title = 'Choisir un inventaire';
-    if (widget.isQuickMode) {
-      title += ' (Scan Rapide)';
-    } else if (widget.isVarianceMode) {
-      title += ' (Correction Écarts)';
-    } else {
-      title += ' (Mode Guidé)';
-    }
+    if (widget.isQuickMode) title += ' (Scan Rapide)';
+    else if (widget.isVarianceMode) title += ' (Correction Écarts)';
+    else if (widget.isUncountedMode) title += ' (Restants)'; // Titre adapté
 
     return Scaffold(
       appBar: AppBar(
@@ -72,16 +69,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
               return const Center(child: CircularProgressIndicator());
             }
             if (provider.error != null) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text(
-                    'Erreur de chargement des inventaires.\nAssurez-vous que le serveur est accessible et que la configuration est correcte.\n\nDétail: ${provider.error}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.red),
-                  ),
-                ),
-              );
+              return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text('Erreur: ${provider.error}', style: const TextStyle(color: Colors.red))));
             }
             if (provider.inventories.isEmpty) {
               return const Center(child: Text('Aucun inventaire trouvé.'));
@@ -97,32 +85,33 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                   title: Text(provider.inventories[i].libelle),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () {
-                    // --- LOGIQUE DE NAVIGATION SELON LE MODE ---
-
+                    // --- ROUTAGE SELON LE MODE ---
                     if (widget.isVarianceMode) {
-                      // 1. Mode Correction Écarts -> Nouvel écran GlobalVarianceScreen
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => GlobalVarianceScreen(
-                            inventoryId: provider.inventories[i].id,
-                            inventoryName: provider.inventories[i].libelle,
-                          ),
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => GlobalVarianceScreen(
+                          inventoryId: provider.inventories[i].id,
+                          inventoryName: provider.inventories[i].libelle,
                         ),
-                      );
-                    } else {
-                      // 2. Modes Saisie (Guidé ou Rapide) -> Écran InventoryEntryScreen
-
-                      // On réinitialise le provider d'entrée pour partir sur une base propre
+                      ));
+                    }
+                    else if (widget.isUncountedMode) {
+                      // ROUTAGE VERS ECRAN RESTANTS
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => UncountedScreen(
+                          inventoryId: provider.inventories[i].id,
+                          inventoryName: provider.inventories[i].libelle,
+                        ),
+                      ));
+                    }
+                    else {
+                      // Modes Saisie Classique
                       Provider.of<EntryProvider>(context, listen: false).reset();
-
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => InventoryEntryScreen(
-                            inventoryId: provider.inventories[i].id,
-                            isQuickMode: widget.isQuickMode,
-                          ),
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => InventoryEntryScreen(
+                          inventoryId: provider.inventories[i].id,
+                          isQuickMode: widget.isQuickMode,
                         ),
-                      );
+                      ));
                     }
                   },
                 ),
