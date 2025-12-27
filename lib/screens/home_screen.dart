@@ -126,7 +126,29 @@ class HomeScreen extends StatelessWidget {
 
                     const SizedBox(height: 20),
 
-                    // NOUVEAU BOUTON 3 : COLLECTE DE DONNÉES
+                    // --- AJOUT DU BOUTON CORRECTION ÉCARTS ---
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.rule, size: 28), // Icône appropriée pour correction/règle
+                        label: const Text('CORRECTION ÉCARTS\n(Scan & Liste)', textAlign: TextAlign.center),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red.shade700, // Rouge pour signifier correction/urgence
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            // On appelle InventoryListScreen avec le nouveau mode
+                            MaterialPageRoute(builder: (_) => const InventoryListScreen(isVarianceMode: true)),
+                          );
+                        },
+                      ),
+                    ),
+                    // -----------------------------------------
+
+                    const SizedBox(height: 20),
+                    
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(

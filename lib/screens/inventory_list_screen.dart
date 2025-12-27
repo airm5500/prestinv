@@ -8,13 +8,19 @@ import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/providers/inventory_provider.dart';
 import 'package:prestinv/screens/inventory_entry_screen.dart';
 import 'package:prestinv/providers/entry_provider.dart';
+import 'package:prestinv/screens/global_variance_screen.dart'; // Assurez-vous d'avoir créé ce fichier
 
 class InventoryListScreen extends StatefulWidget {
-  // NOUVEAU : Paramètre pour savoir si on est en mode "Saisie Rapide"
+  // Paramètre pour savoir si on est en mode "Saisie Rapide"
   final bool isQuickMode;
+  // NOUVEAU : Paramètre pour le mode "Correction Écarts"
+  final bool isVarianceMode;
 
-  // Constructeur mis à jour pour accepter le paramètre (par défaut à false)
-  const InventoryListScreen({super.key, this.isQuickMode = false});
+  const InventoryListScreen({
+    super.key,
+    this.isQuickMode = false,
+    this.isVarianceMode = false,
+  });
 
   @override
   State<InventoryListScreen> createState() => _InventoryListScreenState();
@@ -44,10 +50,19 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Le titre de la page s'adapte au mode sélectionné
+    String title = 'Choisir un inventaire';
+    if (widget.isQuickMode) {
+      title += ' (Scan Rapide)';
+    } else if (widget.isVarianceMode) {
+      title += ' (Correction Écarts)';
+    } else {
+      title += ' (Mode Guidé)';
+    }
+
     return Scaffold(
       appBar: AppBar(
-        // Le titre change selon le mode
-        title: Text(widget.isQuickMode ? 'Choisir un inventaire (Scan)' : 'Choisir un inventaire'),
+        title: Text(title),
       ),
       body: RefreshIndicator(
         onRefresh: _refreshInventories,
@@ -71,6 +86,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
             if (provider.inventories.isEmpty) {
               return const Center(child: Text('Aucun inventaire trouvé.'));
             }
+
             return ListView.builder(
               itemCount: provider.inventories.length,
               itemBuilder: (ctx, i) => Card(
@@ -81,18 +97,33 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                   title: Text(provider.inventories[i].libelle),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () {
-                    // On réinitialise le provider d'entrée avant d'y aller
-                    Provider.of<EntryProvider>(context, listen: false).reset();
+                    // --- LOGIQUE DE NAVIGATION SELON LE MODE ---
 
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => InventoryEntryScreen(
-                          inventoryId: provider.inventories[i].id,
-                          // IMPORTANT : On transmet le mode choisi à l'écran suivant
-                          isQuickMode: widget.isQuickMode,
+                    if (widget.isVarianceMode) {
+                      // 1. Mode Correction Écarts -> Nouvel écran GlobalVarianceScreen
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => GlobalVarianceScreen(
+                            inventoryId: provider.inventories[i].id,
+                            inventoryName: provider.inventories[i].libelle,
+                          ),
                         ),
-                      ),
-                    );
+                      );
+                    } else {
+                      // 2. Modes Saisie (Guidé ou Rapide) -> Écran InventoryEntryScreen
+
+                      // On réinitialise le provider d'entrée pour partir sur une base propre
+                      Provider.of<EntryProvider>(context, listen: false).reset();
+
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => InventoryEntryScreen(
+                            inventoryId: provider.inventories[i].id,
+                            isQuickMode: widget.isQuickMode,
+                          ),
+                        ),
+                      );
+                    }
                   },
                 ),
               ),
