@@ -74,7 +74,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     _sendReminderTimer?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
-    _debounceTimer?.cancel(); // Annulation du timer de recherche
+    _debounceTimer?.cancel();
     super.dispose();
   }
 
@@ -85,7 +85,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       String targetRayonId = provider.selectedRayon?.id ?? "";
       String targetRayonName = provider.selectedRayon?.libelle ?? "Global";
       List<Product> products;
-      // Chargement des produits pour le récap
       if (targetRayonId.isNotEmpty) {
         products = await _apiService.fetchProducts(widget.inventoryId, targetRayonId);
       } else {
@@ -222,11 +221,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  // --- LOGIQUE DE RECHERCHE AS-YOU-TYPE (DEBOUNCE) ---
+  // --- LOGIQUE DE RECHERCHE ---
+
   void _onSearchChanged(String query) {
     if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
 
-    // Si vide, on efface tout immédiatement
+    // Si vide, on efface immédiatement
     if (query.isEmpty) {
       setState(() {
         _showSearchResults = false;
@@ -235,9 +235,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       return;
     }
 
-    // Sinon, on déclenche la recherche après 500ms
+    // Sinon, debounce de 500ms
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
-      // IMPORTANT: fromTyping = true empêche de fermer le clavier automatiquement
       _handleScanOrSearch(query, fromTyping: true);
     });
   }
@@ -261,16 +260,15 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       if (!mounted) return;
 
       if (onlineMatches.isNotEmpty) {
-        // Résultats trouvés
         setState(() {
           _filteredProducts = onlineMatches;
           _showSearchResults = true;
         });
 
         if (fromTyping) {
-          // Pendant la frappe : On laisse le clavier ouvert (PAS de unfocus)
+          // Pendant la frappe : on ne fait RIEN d'autre (le clavier reste ouvert)
         } else {
-          // Validation manuelle (Touche Entrée)
+          // Validation manuelle
           if (onlineMatches.length == 1) {
             _openQuickEntryDialog(onlineMatches.first);
             _searchController.clear();
@@ -372,7 +370,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                             if (mounted) _searchFocusNode.requestFocus();
                           });
                         } else {
-                          // En mode Guidé, retour au focus quantité
                           Future.delayed(const Duration(milliseconds: 100), () {
                             if (mounted) {
                               FocusScope.of(context).unfocus();
@@ -458,12 +455,98 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
+  // --- NOUVEAU : Méthode pour le dialogue "Aller à" ---
+  void _showJumpDialog(EntryProvider provider) {
+    final TextEditingController jumpController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Aller au produit'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Entrez une position (ex: 45), un nom ou un code :"),
+              const SizedBox(height: 10),
+              TextField(
+                controller: jumpController,
+                autofocus: true,
+                keyboardType: TextInputType.text,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  hintText: 'Position, Nom ou Code',
+                  prefixIcon: Icon(Icons.directions),
+                ),
+                onSubmitted: (_) => _performJump(ctx, provider, jumpController.text),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Annuler')
+            ),
+            ElevatedButton(
+              onPressed: () => _performJump(ctx, provider, jumpController.text),
+              child: const Text('Aller'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _performJump(BuildContext dialogContext, EntryProvider provider, String input) {
+    if (input.isEmpty) return;
+    Navigator.of(dialogContext).pop();
+
+    final products = provider.products;
+    int targetIndex = -1;
+
+    // 1. Essayer comme position
+    if (RegExp(r'^\d+$').hasMatch(input)) {
+      int pos = int.parse(input);
+      if (pos > 0 && pos <= products.length) {
+        targetIndex = pos - 1;
+      }
+    }
+
+    // 2. Sinon, chercher par code ou nom
+    if (targetIndex == -1) {
+      targetIndex = products.indexWhere((p) =>
+      p.produitCip.contains(input) ||
+          p.produitName.toLowerCase().contains(input.toLowerCase())
+      );
+    }
+
+    // 3. Exécuter le saut
+    if (targetIndex != -1) {
+      final targetProduct = products[targetIndex];
+      provider.jumpToProduct(targetProduct);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Position ${targetIndex + 1} : ${targetProduct.produitName}'),
+            duration: const Duration(seconds: 1),
+            backgroundColor: Colors.green,
+          )
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Aucun produit trouvé.'),
+            backgroundColor: Colors.red,
+          )
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: _onWillPop,
       child: Scaffold(
-        // Permet au contenu de remonter quand le clavier s'ouvre
         resizeToAvoidBottomInset: true,
 
         appBar: AppBar(
@@ -493,9 +576,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text('Une erreur est survenue :\n${provider.error}', textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontSize: 16))));
             }
 
-            // --- CORRECTION MAJEURE DU SCINTILLEMENT DU CLAVIER ---
-            // On n'affiche le loader plein écran QUE si on charge les rayons au démarrage (Mode Guidé)
-            // En mode Rapide, on ne bloque PAS l'interface si isLoading est vrai pendant une recherche
+            // CORRECTION: Loader uniquement si ce n'est pas le mode rapide, pour éviter scintillement clavier
             if (provider.isLoading && provider.rayons.isEmpty && !widget.isQuickMode) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -588,7 +669,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   Expanded(
                     child: Stack(
                       children: [
-                        // Affichage conditionnel du contenu
                         (provider.isLoading && provider.products.isEmpty)
                             ? const Center(child: CircularProgressIndicator())
                             : (provider.products.isEmpty || provider.currentProduct == null)
@@ -597,7 +677,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                             ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.qr_code_scanner, size: 80, color: Colors.grey.shade300), const SizedBox(height: 16), const Text('Mode Saisie Rapide Activé', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey)), const SizedBox(height: 8), const Text('Scannez un produit pour saisir sa quantité', style: TextStyle(color: Colors.grey))]))
                             : buildProductView(provider),
 
-                        // Affichage des résultats de recherche par-dessus
                         if (_showSearchResults)
                           Container(
                             color: AppColors.background.withOpacity(0.98),
@@ -639,7 +718,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
-  // ... Les widgets _buildNotificationArea et buildProductView restent inchangés ...
   Widget _buildNotificationArea() {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
@@ -810,6 +888,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               ),
             ),
 
+            const SizedBox(width: 8),
+
+            // NOUVEAU BOUTON "Aller à" (Remplace goToFirstProduct)
             SizedBox(
               width: buttonSize,
               height: buttonSize,
@@ -817,10 +898,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 style: OutlinedButton.styleFrom(
                   shape: const CircleBorder(),
                   padding: const EdgeInsets.all(12),
-                  side: const BorderSide(color: Colors.red, width: 2),
+                  side: const BorderSide(color: Colors.blue, width: 2),
                 ),
-                onPressed: () => provider.goToFirstProduct(),
-                child: Icon(Icons.first_page, size: buttonIconSize, color: Colors.red),
+                onPressed: () => _showJumpDialog(provider),
+                child: Icon(Icons.find_in_page, size: buttonIconSize * 0.9, color: Colors.blue),
               ),
             ),
           ],
