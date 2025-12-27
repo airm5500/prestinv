@@ -46,10 +46,8 @@ class EntryProvider with ChangeNotifier {
   bool get hasUnsyncedData => _allProducts.any((p) => !p.isSynced);
 
   Future<void> _saveUnsyncedData() async {
-    // Si on est en mode global (selectedRayon == null), on utilise une clé générique ou on ne sauvegarde pas localement de la même façon.
-    // Pour simplifier ici, on garde la logique rayon si présent.
+    // Sauvegarde contextuelle (Rayon ou Global)
     final String keySuffix = _selectedRayon?.id ?? 'global_${_isGlobalMode ? "quick" : "unknown"}';
-
     final prefs = await SharedPreferences.getInstance();
     final key = 'unsynced_data_$keySuffix';
 
@@ -85,7 +83,6 @@ class EntryProvider with ChangeNotifier {
         return apiProduct;
       }).toList();
     } catch (e) {
-      // En cas d'erreur de parsing, on retourne les produits API bruts
       return apiProducts;
     }
   }
@@ -136,16 +133,21 @@ class EntryProvider with ChangeNotifier {
           _filteredProducts = _allProducts.sublist(from, to);
         } catch (e) { _filteredProducts = []; }
         break;
+
       case FilterType.alphabetic:
         try {
           final from = _activeFilter.from.toLowerCase();
-          final to = _activeFilter.to.toLowerCase();
+          // CORRECTION: Ajout du caractère unicode maximum pour inclure les mots commençant par 'to'
+          // Ex: "TOT" -> "TOT\uffff". Ainsi "TOTHEMA" <= "TOT\uffff" sera VRAI.
+          final to = _activeFilter.to.toLowerCase() + '\uffff';
+
           _filteredProducts = _allProducts.where((p) {
             final name = p.produitName.toLowerCase();
             return name.compareTo(from) >= 0 && name.compareTo(to) <= 0;
           }).toList();
         } catch(e) { _filteredProducts = []; }
         break;
+
       case FilterType.none:
       default:
         _filteredProducts = List.from(_allProducts);
@@ -212,18 +214,18 @@ class EntryProvider with ChangeNotifier {
 
     try {
       final rayonId = _selectedRayon?.id;
+      // ApiService gère le basculement details/detailsAll via idRayon null ou non
       results = await api.fetchProducts(inventoryId, rayonId, query: query);
 
       if (results.isNotEmpty) {
         if (rayonId == null) {
-          // Mode Global : On remplace la liste affichée
+          // Mode Global : On remplace la liste affichée par les résultats
           _allProducts = results;
           _filteredProducts = results;
           _isGlobalMode = true;
           _currentProductIndex = 0;
         }
-        // Mode Rayon : On ne remplace PAS la liste affichée pour ne pas perdre le contexte.
-        // On retourne juste le résultat.
+        // Mode Rayon : On ne remplace pas la liste, on retourne juste les résultats pour popup
       }
     } catch (e) {
       _error = "Erreur recherche: $e";
@@ -271,27 +273,23 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // --- CORRECTION CRITIQUE POUR LA SYNCHRO ---
-  // Cette méthode met à jour la quantité d'un produit.
-  // Elle s'assure de mettre à jour l'instance présente dans _allProducts
-  // pour qu'elle soit prise en compte lors de l'envoi global.
+  // Cette méthode met à jour la quantité d'un produit en assurant la persistance
+  // dans la liste principale, même si on est en mode recherche ou filtre.
   Future<void> updateSpecificProduct(Product productToUpdate) async {
-    // 1. Essayer de trouver le produit dans la liste principale par son ID
     try {
+      // On cherche l'instance "réelle" dans la liste complète
       final index = _allProducts.indexWhere((p) => p.id == productToUpdate.id);
 
       if (index != -1) {
-        // TROUVÉ : On met à jour l'instance originale
+        // Mise à jour de l'existant
         _allProducts[index].quantiteSaisie = productToUpdate.quantiteSaisie;
         _allProducts[index].isSynced = false;
       } else {
-        // NON TROUVÉ : Cas rare en Saisie Guidée (produit scanné absent de la liste chargée ?)
-        // Ou cas Saisie Rapide (où la liste est volatile)
-        // On l'ajoute à la liste pour qu'il soit sauvegardé
+        // Ajout (Cas Saisie Rapide sur produit non chargé initialement)
         productToUpdate.isSynced = false;
         _allProducts.add(productToUpdate);
 
-        // Si on est en mode global/recherche, on met aussi à jour la liste filtrée
+        // Si on est en mode affichage filtré/global, on met à jour la vue aussi
         if (_isGlobalMode) {
           final filterIndex = _filteredProducts.indexWhere((p) => p.id == productToUpdate.id);
           if (filterIndex != -1) {
@@ -306,7 +304,6 @@ class EntryProvider with ChangeNotifier {
       print("Erreur updateSpecificProduct : $e");
     }
 
-    // 2. Sauvegarde persistante
     await _saveUnsyncedData();
     notifyListeners();
   }
@@ -315,7 +312,6 @@ class EntryProvider with ChangeNotifier {
     if (currentProduct != null) {
       final int quantity = int.tryParse(value) ?? 0;
       if (quantity >= 0) {
-        // On utilise la nouvelle logique robuste
         currentProduct!.quantiteSaisie = quantity;
         await updateSpecificProduct(currentProduct!);
       }
@@ -325,6 +321,7 @@ class EntryProvider with ChangeNotifier {
   void nextProduct() { if (_currentProductIndex < _filteredProducts.length - 1) { _currentProductIndex++; _saveCurrentIndex(); notifyListeners(); } }
   void previousProduct() { if (_currentProductIndex > 0) { _currentProductIndex--; _saveCurrentIndex(); notifyListeners(); } }
   void goToFirstProduct() { if (_filteredProducts.isNotEmpty) { _currentProductIndex = 0; _saveCurrentIndex(); notifyListeners(); } }
+
   void jumpToProduct(Product product) {
     final index = _filteredProducts.indexWhere((p) => p.id == product.id);
     if (index != -1) { _currentProductIndex = index; _saveCurrentIndex(); notifyListeners(); }
