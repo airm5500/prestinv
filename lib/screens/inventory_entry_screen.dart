@@ -85,6 +85,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       String targetRayonId = provider.selectedRayon?.id ?? "";
       String targetRayonName = provider.selectedRayon?.libelle ?? "Global";
       List<Product> products;
+      // Chargement des produits pour le récap
       if (targetRayonId.isNotEmpty) {
         products = await _apiService.fetchProducts(widget.inventoryId, targetRayonId);
       } else {
@@ -221,11 +222,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  // --- LOGIQUE DE RECHERCHE AMÉLIORÉE ---
-
+  // --- LOGIQUE DE RECHERCHE AS-YOU-TYPE (DEBOUNCE) ---
   void _onSearchChanged(String query) {
     if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
 
+    // Si vide, on efface tout immédiatement
     if (query.isEmpty) {
       setState(() {
         _showSearchResults = false;
@@ -234,10 +235,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       return;
     }
 
-    // Déclenche la recherche après 500ms d'inactivité
+    // Sinon, on déclenche la recherche après 500ms
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
-      // IMPORTANT: fromTyping = true indique qu'on est en train de taper
-      // et qu'on ne veut PAS fermer le clavier ni ouvrir de popup automatiquement
+      // IMPORTANT: fromTyping = true empêche de fermer le clavier automatiquement
       _handleScanOrSearch(query, fromTyping: true);
     });
   }
@@ -248,7 +248,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     _debounceTimer?.cancel();
     final provider = Provider.of<EntryProvider>(context, listen: false);
 
-    // Pas de snackbar pendant la frappe pour éviter de polluer l'écran
     if (!fromTyping) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -269,19 +268,15 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         });
 
         if (fromTyping) {
-          // Pendant la frappe : On affiche la liste MAIS on garde le clavier ouvert.
-          // On n'ouvre JAMAIS le popup automatiquement ici, même s'il n'y a qu'un seul résultat.
-          // L'utilisateur doit choisir le produit dans la liste.
+          // Pendant la frappe : On laisse le clavier ouvert (PAS de unfocus)
         } else {
-          // Validation manuelle (Touche Entrée) :
+          // Validation manuelle (Touche Entrée)
           if (onlineMatches.length == 1) {
-            // Un seul résultat -> Popup direct et on ferme le clavier
             _openQuickEntryDialog(onlineMatches.first);
             _searchController.clear();
             setState(() { _showSearchResults = false; });
             FocusScope.of(context).unfocus();
           } else {
-            // Plusieurs résultats -> On garde le clavier fermé pour voir la liste
             FocusScope.of(context).unfocus();
           }
         }
@@ -292,7 +287,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
             const SnackBar(content: Text('Produit introuvable.'), backgroundColor: Colors.red),
           );
         }
-        // En frappe, on ne fait rien de spécial, la liste vide ou ancienne disparaît
       }
     } catch (e) {
       if (mounted && !fromTyping) {
@@ -366,7 +360,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                         _saveScannedQuantity(product, qty);
                         Navigator.of(ctx).pop();
 
-                        // --- GESTION DU RETOUR ET FOCUS ---
+                        // Nettoyage et Focus
                         _searchController.clear();
                         setState(() {
                           _showSearchResults = false;
@@ -374,16 +368,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                         });
 
                         if (widget.isQuickMode) {
-                          // En mode Rapide, on remet le focus sur la recherche pour le scan suivant
                           Future.delayed(const Duration(milliseconds: 100), () {
                             if (mounted) _searchFocusNode.requestFocus();
                           });
                         } else {
-                          // En mode Guidé (Rayon), on remet le focus sur la saisie de quantité principale
-                          // Cela permet de revenir "à l'écran de saisie qui était déjà en cours"
+                          // En mode Guidé, retour au focus quantité
                           Future.delayed(const Duration(milliseconds: 100), () {
                             if (mounted) {
-                              FocusScope.of(context).unfocus(); // Ferme le clavier recherche si ouvert
+                              FocusScope.of(context).unfocus();
                               _quantityFocusNode.requestFocus();
                             }
                           });
@@ -471,8 +463,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     return WillPopScope(
       onWillPop: _onWillPop,
       child: Scaffold(
-        // resizeToAvoidBottomInset est true par défaut, ce qui permet à la vue de remonter
-        // quand le clavier est ouvert, rendant la liste scrollable au-dessus.
+        // Permet au contenu de remonter quand le clavier s'ouvre
         resizeToAvoidBottomInset: true,
 
         appBar: AppBar(
@@ -501,9 +492,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
             if (provider.error != null) {
               return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text('Une erreur est survenue :\n${provider.error}', textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontSize: 16))));
             }
-            if (provider.isLoading && provider.rayons.isEmpty) {
+
+            // --- CORRECTION MAJEURE DU SCINTILLEMENT DU CLAVIER ---
+            // On n'affiche le loader plein écran QUE si on charge les rayons au démarrage (Mode Guidé)
+            // En mode Rapide, on ne bloque PAS l'interface si isLoading est vrai pendant une recherche
+            if (provider.isLoading && provider.rayons.isEmpty && !widget.isQuickMode) {
               return const Center(child: CircularProgressIndicator());
             }
+
             final currentProduct = provider.currentProduct;
             if (!widget.isQuickMode && currentProduct != null && currentProduct.id != _lastDisplayedProductId) {
               _lastDisplayedProductId = currentProduct.id;
@@ -592,10 +588,16 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   Expanded(
                     child: Stack(
                       children: [
-                        (provider.isLoading && provider.products.isEmpty) ? const Center(child: CircularProgressIndicator()) : (provider.products.isEmpty || provider.currentProduct == null) ? Center(child: Text(provider.activeFilter.isActive ? 'Aucun produit dans cet intervalle.' : 'Aucun produit. Commencez par scanner.'))
+                        // Affichage conditionnel du contenu
+                        (provider.isLoading && provider.products.isEmpty)
+                            ? const Center(child: CircularProgressIndicator())
+                            : (provider.products.isEmpty || provider.currentProduct == null)
+                            ? Center(child: Text(provider.activeFilter.isActive ? 'Aucun produit dans cet intervalle.' : 'Aucun produit. Commencez par scanner.'))
                             : widget.isQuickMode
                             ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.qr_code_scanner, size: 80, color: Colors.grey.shade300), const SizedBox(height: 16), const Text('Mode Saisie Rapide Activé', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey)), const SizedBox(height: 8), const Text('Scannez un produit pour saisir sa quantité', style: TextStyle(color: Colors.grey))]))
                             : buildProductView(provider),
+
+                        // Affichage des résultats de recherche par-dessus
                         if (_showSearchResults)
                           Container(
                             color: AppColors.background.withOpacity(0.98),
@@ -637,7 +639,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
-  // ... (Widgets _buildNotificationArea et buildProductView inchangés) ...
+  // ... Les widgets _buildNotificationArea et buildProductView restent inchangés ...
   Widget _buildNotificationArea() {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
