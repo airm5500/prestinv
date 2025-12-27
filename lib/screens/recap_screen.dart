@@ -64,7 +64,6 @@ class _RecapScreenState extends State<RecapScreen> {
 
     // Logique hybride (Pré-chargé OU Téléchargement)
     if (widget.preloadedProducts != null) {
-      // On utilise le '!' car on a vérifié que ce n'est pas null
       _productsFuture = Future.value(widget.preloadedProducts!).then((products) {
         if (mounted) {
           _calculateTotals(products);
@@ -72,7 +71,6 @@ class _RecapScreenState extends State<RecapScreen> {
         return products;
       });
     } else {
-      // Sinon, on télécharge comme avant (comportement par défaut)
       _productsFuture = _apiService.fetchProducts(widget.inventoryId, widget.rayonId)
           .then((products) {
         if (mounted) {
@@ -130,12 +128,14 @@ class _RecapScreenState extends State<RecapScreen> {
       final doc = pw.Document();
 
       // Préparation des données pour le PDF
+      // Changement des libellés : 'Ecart', 'Rayon', 'Machine'
       final List<List<String>> tableData = [
-        ['Désignation', 'Écart Qté', 'Stock Compté', 'Stock Théo.', 'Valorisation'],
+        ['CIP', 'Désignation', 'Ecart', 'Rayon', 'Théo', 'Valorisation'],
         ...products.map((p) {
           final ecart = p.quantiteSaisie - p.quantiteInitiale;
           final valo = ecart * p.produitPrixAchat;
           return [
+            p.produitCip,
             p.produitName,
             ecart.toString(),
             p.quantiteSaisie.toString(),
@@ -148,6 +148,8 @@ class _RecapScreenState extends State<RecapScreen> {
       doc.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
+          // Marges réduites pour gagner de la place
+          margin: const pw.EdgeInsets.all(15),
           header: (pw.Context context) => pw.Header(level: 0, text: 'Récapitulatif - ${widget.rayonName}'),
           footer: (pw.Context context) => pw.Align(
             alignment: pw.Alignment.centerRight,
@@ -156,9 +158,25 @@ class _RecapScreenState extends State<RecapScreen> {
           build: (pw.Context context) => [
             pw.Table.fromTextArray(
               data: tableData,
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-              cellAlignment: pw.Alignment.centerLeft,
-              cellAlignments: {1: pw.Alignment.center, 2: pw.Alignment.center, 3: pw.Alignment.center, 4: pw.Alignment.centerRight},
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+              cellStyle: const pw.TextStyle(fontSize: 9),
+              cellAlignments: {
+                0: pw.Alignment.centerLeft, // CIP
+                1: pw.Alignment.centerLeft, // Désignation
+                2: pw.Alignment.centerRight, // Ecart
+                3: pw.Alignment.centerRight, // Rayon
+                4: pw.Alignment.centerRight, // Machine
+                5: pw.Alignment.centerRight // Val
+              },
+              // Répartition intelligente de l'espace pour maximiser la Désignation
+              columnWidths: {
+                0: const pw.FlexColumnWidth(1.5), // CIP (assez pour 7 chiffres)
+                1: const pw.FlexColumnWidth(6),   // Désignation (MAXIMUM D'ESPACE)
+                2: const pw.FlexColumnWidth(0.8), // Ecart (petit)
+                3: const pw.FlexColumnWidth(0.8), // Rayon (petit)
+                4: const pw.FlexColumnWidth(0.8), // Machine (petit)
+                5: const pw.FlexColumnWidth(1.5), // Valorisation
+              },
             ),
             pw.Divider(height: 30),
             pw.Text('Total Achat: ${numberFormat.format(_totalAchat)}'),

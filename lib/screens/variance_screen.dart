@@ -2,7 +2,7 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Ajouté pour les InputFormatters si besoin
+import 'package:flutter/services.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/config/app_config.dart';
@@ -32,7 +32,7 @@ class VarianceScreen extends StatefulWidget {
 
 class _VarianceScreenState extends State<VarianceScreen> {
   final _searchController = TextEditingController();
-  final _searchFocusNode = FocusNode(); // FocusNode pour la recherche
+  final _searchFocusNode = FocusNode();
 
   final _quantityController = TextEditingController();
   final _quantityFocusNode = FocusNode();
@@ -48,10 +48,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
   bool _isPrinting = false;
 
-  // Variable pour le mode de scan continu (Interrupteur)
   bool _continuousScanMode = false;
-
-  // AJOUT : État pour savoir si on est en train de chercher (clavier Android ouvert)
   bool _isSearching = false;
 
   String? _notificationMessage;
@@ -69,7 +66,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
     _fetchAndSetupProducts();
     _searchController.addListener(_filterProducts);
 
-    // AJOUT : Écouteur pour masquer le clavier numérique lors de la recherche
     _searchFocusNode.addListener(() {
       setState(() {
         _isSearching = _searchFocusNode.hasFocus;
@@ -94,7 +90,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
       if (mounted) {
         setState(() {
-          // On ne garde que les produits avec écarts
           _productsWithVariance = allProductsFromServer
               .where((p) => p.quantiteSaisie != p.quantiteInitiale)
               .toList();
@@ -121,17 +116,14 @@ class _VarianceScreenState extends State<VarianceScreen> {
       _quantityController.text = _productsWithVariance[index].quantiteSaisie.toString();
       _isNewEntry = true;
     });
-    // Focus sur la quantité lors de la navigation manuelle
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _quantityFocusNode.requestFocus();
     });
   }
 
-  // --- Logique Scan-to-Action pour Variance ---
   void _handleScanOrSearch(String query) {
     if (query.isEmpty) return;
 
-    // Recherche dans la liste des ÉCARTS
     final matches = _productsWithVariance.where((p) {
       final q = query.toLowerCase();
       return p.produitCip.toLowerCase().contains(q) ||
@@ -139,29 +131,18 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }).toList();
 
     if (matches.length == 1) {
-      // 1. Produit Unique (Succès) -> Popup Saisie
       _openQuickEntryDialog(matches.first);
-
-      // Nettoyage
       _searchController.clear();
       setState(() { _showSearchResults = false; });
-      // On ne force pas le focus ici, c'est le popup qui le gère
-
     } else if (matches.length > 1) {
-      // 2. Plusieurs résultats -> Liste filtrée
       setState(() {
         _filteredProducts = matches;
         _showSearchResults = true;
       });
-      // FocusScope.of(context).unfocus(); // On garde le focus recherche pour voir les résultats
-
     } else {
-      // 3. Aucun résultat (Erreur)
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Ce produit n\'est pas dans la liste des écarts.'), backgroundColor: Colors.red),
       );
-
-      // Pré-sélection de la saisie pour correction rapide
       _searchFocusNode.requestFocus();
       Future.delayed(const Duration(milliseconds: 50), () {
         if (mounted && _searchController.text.isNotEmpty) {
@@ -174,10 +155,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }
   }
 
-  // --- Popup de Saisie Rapide pour Variance ---
   void _openQuickEntryDialog(Product product) {
     final quickQtyController = TextEditingController();
-    // Champ vide pour nouvelle saisie
 
     showDialog(
       context: context,
@@ -192,7 +171,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
               Text(product.produitName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               Text('CIP: ${product.produitCip}', style: const TextStyle(fontSize: 14)),
               const Divider(),
-              // Infos contextuelles (Stock Théo + Écart actuel)
               Consumer<AppConfig>(
                 builder: (context, appConfig, child) {
                   return Visibility(
@@ -230,7 +208,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                   ),
                   readOnly: true,
                   autofocus: true,
-                  showCursor: true, // Curseur visible
+                  showCursor: true,
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -239,18 +217,14 @@ class _VarianceScreenState extends State<VarianceScreen> {
                     onKeyPressed: (key) {
                       if (key == 'OK') {
                         final int qty = int.tryParse(quickQtyController.text) ?? 0;
-                        // On valide et on ferme
                         _applyQuickCorrection(product, qty);
                         Navigator.of(ctx).pop();
 
-                        // Gestion du focus selon l'interrupteur
                         Future.delayed(const Duration(milliseconds: 100), () {
                           if (mounted) {
                             if (_continuousScanMode) {
-                              // Si Mode Scan actif : Retour au champ de recherche pour le prochain
                               _searchFocusNode.requestFocus();
                             } else {
-                              // Sinon (par défaut) : Retour au champ quantité
                               _quantityFocusNode.requestFocus();
                             }
                           }
@@ -281,16 +255,13 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 
   void _applyQuickCorrection(Product product, int newQuantity) async {
-    // 1. Mise à jour visuelle immédiate
     setState(() {
       product.quantiteSaisie = newQuantity;
-      // Si c'est le produit affiché en fond, on met à jour son champ aussi
-      if (_productsWithVariance[_currentProductIndex].id == product.id) {
+      if (_productsWithVariance.isNotEmpty && _productsWithVariance[_currentProductIndex].id == product.id) {
         _quantityController.text = newQuantity.toString();
       }
     });
 
-    // 2. Envoi API
     try {
       await _apiService.updateProductQuantity(product.id, newQuantity);
       if (mounted) _showNotification('Correction enregistrée !', Colors.green);
@@ -298,7 +269,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
       if (mounted) _showNotification('Erreur sauvegarde: $e', Colors.red);
     }
   }
-  // ---------------------------------------------------------
 
   void _filterProducts() {
     final query = _searchController.text.toLowerCase();
@@ -318,14 +288,11 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 
   void _selectProduct(Product product) {
-    // MODIFIÉ : Ouvre le popup de saisie au lieu de naviguer
     _openQuickEntryDialog(product);
-
     _searchController.clear();
     setState(() {
       _showSearchResults = false;
     });
-    // On laisse le popup gérer le focus à la fermeture
     FocusScope.of(context).unfocus();
   }
 
@@ -393,6 +360,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
     });
   }
 
+  // --- PARTIE MODIFIÉE : GÉNÉRATION DU PDF ---
   Future<void> _printVariances() async {
     if (_isPrinting) return;
 
@@ -419,11 +387,12 @@ class _VarianceScreenState extends State<VarianceScreen> {
     try {
       final doc = pw.Document();
 
+      // MODIFICATION ICI : Ordre des colonnes (CIP en premier)
       final tableData = <List<String>>[
-        ['Désignation', 'CIP', 'Stock Théo.', 'Stock Corrigé', 'Écart'],
+        ['CIP', 'Désignation', 'Stock Théo.', 'Stock Corrigé', 'Écart'],
         ..._productsWithVariance.map((p) => [
+          p.produitCip, // CIP en premier
           p.produitName,
-          p.produitCip,
           p.quantiteInitiale.toString(),
           p.quantiteSaisie.toString(),
           (p.quantiteSaisie - p.quantiteInitiale).toString(),
@@ -438,8 +407,25 @@ class _VarianceScreenState extends State<VarianceScreen> {
             pw.TableHelper.fromTextArray(
               context: context,
               data: tableData,
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-              cellAlignments: {1: pw.Alignment.center, 2: pw.Alignment.center, 3: pw.Alignment.center},
+              // MODIFICATION ICI : Taille de police réduite à 9
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+              cellStyle: const pw.TextStyle(fontSize: 9),
+              // Alignement ajusté
+              cellAlignments: {
+                0: pw.Alignment.centerLeft, // CIP
+                1: pw.Alignment.centerLeft, // Désignation
+                2: pw.Alignment.centerRight,
+                3: pw.Alignment.centerRight,
+                4: pw.Alignment.centerRight
+              },
+              // Largeur relative pour donner de la place au Nom
+              columnWidths: {
+                0: const pw.FlexColumnWidth(2),
+                1: const pw.FlexColumnWidth(5),
+                2: const pw.FlexColumnWidth(1.5),
+                3: const pw.FlexColumnWidth(1.5),
+                4: const pw.FlexColumnWidth(1),
+              },
             )
           ],
         ),
@@ -510,7 +496,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
                 ),
                 const SizedBox(width: 8),
 
-                // Interrupteur "Mode Scan"
                 Column(
                   children: [
                     Switch(
@@ -548,7 +533,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
                           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           child: ListTile(
                             title: Text(product.produitName, maxLines: 1, overflow: TextOverflow.ellipsis),
-                            // MODIFIÉ : Affichage du Prix
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -569,7 +553,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
             ),
           ),
           _buildNotificationArea(),
-          // MODIFIÉ : Masquer le clavier numérique si on recherche
           if (!_isSearching && !_showSearchResults)
             NumericKeyboard(onKeyPressed: _onKeyPressed),
         ],
@@ -657,7 +640,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                   decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
                   keyboardType: TextInputType.none,
                   readOnly: true,
-                  showCursor: true, // Le curseur est bien présent
+                  showCursor: true,
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
