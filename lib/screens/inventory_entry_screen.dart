@@ -168,9 +168,35 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       }
 
       bool isLastProduct = provider.currentProductIndex >= provider.totalProducts - 1;
+
+      // Si c'est le dernier produit (du filtre ou du rayon)
       if (isLastProduct && provider.totalProducts > 0) {
-        _sendReminderTimer?.cancel(); if (!mounted) return;
-        showDialog(context: context, builder: (ctx) => AlertDialog(title: Text(provider.activeFilter.isActive ? 'Fin du filtre' : 'Fin de l\'emplacement'), content: Text(provider.activeFilter.isActive ? 'Vous avez traité le dernier produit du filtre.' : 'Vous avez traité le dernier produit. Voulez-vous envoyer les données au serveur ?'), actions: [ TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')), if (!provider.activeFilter.isActive) TextButton(onPressed: () { Navigator.of(ctx).pop(); _sendDataToServer(); }, child: const Text('Oui, envoyer')), ],),);
+        _sendReminderTimer?.cancel();
+        if (!mounted) return;
+
+        // --- AMÉLIORATION 2 : PROPOSER L'ENVOI MÊME EN MODE FILTRE ---
+        bool isFilterActive = provider.activeFilter.isActive;
+
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(isFilterActive ? 'Fin du filtre' : 'Fin de l\'emplacement'),
+            content: Text(isFilterActive
+                ? 'Vous avez traité le dernier produit du filtre. Voulez-vous envoyer les données maintenant ?'
+                : 'Vous avez traité le dernier produit. Voulez-vous envoyer les données au serveur ?'),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Non, continuer')),
+              // Le bouton Envoyer est maintenant toujours présent à la fin
+              TextButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    _sendDataToServer();
+                  },
+                  child: const Text('Oui, envoyer')
+              ),
+            ],
+          ),
+        );
       } else {
         provider.nextProduct();
       }
@@ -222,11 +248,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   // --- LOGIQUE DE RECHERCHE ---
-
   void _onSearchChanged(String query) {
     if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
 
-    // Si vide, on efface immédiatement
+    // Si vide, on efface tout immédiatement
     if (query.isEmpty) {
       setState(() {
         _showSearchResults = false;
@@ -235,7 +260,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       return;
     }
 
-    // Sinon, debounce de 500ms
+    // Sinon, on déclenche la recherche après 500ms
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
       _handleScanOrSearch(query, fromTyping: true);
     });
@@ -260,6 +285,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       if (!mounted) return;
 
       if (onlineMatches.isNotEmpty) {
+        // Résultats trouvés
         setState(() {
           _filteredProducts = onlineMatches;
           _showSearchResults = true;
@@ -268,7 +294,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         if (fromTyping) {
           // Pendant la frappe : on ne fait RIEN d'autre (le clavier reste ouvert)
         } else {
-          // Validation manuelle
+          // Validation manuelle (Touche Entrée)
           if (onlineMatches.length == 1) {
             _openQuickEntryDialog(onlineMatches.first);
             _searchController.clear();
@@ -455,7 +481,136 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
-  // --- NOUVEAU : Méthode pour le dialogue "Aller à" ---
+  // --- Dialogue de Filtre (Réintégré) ---
+  void _showFilterDialog(BuildContext context, EntryProvider provider) {
+    final currentFilter = provider.activeFilter;
+    final totalProducts = provider.totalProductsInRayon;
+
+    final _fromNumController = TextEditingController(text: currentFilter.type == FilterType.numeric ? currentFilter.from : '');
+    final _toNumController = TextEditingController(text: currentFilter.type == FilterType.numeric ? currentFilter.to : '');
+    final _fromAlphaController = TextEditingController(text: currentFilter.type == FilterType.alphabetic ? currentFilter.from : '');
+    final _toAlphaController = TextEditingController(text: currentFilter.type == FilterType.alphabetic ? currentFilter.to : '');
+
+    FilterType selectedType = currentFilter.type;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setPopupState) {
+            return AlertDialog(
+              title: const Text('Appliquer un filtre'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    RadioListTile<FilterType>(
+                      title: const Text('Intervalle numérique'),
+                      value: FilterType.numeric,
+                      groupValue: selectedType,
+                      onChanged: (val) => setPopupState(() => selectedType = val!),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _fromNumController,
+                            decoration: const InputDecoration(labelText: 'De (N°)', border: OutlineInputBorder()),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            enabled: selectedType == FilterType.numeric,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _toNumController,
+                            decoration: const InputDecoration(labelText: 'À (N°)', border: OutlineInputBorder()),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            enabled: selectedType == FilterType.numeric,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    RadioListTile<FilterType>(
+                      title: const Text('Intervalle alphabétique'),
+                      value: FilterType.alphabetic,
+                      groupValue: selectedType,
+                      onChanged: (val) => setPopupState(() => selectedType = val!),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _fromAlphaController,
+                            decoration: const InputDecoration(labelText: 'De (Texte)', border: OutlineInputBorder()),
+                            inputFormatters: [LengthLimitingTextInputFormatter(3)],
+                            enabled: selectedType == FilterType.alphabetic,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _toAlphaController,
+                            decoration: const InputDecoration(labelText: 'À (Texte)', border: OutlineInputBorder()),
+                            inputFormatters: [LengthLimitingTextInputFormatter(3)],
+                            enabled: selectedType == FilterType.alphabetic,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annuler')),
+                ElevatedButton(
+                  child: const Text('Appliquer'),
+                  onPressed: () {
+                    ProductFilter newFilter = ProductFilter();
+
+                    if (selectedType == FilterType.numeric) {
+                      int from = int.tryParse(_fromNumController.text) ?? 0;
+                      int to = int.tryParse(_toNumController.text) ?? 0;
+                      if (from <= 0) from = 1;
+                      if (to > totalProducts) to = totalProducts;
+                      if (to == 0) to = totalProducts;
+                      if (from > to) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erreur : "De" doit être inférieur à "À"'), backgroundColor: Colors.red));
+                        return;
+                      }
+                      newFilter = ProductFilter(type: FilterType.numeric, from: from.toString(), to: to.toString());
+
+                    } else if (selectedType == FilterType.alphabetic) {
+                      String from = _fromAlphaController.text.toUpperCase();
+                      String to = _toAlphaController.text.toUpperCase();
+                      if (from.isEmpty || to.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erreur : Les champs ne peuvent pas être vides'), backgroundColor: Colors.red));
+                        return;
+                      }
+                      if (from.compareTo(to) > 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erreur : "De" doit être alphabétiquement avant "À"'), backgroundColor: Colors.red));
+                        return;
+                      }
+                      newFilter = ProductFilter(type: FilterType.alphabetic, from: from, to: to);
+                    }
+
+                    provider.applyFilter(newFilter);
+                    Navigator.of(ctx).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // --- Dialogue Aller à ---
   void _showJumpDialog(EntryProvider provider) {
     final TextEditingController jumpController = TextEditingController();
 
@@ -504,7 +659,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final products = provider.products;
     int targetIndex = -1;
 
-    // 1. Essayer comme position
     if (RegExp(r'^\d+$').hasMatch(input)) {
       int pos = int.parse(input);
       if (pos > 0 && pos <= products.length) {
@@ -512,7 +666,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       }
     }
 
-    // 2. Sinon, chercher par code ou nom
     if (targetIndex == -1) {
       targetIndex = products.indexWhere((p) =>
       p.produitCip.contains(input) ||
@@ -520,7 +673,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       );
     }
 
-    // 3. Exécuter le saut
     if (targetIndex != -1) {
       final targetProduct = products[targetIndex];
       provider.jumpToProduct(targetProduct);
@@ -576,7 +728,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text('Une erreur est survenue :\n${provider.error}', textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontSize: 16))));
             }
 
-            // CORRECTION: Loader uniquement si ce n'est pas le mode rapide, pour éviter scintillement clavier
             if (provider.isLoading && provider.rayons.isEmpty && !widget.isQuickMode) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -659,6 +810,22 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                             ),
                           ),
                         ),
+
+                        // --- BOUTONS FILTRE ---
+                        if (!widget.isQuickMode) ...[
+                          const SizedBox(width: 8),
+                          OutlinedButton(
+                              style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
+                              onPressed: provider.selectedRayon == null ? null : () => _showFilterDialog(context, provider),
+                              child: const Icon(Icons.filter_alt_outlined)
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton(
+                              style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero),
+                              onPressed: (provider.selectedRayon == null || !provider.activeFilter.isActive) ? null : () => provider.applyFilter(ProductFilter(type: FilterType.none)),
+                              child: const Icon(Icons.delete_outline)
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -774,9 +941,20 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text(
-              '${provider.currentProductIndex + 1} / ${provider.totalProductsInRayon}',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: stockFontSize),
+            // --- CORRECTION AMÉLIORATION 1 : Indicateur d'index réel global ---
+            Builder(
+                builder: (context) {
+                  // On cherche l'index du produit actuel dans la liste COMPLÈTE (pas celle du filtre)
+                  // pour afficher "20/22" au lieu de "1/22" quand on filtre 20-22.
+                  int currentGlobalIndex = provider.allProducts.indexWhere((p) => p.id == product.id);
+                  // Si non trouvé (cas rare), fallback sur index relatif
+                  int displayIndex = (currentGlobalIndex != -1) ? currentGlobalIndex : provider.currentProductIndex;
+
+                  return Text(
+                    '${displayIndex + 1} / ${provider.totalProductsInRayon}',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: stockFontSize),
+                  );
+                }
             ),
 
             if (provider.activeFilter.isActive)
@@ -888,9 +1066,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               ),
             ),
 
-            const SizedBox(width: 8),
-
-            // NOUVEAU BOUTON "Aller à" (Remplace goToFirstProduct)
             SizedBox(
               width: buttonSize,
               height: buttonSize,
