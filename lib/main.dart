@@ -15,40 +15,35 @@ import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/providers/inventory_provider.dart';
 import 'package:prestinv/providers/entry_provider.dart';
-import 'package:prestinv/providers/license_provider.dart'; // NOUVEAU
+import 'package:prestinv/providers/license_provider.dart';
 
 // --- IMPORTS ÉCRANS ---
 import 'package:prestinv/screens/home_screen.dart';
 import 'package:prestinv/screens/login_screen.dart';
-import 'package:prestinv/screens/license_register_screen.dart'; // NOUVEAU
+import 'package:prestinv/screens/license_register_screen.dart';
 
 void main() async {
-  // On s'assure que tout est prêt et on préserve le splash screen natif
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
-  // On charge les configurations essentielles avant de lancer l'app
   final appConfig = AppConfig();
   await appConfig.load();
 
   final authProvider = AuthProvider();
 
   runApp(
-    // Le MultiProvider est à la racine pour être accessible partout
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: appConfig),
         ChangeNotifierProvider.value(value: authProvider),
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
         ChangeNotifierProvider(create: (_) => EntryProvider()),
-        // AJOUT DU PROVIDER LICENCE
         ChangeNotifierProvider(create: (_) => LicenseProvider()),
       ],
       child: const PrestinvApp(),
     ),
   );
 
-  // Une fois l'application prête, on retire le splash screen
   FlutterNativeSplash.remove();
 }
 
@@ -69,18 +64,21 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
 
     // VÉRIFICATION LICENCE AU DÉMARRAGE
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkLicenseAtStartup();
+      _checkLicense();
     });
   }
 
-  /// Lance la vérification de la licence via le Provider dédié
-  void _checkLicenseAtStartup() {
+  /// Vérifie la licence via le Provider
+  void _checkLicense() {
+    // Sécurité : Vérifier si le widget est encore monté
+    if (!mounted) return;
+
     final config = context.read<AppConfig>();
     final auth = context.read<AuthProvider>();
-    // On construit une instance API temporaire avec la config actuelle
     final api = ApiService(baseUrl: config.currentApiUrl, sessionCookie: auth.sessionCookie);
 
-    // On lance la vérification (API ou Cache)
+    // Cette méthode mettra à jour le status du LicenseProvider.
+    // Si la licence est expirée, le Consumer dans build() redirigera automatiquement vers l'écran d'enregistrement.
     context.read<LicenseProvider>().checkLicense(api);
   }
 
@@ -91,12 +89,10 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  /// Réinitialise le minuteur de déconnexion automatique
   void _resetInactivityTimer(BuildContext context) {
     final appConfig = context.read<AppConfig>();
     final authProvider = context.read<AuthProvider>();
 
-    // Le timer ne s'active que si l'utilisateur est connecté ET que le délai est configuré.
     if (!authProvider.isLoggedIn) {
       _inactivityTimer?.cancel();
       return;
@@ -119,16 +115,23 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+
+    // --- CORRECTION DU SCÉNARIO "DEMAIN" ---
     if (state == AppLifecycleState.resumed) {
+      // 1. On relance le timer d'inactivité
       _resetInactivityTimer(context);
-      // Optionnel : On pourrait revérifier la licence ici au retour de l'app
+
+      // 2. On RE-VÉRIFIE la licence chaque fois que l'app revient au premier plan
+      // Ainsi, si l'utilisateur ouvre l'app demain matin, la vérification se relance,
+      // la date sera comparée à la nouvelle date du jour, et l'accès sera bloqué si expiré.
+      _checkLicense();
     }
+
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       _attemptBackgroundSync();
     }
   }
 
-  /// Tente d'envoyer les données en attente quand l'app passe en arrière-plan
   void _attemptBackgroundSync() {
     final entryProvider = context.read<EntryProvider>();
     if (entryProvider.hasUnsyncedData) {
@@ -146,38 +149,32 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Le GestureDetector global intercepte les clics pour reset le timer d'inactivité
     return GestureDetector(
       onTap: () => _resetInactivityTimer(context),
       onPanDown: (_) => _resetInactivityTimer(context),
       behavior: HitTestBehavior.translucent,
 
-      // On écoute AuthProvider ET LicenseProvider pour décider quel écran afficher
       child: Consumer2<AuthProvider, LicenseProvider>(
         builder: (context, auth, license, _) {
 
-          // On s'assure que le timer est géré à chaque reconstruction si nécessaire
           WidgetsBinding.instance.addPostFrameCallback((_) => _resetInactivityTimer(context));
 
-          // --- LOGIQUE DE ROUTAGE ---
           Widget homeWidget;
 
           if (license.status == LicenseStatus.loading) {
-            // 1. Chargement de la licence en cours
             homeWidget = const Scaffold(
                 body: Center(child: CircularProgressIndicator())
             );
           }
+          // Si le statut passe à "expired" lors du _checkLicense() au "resume",
+          // l'interface basculera immédiatement ici :
           else if (license.status == LicenseStatus.none || license.status == LicenseStatus.expired) {
-            // 2. Pas de licence ou expirée => Écran d'enregistrement BLOQUANT
             homeWidget = const LicenseRegisterScreen();
           }
           else if (auth.isLoggedIn) {
-            // 3. Licence OK et Connecté => Accueil
             homeWidget = const HomeScreen();
           }
           else {
-            // 4. Licence OK mais pas connecté => Login
             homeWidget = const LoginScreen();
           }
 
