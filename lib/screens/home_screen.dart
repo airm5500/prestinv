@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/providers/auth_provider.dart';
-import 'package:prestinv/providers/license_provider.dart'; // IMPORT
+import 'package:prestinv/providers/license_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/screens/inventory_list_screen.dart';
@@ -21,12 +21,18 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
 
+  // CORRECTION ICI : Variable statique pour mémoriser si l'alerte a déjà été montrée dans cette session
+  static bool _alertShown = false;
+
   @override
   void initState() {
     super.initState();
     // Affichage des alertes de licence après le build
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkLicenseWarnings();
+      // On ne lance la vérification que si l'alerte n'a pas encore été montrée
+      if (!_alertShown) {
+        _checkLicenseWarnings();
+      }
     });
   }
 
@@ -34,15 +40,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final license = Provider.of<LicenseProvider>(context, listen: false);
     final days = license.daysRemaining;
 
-    // Seuils d'alerte
-    // 3 mois ~ 90j, 1 mois ~ 30j, 1 semaine = 7j, Veille = 1j
-
-    // On affiche une alerte si on tombe exactement sur ces jours (ou proche si l'app n'a pas été ouverte pile ce jour là ?)
-    // Pour simplifier et ne pas harceler, on affiche si on est DANS la zone critique.
-
     String? message;
     Color color = Colors.orange;
 
+    // Logique des alertes
     if (days <= 1) {
       message = "ATTENTION : Votre licence expire DEMAIN !";
       color = Colors.red;
@@ -56,10 +57,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (message != null) {
+      // CORRECTION ICI : On marque l'alerte comme montrée AVANT d'afficher le dialog
+      _alertShown = true;
+
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Row(children: [Icon(Icons.warning_amber, color: color), SizedBox(width: 10), Text("Licence")]),
+          title: Row(children: [Icon(Icons.warning_amber, color: color), const SizedBox(width: 10), const Text("Licence")]),
           content: Text(message!),
           actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text("OK"))],
         ),
@@ -157,9 +161,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     const SizedBox(height: 30),
 
-                    // LES BOUTONS EXISTANTS (Inchangés)
+                    // LES BOUTONS
                     _buildMenuButton(
-                      context, 'SAISIE GUIDÉE LISTE\n(Mode Guidé)', Icons.inventory_2_outlined,
+                      context, 'COMMENCER L\'INVENTAIRE\n(Mode Guidé)', Icons.inventory_2_outlined,
                       AppColors.accent,
                           () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: false))),
                     ),
