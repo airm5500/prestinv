@@ -22,6 +22,8 @@ dependencies:
   printing: ^5.12.0
   path_provider: ^2.1.3
   share_plus: ^9.0.0
+  permission_handler: ^11.3.1
+
 
   # CORRECTION : On déplace le package ici
   flutter_native_splash: ^2.4.0

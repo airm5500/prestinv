@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart'; // Pour gérer les permissions Android
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/models/collected_item.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
@@ -91,7 +92,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
     }
   }
 
-  // --- NOUVEAU : SUPPRESSION D'UNE LIGNE ---
+  // Suppression d'une ligne spécifique
   void _deleteItem(int index) {
     showDialog(
       context: context,
@@ -224,7 +225,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
     );
   }
 
-  // --- EXPORT CSV ---
+  // --- EXPORT CSV AMÉLIORÉ ---
   Future<void> _exportCsv() async {
     if (_items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('La liste est vide.')));
@@ -237,15 +238,77 @@ class _CollectionScreenState extends State<CollectionScreen> {
       csvContent.writeln('${item.code};${item.quantity};${item.dateScan}');
     }
 
-    final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    final fileName = 'collecte_$timestamp.csv';
-    final directory = await getTemporaryDirectory();
-    final filePath = '${directory.path}/$fileName';
-    final file = File(filePath);
-    await file.writeAsString(csvContent.toString());
+    // Format horodaté demandé
+    final timestamp = DateFormat('ddMMyyyy_HHmm').format(DateTime.now());
+    final fileName = 'inventaireCollection_$timestamp.csv';
 
-    final xFile = XFile(filePath);
-    await Share.shareXFiles([xFile], text: 'Export Collecte $timestamp');
+    try {
+      // 1. Demande de Permission
+      bool hasPermission = false;
+      if (Platform.isAndroid) {
+        var status = await Permission.storage.status;
+        if (!status.isGranted) {
+          status = await Permission.storage.request();
+        }
+        if (status.isGranted) {
+          hasPermission = true;
+        } else if (await Permission.manageExternalStorage.request().isGranted) {
+          hasPermission = true;
+        }
+      } else {
+        hasPermission = true; // iOS géré autrement
+      }
+
+      bool directSuccess = false;
+
+      // 2. Tentative d'écriture directe (Download)
+      if (hasPermission) {
+        try {
+          final Directory downloadDir = Directory('/storage/emulated/0/Download');
+          if (await downloadDir.exists()) {
+            final String filePath = '${downloadDir.path}/$fileName';
+            final File file = File(filePath);
+            await file.writeAsString(csvContent.toString());
+            directSuccess = true;
+          }
+        } catch (e) {
+          print("Erreur écriture directe: $e");
+        }
+      }
+
+      // 3. Résultat ou Fallback (Share)
+      if (directSuccess) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Succès ! Fichier enregistré dans "Download" :\n$fileName'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 4),
+            )
+        );
+      } else {
+        // Fallback : On crée le fichier dans le cache de l'app et on le partage
+        final directory = await getTemporaryDirectory();
+        final filePath = '${directory.path}/$fileName';
+        final file = File(filePath);
+        await file.writeAsString(csvContent.toString());
+
+        final xFile = XFile(filePath);
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sauvegarde directe impossible (Permissions). Veuillez choisir où enregistrer.'), duration: Duration(seconds: 3))
+        );
+
+        await Share.shareXFiles([xFile], text: 'Export Inventaire $timestamp');
+      }
+
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur export: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   // --- IMPRESSION PDF ---
@@ -394,7 +457,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
                     title: Text(item.code, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     subtitle: Text(DateFormat('dd/MM/yyyy HH:mm').format(item.dateScan)),
 
-                    // MODIFIÉ : Affichage Quantité + Bouton Supprimer
+                    // Affichage Quantité + Bouton Supprimer
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min, // Important pour ne pas prendre toute la largeur
                       children: [

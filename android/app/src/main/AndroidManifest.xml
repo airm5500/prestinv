@@ -8,7 +8,8 @@
     <!-- On déclare que la caméra est une fonctionnalité utilisée,
          mais elle n'est pas obligatoire pour que l'application s'installe. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
 
     <!-- La balise application contient la configuration principale -->
     <application
