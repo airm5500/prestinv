@@ -80,7 +80,7 @@ class AppConfig with ChangeNotifier {
     _localApiPort = _prefs.getString('localApiPort') ?? '8080';
     _distantApiAddress = _prefs.getString('distantApiAddress') ?? '';
     _distantApiPort = _prefs.getString('distantApiPort') ?? '8080';
-    _appName = _prefs.getString('appName') ?? 'laborex';
+    _appName = _prefs.getString('appName') ?? 'prestige';
 
     _maxResult = _prefs.getInt('maxResult') ?? 3;
     _showTheoreticalStock = _prefs.getBool('showTheoreticalStock') ?? true;

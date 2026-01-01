@@ -266,4 +266,34 @@ class ApiService {
     }
   }
 
+  Future<List<Product>> fetchUntouchedProductsByRayon(String idInventaire, String idRayon, {String? query}) async {
+    String urlStr = '$baseUrl/api/v1/ws/inventaires/detailsUntouchedRayon?idInventaire=$idInventaire&idRayon=$idRayon';
+
+    if (query != null && query.isNotEmpty) {
+      urlStr += '&query=${Uri.encodeQueryComponent(query)}';
+    }
+
+    final url = Uri.parse(urlStr);
+
+    try {
+      print("Calling API Untouched Rayon: $urlStr");
+      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
+
+      if (response.statusCode == 200) {
+        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+        List<Product> products = data.map((json) => Product.fromJson(json)).toList();
+        products.sort((a, b) => a.produitName.compareTo(b.produitName));
+        return products;
+      } else {
+        throw Exception('Échec du chargement des restants par rayon (Statut: ${response.statusCode})');
+      }
+    } on SocketException {
+      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
+    } on TimeoutException {
+      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
 }

@@ -8,6 +8,7 @@ import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/product.dart';
+import 'package:prestinv/models/rayon.dart'; // Import du modèle Rayon
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
 
@@ -37,11 +38,15 @@ class _UncountedScreenState extends State<UncountedScreen> {
 
   late ApiService _apiService;
 
-  // Listes
+  // Listes Produits
   List<Product> _allUntouched = [];
   List<Product> _displayedProducts = [];
   bool _isLoading = true;
   String? _errorMessage;
+
+  // Listes Rayons (Nouveau)
+  List<Rayon> _rayons = [];
+  Rayon? _selectedRayon; // Si null = "Tous les emplacements"
 
   // Notification
   String? _notificationMessage;
@@ -67,7 +72,8 @@ class _UncountedScreenState extends State<UncountedScreen> {
       });
     });
 
-    _loadUntouchedProducts();
+    // On charge d'abord les rayons, puis les produits
+    _loadRayons();
   }
 
   @override
@@ -79,14 +85,42 @@ class _UncountedScreenState extends State<UncountedScreen> {
     super.dispose();
   }
 
+  // --- CHARGEMENT DES DONNÉES ---
+
+  Future<void> _loadRayons() async {
+    try {
+      final rayons = await _apiService.fetchRayons(widget.inventoryId);
+      if (mounted) {
+        setState(() {
+          _rayons = rayons;
+        });
+        // Une fois les rayons chargés, on lance le chargement des produits
+        _loadUntouchedProducts();
+      }
+    } catch (e) {
+      print("Erreur chargement rayons: $e");
+      // En cas d'erreur rayons, on essaie quand même de charger les produits globaux
+      _loadUntouchedProducts();
+    }
+  }
+
   Future<void> _loadUntouchedProducts() async {
     setState(() { _isLoading = true; _errorMessage = null; });
     try {
-      final products = await _apiService.fetchUntouchedProducts(widget.inventoryId);
+      List<Product> products;
+
+      // SI un rayon est sélectionné, on utilise l'API spécifique
+      if (_selectedRayon != null) {
+        products = await _apiService.fetchUntouchedProductsByRayon(widget.inventoryId, _selectedRayon!.id);
+      } else {
+        // SINON on charge tout
+        products = await _apiService.fetchUntouchedProducts(widget.inventoryId);
+      }
+
       if (mounted) {
         setState(() {
           _allUntouched = products;
-          // On applique le filtre initial
+          // On réapplique les filtres locaux (recherche texte + stock)
           _applyFilters();
           _isLoading = false;
         });
@@ -113,7 +147,7 @@ class _UncountedScreenState extends State<UncountedScreen> {
     });
   }
 
-  /// Applique à la fois la recherche texte ET le filtre stock
+  /// Applique à la fois la recherche texte ET le filtre stock sur la liste chargée
   void _applyFilters() {
     final query = _searchController.text.toLowerCase();
 
@@ -147,9 +181,8 @@ class _UncountedScreenState extends State<UncountedScreen> {
     });
   }
 
-  // --- DIALOGUE DE FILTRE (CORRIGÉ) ---
+  // --- DIALOGUE DE FILTRE STOCK ---
   void _showStockFilterDialog() {
-    // Variables temporaires pour le dialog
     StockFilterType tempType = _currentFilterType;
     final TextEditingController valController = TextEditingController(text: _currentFilterValue.toString());
 
@@ -164,7 +197,6 @@ class _UncountedScreenState extends State<UncountedScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Nous définissons les RadioListTiles directement ici pour que setDialogState fonctionne sur tempType
                       RadioListTile<StockFilterType>(
                         title: const Text("Aucun filtre", style: TextStyle(fontSize: 14)),
                         value: StockFilterType.none,
@@ -218,7 +250,6 @@ class _UncountedScreenState extends State<UncountedScreen> {
 
                       const SizedBox(height: 15),
 
-                      // Le champ texte s'affiche uniquement si un filtre est sélectionné
                       if (tempType != StockFilterType.none)
                         TextField(
                           controller: valController,
@@ -242,7 +273,6 @@ class _UncountedScreenState extends State<UncountedScreen> {
                   ),
                   ElevatedButton(
                       onPressed: () {
-                        // Application des changements
                         setState(() {
                           _currentFilterType = tempType;
                           _currentFilterValue = int.tryParse(valController.text) ?? 0;
@@ -260,9 +290,18 @@ class _UncountedScreenState extends State<UncountedScreen> {
     );
   }
 
+  // --- RECHERCHE SERVEUR ---
   Future<void> _performApiSearch(String query) async {
     try {
-      final results = await _apiService.fetchUntouchedProducts(widget.inventoryId, query: query);
+      List<Product> results;
+
+      // On recherche soit dans tout l'inventaire, soit dans le rayon sélectionné
+      if (_selectedRayon != null) {
+        results = await _apiService.fetchUntouchedProductsByRayon(widget.inventoryId, _selectedRayon!.id, query: query);
+      } else {
+        results = await _apiService.fetchUntouchedProducts(widget.inventoryId, query: query);
+      }
+
       if (!mounted) return;
 
       if (results.length == 1) {
@@ -396,6 +435,18 @@ class _UncountedScreenState extends State<UncountedScreen> {
     });
   }
 
+  String _getFilterSymbol(StockFilterType type) {
+    switch (type) {
+      case StockFilterType.less: return "<";
+      case StockFilterType.more: return ">";
+      case StockFilterType.lessEq: return "<=";
+      case StockFilterType.moreEq: return ">=";
+      case StockFilterType.equal: return "=";
+      case StockFilterType.diff: return "!=";
+      default: return "";
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -411,6 +462,75 @@ class _UncountedScreenState extends State<UncountedScreen> {
       ),
       body: Column(
         children: [
+          // --- ZONE SELECTION EMPLACEMENT (DROPDOWN) ---
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            color: Colors.grey.shade100,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Filtrer par Emplacement :", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<Rayon?>(
+                      isExpanded: true,
+                      value: _selectedRayon,
+                      hint: const Text("Tous les emplacements"),
+                      items: [
+                        // Option "Tous"
+                        const DropdownMenuItem<Rayon?>(
+                          value: null,
+                          child: Text("Tous les emplacements", style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                        // Liste des Rayons
+                        ..._rayons.map((rayon) {
+                          return DropdownMenuItem<Rayon?>(
+                            value: rayon,
+                            child: Text("${rayon.code} - ${rayon.libelle}", overflow: TextOverflow.ellipsis),
+                          );
+                        }),
+                      ],
+                      onChanged: (Rayon? newValue) {
+                        if (newValue != _selectedRayon) {
+                          setState(() {
+                            _selectedRayon = newValue;
+                          });
+                          _loadUntouchedProducts(); // Recharger
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                // --- COMPTEUR PRODUITS ---
+                if (!_isLoading)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          "${_allUntouched.length} produits restants",
+                          style: TextStyle(
+                              color: _allUntouched.isEmpty ? Colors.green : Colors.red,
+                              fontWeight: FontWeight.bold
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+              ],
+            ),
+          ),
+
+          const Divider(height: 1),
+
           // Barre de recherche AVEC bouton filtre
           Padding(
             padding: const EdgeInsets.all(12.0),
@@ -559,17 +679,5 @@ class _UncountedScreenState extends State<UncountedScreen> {
         ],
       ),
     );
-  }
-
-  String _getFilterSymbol(StockFilterType type) {
-    switch (type) {
-      case StockFilterType.less: return "<";
-      case StockFilterType.more: return ">";
-      case StockFilterType.lessEq: return "<=";
-      case StockFilterType.moreEq: return ">=";
-      case StockFilterType.equal: return "=";
-      case StockFilterType.diff: return "!=";
-      default: return "";
-    }
   }
 }
