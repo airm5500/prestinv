@@ -29,6 +29,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   // Variables d'état
   late bool _showStockValue;
+  late bool _isCumulEnabled; // Doit être initialisée dans initState
   bool _isAppNameEditable = false;
   bool _isTestingConnection = false;
 
@@ -48,7 +49,10 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _autoLogoutController.text = appConfig.autoLogoutMinutes.toString();
     _exportPathController.text = appConfig.networkExportPath;
     _sendReminderController.text = appConfig.sendReminderMinutes.toString();
+
     _showStockValue = appConfig.showTheoreticalStock;
+    // CORRECTION : Initialisation de la variable (sinon crash)
+    _isCumulEnabled = appConfig.isCumulEnabled;
   }
 
   @override
@@ -139,6 +143,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
       logoutMinutes: logoutMinutes,
       exportPath: exportPath,
       sendReminderMinutes: sendReminder,
+      // CORRECTION : Sauvegarde du paramètre Cumul
+      isCumulEnabled: _isCumulEnabled,
     );
 
     if (Navigator.canPop(context)) {
@@ -222,6 +228,16 @@ class _ConfigScreenState extends State<ConfigScreen> {
             const SizedBox(height: 16),
             TextFormField(controller: _exportPathController, decoration: const InputDecoration(labelText: 'Chemin réseau pour nom de fichier (Optionnel)', hintText: 'ex: \\\\SERVEUR\\partage', border: OutlineInputBorder())),
             SwitchListTile(title: const Text('Afficher le stock théorique'), contentPadding: EdgeInsets.zero, value: _showStockValue, onChanged: (bool value) => setState(() => _showStockValue = value)),
+
+            // Switch CUMUL
+            SwitchListTile(
+              title: const Text('Activer le Cumul de quantité'),
+              subtitle: const Text('Proposer d\'additionner si le produit est déjà compté'),
+              contentPadding: EdgeInsets.zero,
+              value: _isCumulEnabled,
+              onChanged: (bool value) => setState(() => _isCumulEnabled = value),
+            ),
+
             SwitchListTile(
               title: const Text('Mode d\'envoi'),
               subtitle: Text(appConfig.sendMode == SendMode.direct ? 'Direct (après chaque saisie)' : 'Collecte (envoi manuel)'),

@@ -7,6 +7,7 @@ import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/models/product_filter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:prestinv/config/app_config.dart';
 
 class EntryProvider with ChangeNotifier {
   List<Rayon> _rayons = [];
@@ -59,6 +60,38 @@ class EntryProvider with ChangeNotifier {
       final dataToSave = unsyncedProducts.map((p) => p.toJson()).toList();
       await prefs.setString(key, json.encode(dataToSave));
     }
+  }
+
+  /// Vérifie la quantité existante. Retourne null si non trouvé/non touché.
+  Future<int?> checkExistingQuantityForProduct(
+      ApiService api,
+      String cip,
+      String inventoryId,
+      SendMode sendMode
+      ) async {
+
+    // 1. Priorité au LOCAL : Si on a déjà scanné ce produit dans la session actuelle
+    // et qu'on est en mode collecte (ou que la donnée n'est pas encore partie),
+    // la vérité locale prime.
+    try {
+      final localProduct = _allProducts.firstWhere((p) => p.produitCip == cip);
+      if (localProduct.quantiteSaisie > 0) {
+        // Note: Ici on pourrait retourner null si on voulait forcer la vérif serveur,
+        // mais si c'est en local, c'est que l'utilisateur vient de le faire.
+        return localProduct.quantiteSaisie;
+      }
+    } catch (e) {
+      // Pas trouvé dans la liste locale chargée, normal.
+    }
+
+    // 2. Vérification SERVEUR via l'API "detailsTouched"
+    // C'est ici qu'on récupère le "déjà compté" historique (ex: les 3 du serveur)
+    if (cip.isNotEmpty) {
+      // Note : On peut passer _selectedRayon?.id si on veut filtrer par rayon sur le serveur aussi
+      return await api.checkExistingProductQuantity(inventoryId, cip, rayonId: _selectedRayon?.id);
+    }
+
+    return null;
   }
 
   Future<List<Product>> _loadAndMergeUnsyncedData(String rayonId, List<Product> apiProducts) async {

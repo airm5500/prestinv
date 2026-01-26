@@ -27,6 +27,9 @@ class AppConfig with ChangeNotifier {
   SendMode _sendMode = SendMode.collect;
   int _sendReminderMinutes = 15; // 0 = désactivé
 
+  // CORRECTION : Variable d'instance privée (pas de static)
+  bool _isCumulEnabled = false;
+
   // --- Getters publics pour un accès sécurisé depuis l'UI ---
   String get localApiAddress => _localApiAddress;
   String get localApiPort => _localApiPort;
@@ -41,6 +44,9 @@ class AppConfig with ChangeNotifier {
   String get networkExportPath => _networkExportPath;
   SendMode get sendMode => _sendMode;
   int get sendReminderMinutes => _sendReminderMinutes;
+
+  // CORRECTION : Getter public ajouté
+  bool get isCumulEnabled => _isCumulEnabled;
 
   /// Construit l'URL complète actuelle en fonction du mode (Local/Distant)
   String get currentApiUrl {
@@ -89,9 +95,14 @@ class AppConfig with ChangeNotifier {
     _networkExportPath = _prefs.getString('networkExportPath') ?? '';
     _sendReminderMinutes = _prefs.getInt('sendReminderMinutes') ?? 15;
 
+    // CORRECTION : Chargement correct de la variable
+    _isCumulEnabled = _prefs.getBool('isCumulEnabled') ?? false;
+
     // On charge les énumérations à partir de leur index stocké
     _apiMode = ApiMode.values[_prefs.getInt('apiMode') ?? ApiMode.local.index];
     _sendMode = SendMode.values[_prefs.getInt('sendMode') ?? SendMode.collect.index];
+
+    notifyListeners();
   }
 
   /// Sauvegarde les paramètres de connexion API.
@@ -123,6 +134,7 @@ class AppConfig with ChangeNotifier {
     int? logoutMinutes,
     String? exportPath,
     int? sendReminderMinutes,
+    bool? isCumulEnabled,
   }) async {
     if (maxResult != null) {
       _maxResult = maxResult;
@@ -147,6 +159,11 @@ class AppConfig with ChangeNotifier {
     if (sendReminderMinutes != null) {
       _sendReminderMinutes = sendReminderMinutes;
       await _prefs.setInt('sendReminderMinutes', sendReminderMinutes);
+    }
+    // CORRECTION : Sauvegarde de la variable d'instance
+    if (isCumulEnabled != null) {
+      _isCumulEnabled = isCumulEnabled;
+      await _prefs.setBool('isCumulEnabled', isCumulEnabled);
     }
     notifyListeners();
   }

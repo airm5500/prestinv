@@ -8,6 +8,7 @@ import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/models/license.dart';
+// Note: J'ai retiré collected_item.dart car il n'était pas utilisé ici
 
 class ApiService {
   final String baseUrl;
@@ -22,6 +23,8 @@ class ApiService {
     }
     return headers;
   }
+
+  // --- INVENTAIRES ---
 
   Future<List<Inventory>> fetchInventories({int maxResult = 3}) async {
     final url = Uri.parse('$baseUrl/api/v1/ws/inventaires?maxResult=$maxResult');
@@ -41,6 +44,66 @@ class ApiService {
       rethrow;
     }
   }
+
+  // --- CUMUL / VERIFICATION ---
+
+  /// Vérifie si un produit a déjà été touché sur le serveur.
+  /// Renvoie NULL si non trouvé ou liste vide (pas de popup).
+  /// Renvoie la quantité si trouvé (popup cumul).
+  Future<int?> checkExistingProductQuantity(String inventoryId, String query, {String? rayonId}) async {
+    try {
+      if (query.isEmpty) return null;
+
+      String endpoint = rayonId != null && rayonId.isNotEmpty
+          ? '/api/v1/ws/inventaires/detailsTouchedRayon'
+          : '/api/v1/ws/inventaires/detailsAllTouched';
+
+      final uri = Uri.parse('$baseUrl$endpoint').replace(queryParameters: {
+        'idInventaire': inventoryId,
+        'query': query, // On envoie le CIP scanné ici (ex: 8055207)
+        if (rayonId != null && rayonId.isNotEmpty) 'idRayon': rayonId,
+      });
+
+      print("API CHECK URL: $uri");
+
+      final response = await http.get(uri, headers: _getHeaders()).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+
+        // LOGIQUE STRICTE :
+        // 1. Si vide = Pas touché -> return null (Pas de popup)
+        if (data.isEmpty) {
+          return null;
+        }
+
+        // 2. Si contient des données, on cherche la correspondance exacte avec le CIP
+        // pour éviter d'additionner des produits qui ressemblent mais ne sont pas le bon.
+        for (var item in data) {
+          String itemCip = item['produitCip']?.toString() ?? '';
+
+          // Sécurité : on s'assure que c'est bien le produit demandé
+          if (itemCip == query) {
+            if (item['quantiteSaisie'] != null) {
+              int qte = (item['quantiteSaisie'] as num).toInt();
+              print("Quantité trouvée API: $qte");
+              return qte;
+            }
+          }
+        }
+
+        return null; // Pas de correspondance exacte trouvée dans la liste
+      } else {
+        print('Erreur API Check: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      print('Exception API Check: $e');
+      return null;
+    }
+  }
+
+  // --- RAYONS & PRODUITS ---
 
   Future<List<Rayon>> fetchRayons(String idInventaire) async {
     final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/rayons?idInventaire=$idInventaire');
@@ -117,6 +180,7 @@ class ApiService {
 
   Future<void> updateProductQuantity(int productId, int newQuantity) async {
     final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/details');
+    // On envoie un objet JSON avec id et quantite
     final requestBody = jsonEncode({'id': productId, 'quantite': newQuantity});
     try {
       final response = await http.put(url, headers: _getHeaders(), body: requestBody).timeout(const Duration(seconds: 15));
@@ -153,6 +217,8 @@ class ApiService {
     }
   }
 
+  // --- ANALYSE & ÉCARTS ---
+
   Future<List<Product>> fetchAllProductsForInventory(String inventoryId) async {
     final url = Uri.parse('$baseUrl/api/v1/inventaires/analyse_complete?idInventaire=$inventoryId');
     try {
@@ -172,7 +238,6 @@ class ApiService {
     }
   }
 
-  // AJOUT : Nouvelle méthode pour récupérer les écarts globaux
   Future<List<Product>> fetchGlobalVariances(String idInventaire, {String? query}) async {
     String urlStr = '$baseUrl/api/v1/ws/inventaires/detailsAllEcarts?idInventaire=$idInventaire';
 
@@ -205,7 +270,8 @@ class ApiService {
     }
   }
 
-  // --- NOUVELLE MÉTHODE : Chargement des produits non inventoriés ---
+  // --- NON INVENTORIÉS ---
+
   Future<List<Product>> fetchUntouchedProducts(String idInventaire, {String? query}) async {
     String urlStr = '$baseUrl/api/v1/ws/inventaires/detailsAllUntouched?idInventaire=$idInventaire';
     if (query != null && query.isNotEmpty) {
@@ -222,6 +288,36 @@ class ApiService {
         return products;
       } else {
         throw Exception('Échec du chargement des restants (Statut: ${response.statusCode})');
+      }
+    } on SocketException {
+      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
+    } on TimeoutException {
+      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<List<Product>> fetchUntouchedProductsByRayon(String idInventaire, String idRayon, {String? query}) async {
+    String urlStr = '$baseUrl/api/v1/ws/inventaires/detailsUntouchedRayon?idInventaire=$idInventaire&idRayon=$idRayon';
+
+    if (query != null && query.isNotEmpty) {
+      urlStr += '&query=${Uri.encodeQueryComponent(query)}';
+    }
+
+    final url = Uri.parse(urlStr);
+
+    try {
+      print("Calling API Untouched Rayon: $urlStr");
+      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
+
+      if (response.statusCode == 200) {
+        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+        List<Product> products = data.map((json) => Product.fromJson(json)).toList();
+        products.sort((a, b) => a.produitName.compareTo(b.produitName));
+        return products;
+      } else {
+        throw Exception('Échec du chargement des restants par rayon (Statut: ${response.statusCode})');
       }
     } on SocketException {
       throw Exception('Erreur réseau: Impossible de joindre le serveur.');
@@ -265,35 +361,4 @@ class ApiService {
       rethrow;
     }
   }
-
-  Future<List<Product>> fetchUntouchedProductsByRayon(String idInventaire, String idRayon, {String? query}) async {
-    String urlStr = '$baseUrl/api/v1/ws/inventaires/detailsUntouchedRayon?idInventaire=$idInventaire&idRayon=$idRayon';
-
-    if (query != null && query.isNotEmpty) {
-      urlStr += '&query=${Uri.encodeQueryComponent(query)}';
-    }
-
-    final url = Uri.parse(urlStr);
-
-    try {
-      print("Calling API Untouched Rayon: $urlStr");
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
-
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        List<Product> products = data.map((json) => Product.fromJson(json)).toList();
-        products.sort((a, b) => a.produitName.compareTo(b.produitName));
-        return products;
-      } else {
-        throw Exception('Échec du chargement des restants par rayon (Statut: ${response.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
-    } on TimeoutException {
-      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
-    } catch (e) {
-      rethrow;
-    }
-  }
-
 }
