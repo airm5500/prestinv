@@ -25,6 +25,9 @@ class EntryProvider with ChangeNotifier {
 
   bool _hasPendingSession = false;
 
+  // NOUVEAU : Liste pour stocker l'historique des cumuls
+  List<Map<String, dynamic>> _cumulLogs = [];
+
   List<Rayon> get rayons => _rayons;
   Rayon? get selectedRayon => _selectedRayon;
   bool get isLoading => _isLoading;
@@ -40,6 +43,9 @@ class EntryProvider with ChangeNotifier {
   int get totalProductsInRayon => _allProducts.length;
   int get currentProductIndex => _currentProductIndex;
 
+  // NOUVEAU : Getter pour les logs
+  List<Map<String, dynamic>> get cumulLogs => _cumulLogs;
+
   Product? get currentProduct => _filteredProducts.isNotEmpty && _currentProductIndex < _filteredProducts.length
       ? _filteredProducts[_currentProductIndex]
       : null;
@@ -47,7 +53,6 @@ class EntryProvider with ChangeNotifier {
   bool get hasUnsyncedData => _allProducts.any((p) => !p.isSynced);
 
   Future<void> _saveUnsyncedData() async {
-    // Sauvegarde contextuelle (Rayon ou Global)
     final String keySuffix = _selectedRayon?.id ?? 'global_${_isGlobalMode ? "quick" : "unknown"}';
     final prefs = await SharedPreferences.getInstance();
     final key = 'unsynced_data_$keySuffix';
@@ -62,6 +67,51 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
+  // --- GESTION DES LOGS DE CUMUL ---
+
+  /// Enregistre une action de cumul pour traçabilité (PDF futur)
+  Future<void> addCumulLog(Product product, int oldQty, int addedQty) async {
+    final log = {
+      'date': DateTime.now().toIso8601String(),
+      'cip': product.produitCip,
+      'name': product.produitName,
+      'oldQty': oldQty,
+      'addedQty': addedQty,
+      'newQty': oldQty + addedQty,
+      'rayon': _selectedRayon?.libelle ?? 'Global',
+      // Vous pourrez ajouter l'utilisateur ici si dispo
+    };
+
+    _cumulLogs.add(log);
+
+    // Persistance locale
+    final prefs = await SharedPreferences.getInstance();
+    final keySuffix = _selectedRayon?.id ?? 'global';
+    await prefs.setString('cumul_logs_$keySuffix', json.encode(_cumulLogs));
+
+    notifyListeners();
+  }
+
+  /// Charge l'historique des cumuls pour le contexte donné
+  Future<void> loadCumulLogs(String suffixId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? logsString = prefs.getString('cumul_logs_$suffixId');
+
+    if (logsString != null) {
+      try {
+        final List<dynamic> decoded = json.decode(logsString);
+        _cumulLogs = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+      } catch (e) {
+        _cumulLogs = [];
+      }
+    } else {
+      _cumulLogs = [];
+    }
+    // Pas de notifyListeners ici pour éviter les rebuilds inutiles pendant le chargement initial
+  }
+
+  // --- FIN GESTION LOGS ---
+
   /// Vérifie la quantité existante. Retourne null si non trouvé/non touché.
   Future<int?> checkExistingQuantityForProduct(
       ApiService api,
@@ -70,24 +120,16 @@ class EntryProvider with ChangeNotifier {
       SendMode sendMode
       ) async {
 
-    // 1. Priorité au LOCAL : Si on a déjà scanné ce produit dans la session actuelle
-    // et qu'on est en mode collecte (ou que la donnée n'est pas encore partie),
-    // la vérité locale prime.
     try {
       final localProduct = _allProducts.firstWhere((p) => p.produitCip == cip);
       if (localProduct.quantiteSaisie > 0) {
-        // Note: Ici on pourrait retourner null si on voulait forcer la vérif serveur,
-        // mais si c'est en local, c'est que l'utilisateur vient de le faire.
         return localProduct.quantiteSaisie;
       }
     } catch (e) {
-      // Pas trouvé dans la liste locale chargée, normal.
+      // Pas trouvé localement
     }
 
-    // 2. Vérification SERVEUR via l'API "detailsTouched"
-    // C'est ici qu'on récupère le "déjà compté" historique (ex: les 3 du serveur)
     if (cip.isNotEmpty) {
-      // Note : On peut passer _selectedRayon?.id si on veut filtrer par rayon sur le serveur aussi
       return await api.checkExistingProductQuantity(inventoryId, cip, rayonId: _selectedRayon?.id);
     }
 
@@ -170,8 +212,6 @@ class EntryProvider with ChangeNotifier {
       case FilterType.alphabetic:
         try {
           final from = _activeFilter.from.toLowerCase();
-          // CORRECTION: Ajout du caractère unicode maximum pour inclure les mots commençant par 'to'
-          // Ex: "TOT" -> "TOT\uffff". Ainsi "TOTHEMA" <= "TOT\uffff" sera VRAI.
           final to = _activeFilter.to.toLowerCase() + '\uffff';
 
           _filteredProducts = _allProducts.where((p) {
@@ -192,6 +232,7 @@ class EntryProvider with ChangeNotifier {
     _rayons = [];
     _allProducts = [];
     _filteredProducts = [];
+    _cumulLogs = []; // Reset des logs
     _selectedRayon = null;
     _currentProductIndex = 0;
     _error = null;
@@ -226,6 +267,10 @@ class EntryProvider with ChangeNotifier {
     try {
       final apiProducts = await api.fetchProducts(inventoryId, rayonId);
       _allProducts = await _loadAndMergeUnsyncedData(rayonId, apiProducts);
+
+      // AJOUT : Chargement des logs de cumul pour ce rayon
+      await loadCumulLogs(rayonId);
+
       _activeFilter = await _loadFilter(rayonId);
       _runFilterLogic();
       final lastIndex = _lastIndexByRayon[rayonId] ?? (await SharedPreferences.getInstance()).getInt('lastIndex_$rayonId') ?? 0;
@@ -247,18 +292,15 @@ class EntryProvider with ChangeNotifier {
 
     try {
       final rayonId = _selectedRayon?.id;
-      // ApiService gère le basculement details/detailsAll via idRayon null ou non
       results = await api.fetchProducts(inventoryId, rayonId, query: query);
 
       if (results.isNotEmpty) {
         if (rayonId == null) {
-          // Mode Global : On remplace la liste affichée par les résultats
           _allProducts = results;
           _filteredProducts = results;
           _isGlobalMode = true;
           _currentProductIndex = 0;
         }
-        // Mode Rayon : On ne remplace pas la liste, on retourne juste les résultats pour popup
       }
     } catch (e) {
       _error = "Erreur recherche: $e";
@@ -297,7 +339,12 @@ class EntryProvider with ChangeNotifier {
       }
 
       _filteredProducts = List.from(_allProducts);
-      if (rayons.isNotEmpty) { _selectedRayon = rayons.first; }
+      if (rayons.isNotEmpty) {
+        _selectedRayon = rayons.first;
+      }
+
+      // AJOUT : Chargement des logs pour le contexte (Rayon par défaut ou 'global')
+      await loadCumulLogs(_selectedRayon?.id ?? 'global');
 
     } catch (e) {
       _error = "Erreur chargement global : $e";
@@ -306,23 +353,17 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // Cette méthode met à jour la quantité d'un produit en assurant la persistance
-  // dans la liste principale, même si on est en mode recherche ou filtre.
   Future<void> updateSpecificProduct(Product productToUpdate) async {
     try {
-      // On cherche l'instance "réelle" dans la liste complète
       final index = _allProducts.indexWhere((p) => p.id == productToUpdate.id);
 
       if (index != -1) {
-        // Mise à jour de l'existant
         _allProducts[index].quantiteSaisie = productToUpdate.quantiteSaisie;
         _allProducts[index].isSynced = false;
       } else {
-        // Ajout (Cas Saisie Rapide sur produit non chargé initialement)
         productToUpdate.isSynced = false;
         _allProducts.add(productToUpdate);
 
-        // Si on est en mode affichage filtré/global, on met à jour la vue aussi
         if (_isGlobalMode) {
           final filterIndex = _filteredProducts.indexWhere((p) => p.id == productToUpdate.id);
           if (filterIndex != -1) {
