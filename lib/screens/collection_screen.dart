@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart'; // Pour gérer les permissions Android
+import 'package:permission_handler/permission_handler.dart';
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/models/collected_item.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
@@ -225,7 +225,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
     );
   }
 
-  // --- EXPORT CSV AMÉLIORÉ ---
+  // --- EXPORT CSV DIRECT VERS DOWNLOADS ---
   Future<void> _exportCsv() async {
     if (_items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('La liste est vide.')));
@@ -243,65 +243,82 @@ class _CollectionScreenState extends State<CollectionScreen> {
     final fileName = 'inventaireCollection_$timestamp.csv';
 
     try {
-      // 1. Demande de Permission
-      bool hasPermission = false;
+      // CAS ANDROID : Tentative d'écriture directe dans Téléchargements
       if (Platform.isAndroid) {
-        var status = await Permission.storage.status;
-        if (!status.isGranted) {
-          status = await Permission.storage.request();
-        }
-        if (status.isGranted) {
-          hasPermission = true;
-        } else if (await Permission.manageExternalStorage.request().isGranted) {
-          hasPermission = true;
-        }
-      } else {
-        hasPermission = true; // iOS géré autrement
-      }
+        // Chemin public standard des téléchargements sur Android
+        final Directory downloadDir = Directory('/storage/emulated/0/Download');
 
-      bool directSuccess = false;
-
-      // 2. Tentative d'écriture directe (Download)
-      if (hasPermission) {
-        try {
-          final Directory downloadDir = Directory('/storage/emulated/0/Download');
-          if (await downloadDir.exists()) {
-            final String filePath = '${downloadDir.path}/$fileName';
-            final File file = File(filePath);
-            await file.writeAsString(csvContent.toString());
-            directSuccess = true;
+        // Si le dossier n'existe pas (rare), on le crée
+        if (!await downloadDir.exists()) {
+          try {
+            await downloadDir.create(recursive: true);
+          } catch(e) {
+            print("Impossible de créer le dossier Download: $e");
           }
+        }
+
+        final String filePath = '${downloadDir.path}/$fileName';
+        final File file = File(filePath);
+
+        bool saveSuccess = false;
+
+        // TENTATIVE 1 : Écriture directe (Fonctionne souvent sur Android 11+ Scoped Storage)
+        try {
+          await file.writeAsString(csvContent.toString());
+          saveSuccess = true;
         } catch (e) {
-          print("Erreur écriture directe: $e");
+          print("Échec écriture directe, tentative avec permission... ($e)");
+
+          // TENTATIVE 2 : Demande de permission classique (Android 10 et moins)
+          var status = await Permission.storage.status;
+          if (!status.isGranted) {
+            status = await Permission.storage.request();
+          }
+
+          if (status.isGranted) {
+            try {
+              await file.writeAsString(csvContent.toString());
+              saveSuccess = true;
+            } catch (e2) {
+              print("Échec après permission: $e2");
+            }
+          }
+        }
+
+        // SUCCÈS : On notifie l'utilisateur
+        if (saveSuccess) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ Fichier sauvegardé dans Téléchargements :\n$fileName'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 5),
+                action: SnackBarAction(
+                  label: 'Partager',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    Share.shareXFiles([XFile(filePath)], text: 'Export Inventaire');
+                  },
+                ),
+              )
+          );
+          return; // On arrête ici, pas besoin de Share manuel
         }
       }
 
-      // 3. Résultat ou Fallback (Share)
-      if (directSuccess) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Succès ! Fichier enregistré dans "Download" :\n$fileName'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 4),
-            )
-        );
-      } else {
-        // Fallback : On crée le fichier dans le cache de l'app et on le partage
-        final directory = await getTemporaryDirectory();
-        final filePath = '${directory.path}/$fileName';
-        final file = File(filePath);
-        await file.writeAsString(csvContent.toString());
+      // CAS IOS ou ÉCHEC ANDROID (Fallback) : Utilisation du dossier temporaire + Share sheet
+      final directory = await getTemporaryDirectory();
+      final filePath = '${directory.path}/$fileName';
+      final file = File(filePath);
+      await file.writeAsString(csvContent.toString());
 
-        final xFile = XFile(filePath);
-        if (!mounted) return;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sauvegarde automatique impossible. Veuillez choisir où enregistrer.'), duration: Duration(seconds: 3))
+      );
 
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sauvegarde directe impossible (Permissions). Veuillez choisir où enregistrer.'), duration: Duration(seconds: 3))
-        );
-
-        await Share.shareXFiles([xFile], text: 'Export Inventaire $timestamp');
-      }
+      final xFile = XFile(filePath);
+      await Share.shareXFiles([xFile], text: 'Export Inventaire $timestamp');
 
     } catch (e) {
       if (!mounted) return;
@@ -394,8 +411,8 @@ class _CollectionScreenState extends State<CollectionScreen> {
             onPressed: (_items.isEmpty || _isPrinting) ? null : _printCollection,
           ),
           IconButton(
-            icon: const Icon(Icons.share),
-            tooltip: 'Exporter CSV',
+            icon: const Icon(Icons.file_download), // Icône changée pour "Télécharger/Sauvegarder"
+            tooltip: 'Générer CSV (Downloads)',
             onPressed: _items.isEmpty ? null : _exportCsv,
           ),
         ],
