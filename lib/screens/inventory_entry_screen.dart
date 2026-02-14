@@ -608,10 +608,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     return AnimatedSwitcher(duration: const Duration(milliseconds: 300), transitionBuilder: (Widget child, Animation<double> animation) { return FadeTransition(opacity: animation, child: child); }, child: _notificationMessage == null ? const SizedBox(height: 48, key: ValueKey('empty')) : Container(key: const ValueKey('notification'), height: 48, child: Center(child: Text(_notificationMessage!, style: TextStyle(color: _notificationColor, fontWeight: FontWeight.bold, fontSize: 16)))));
   }
 
+// Dans lib/screens/inventory_entry_screen.dart
+
   Widget buildProductView(EntryProvider provider) {
     final Product product = provider.currentProduct!;
     final screenHeight = MediaQuery.of(context).size.height;
     final bool isSmallScreen = screenHeight < 700;
+
+    // Tailles de police
     double stockFontSize = isSmallScreen ? 14 : 16;
     double titleFontSize = isSmallScreen ? 14 : 16;
     double priceFontSize = isSmallScreen ? 13 : 16;
@@ -619,18 +623,68 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     double buttonSize = isSmallScreen ? 56 : 64;
     double buttonIconSize = isSmallScreen ? 28 : 30;
 
+    // --- CORRECTION HAUTEUR FIXE ---
+    // On définit une hauteur de ligne standard (ex: 1.3 fois la taille de police)
+    // On calcule la hauteur totale pour 2 lignes
+    // Hauteur = TaillePolice * HauteurLigne * NombreLignes
+    const double lineHeightMultiplier = 1.3;
+    final double fixedTitleHeight = titleFontSize * lineHeightMultiplier * 2;
+    // -------------------------------
+
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
       children: [
         const SizedBox(height: 8),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [ Builder(builder: (context) { int currentGlobalIndex = provider.allProducts.indexWhere((p) => p.id == product.id); int displayIndex = (currentGlobalIndex != -1) ? currentGlobalIndex : provider.currentProductIndex; return Text('${displayIndex + 1} / ${provider.totalProductsInRayon}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: stockFontSize)); }), if (provider.activeFilter.isActive) Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: Colors.blue.shade100, borderRadius: BorderRadius.circular(12)), child: const Text('Filtré', style: TextStyle(fontSize: 12))) ]),
+
+        // Indicateur x/y et Filtre (Inchangé)
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Builder(builder: (context) {
+            int currentGlobalIndex = provider.allProducts.indexWhere((p) => p.id == product.id);
+            int displayIndex = (currentGlobalIndex != -1) ? currentGlobalIndex : provider.currentProductIndex;
+            return Text('${displayIndex + 1} / ${provider.totalProductsInRayon}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: stockFontSize));
+          }),
+          if (provider.activeFilter.isActive)
+            Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: Colors.blue.shade100, borderRadius: BorderRadius.circular(12)), child: const Text('Filtré', style: TextStyle(fontSize: 12)))
+        ]),
+
         const SizedBox(height: 8),
-        Text('${product.produitCip} - ${product.produitName}', style: TextStyle(fontSize: titleFontSize, fontWeight: FontWeight.bold, color: AppColors.primary), maxLines: 2, overflow: TextOverflow.ellipsis),
+
+        // --- ZONE NOM PRODUIT FIXE SUR 2 LIGNES ---
+        SizedBox(
+          height: fixedTitleHeight, // Hauteur forçée
+          child: Align( // Alignement vertical (Top) pour que le texte commence en haut
+            alignment: Alignment.centerLeft,
+            child: Text(
+                '${product.produitCip} - ${product.produitName}',
+                style: TextStyle(
+                  fontSize: titleFontSize,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
+                  height: lineHeightMultiplier, // Important : fixe l'espacement inter-ligne
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis
+            ),
+          ),
+        ),
+        // -------------------------------------------
+
         const SizedBox(height: 12),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [ Text('PA: ${product.produitPrixAchat} F', style: TextStyle(fontSize: priceFontSize, color: Colors.orange)), Text('PV: ${product.produitPrixUni} F', style: TextStyle(fontSize: priceFontSize, color: AppColors.accent)) ]),
+
+        // Prix (Inchangé)
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text('PA: ${product.produitPrixAchat} F', style: TextStyle(fontSize: priceFontSize, color: Colors.orange)),
+          Text('PV: ${product.produitPrixUni} F', style: TextStyle(fontSize: priceFontSize, color: AppColors.accent))
+        ]),
+
         const SizedBox(height: 8),
+
+        // Stock Théorique (Inchangé)
         Consumer<AppConfig>(builder: (context, appConfig, child) { return Visibility(visible: appConfig.showTheoreticalStock, child: Text('Stock Théorique: ${product.quantiteInitiale}', style: TextStyle(fontSize: stockFontSize, fontWeight: FontWeight.bold, color: product.quantiteInitiale < 0 ? Colors.red.shade700 : const Color(0xFF1B5E20)))); }),
+
         const SizedBox(height: 8),
+
+        // Zone Saisie Quantité (Inchangé)
         Row(
             children: [
               SizedBox(
@@ -673,6 +727,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               )
             ]
         ),
+
         _buildNotificationArea(),
       ],
     );

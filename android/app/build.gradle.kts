@@ -31,7 +31,7 @@ android {
         //versionCode = flutter.versionCode
         versionCode = 2
         //versionName = flutter.versionName
-        versionName = "4.7.1"
+        versionName = "4.7.5"
     }
 
     // Ajouter ce bloc pour renommer les fichiers de sortie
