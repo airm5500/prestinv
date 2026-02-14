@@ -16,10 +16,15 @@ import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/models/product.dart';
 import 'dart:async';
 import 'package:prestinv/models/product_filter.dart';
-
-// --- IMPORT MANQUANT QUI CAUSAIT L'ERREUR ---
 import 'package:prestinv/screens/cumul_history_screen.dart';
-// ---------------------------------------------
+
+// --- IMPORTS AJOUTÉS POUR L'EXPORT CSV ---
+import 'dart:io';
+import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
+// -----------------------------------------
 
 class InventoryEntryScreen extends StatefulWidget {
   final String inventoryId;
@@ -79,6 +84,84 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     _debounceTimer?.cancel();
     super.dispose();
   }
+
+  // --- NOUVELLE MÉTHODE D'EXPORTATION CSV ---
+  Future<void> _exportProductsToCsv(List<Product> products, String suffixName) async {
+    if (products.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Aucune donnée à exporter.')));
+      return;
+    }
+
+    final StringBuffer csvContent = StringBuffer();
+    csvContent.writeln('code_cip;quantite'); // En-tête demandé
+
+    for (final p in products) {
+      // On exporte uniquement si quantité saisie > 0 ou si c'est pertinent
+      // Ici on exporte tout ce qui est dans la liste (filtrée ou globale)
+      csvContent.writeln('${p.produitCip};${p.quantiteSaisie}');
+    }
+
+    final timestamp = DateFormat('ddMMyyyy_HHmm').format(DateTime.now());
+    // Nettoyage du nom pour éviter les caractères spéciaux dans le fichier
+    final cleanSuffix = suffixName.replaceAll(RegExp(r'[^\w\s]+'), '');
+    final fileName = 'Export_${cleanSuffix}_$timestamp.csv';
+
+    try {
+      if (Platform.isAndroid) {
+        final Directory downloadDir = Directory('/storage/emulated/0/Download');
+        if (!await downloadDir.exists()) {
+          try { await downloadDir.create(recursive: true); } catch(e) { print("Err create dir: $e"); }
+        }
+
+        final String filePath = '${downloadDir.path}/$fileName';
+        final File file = File(filePath);
+
+        bool saveSuccess = false;
+
+        try {
+          await file.writeAsString(csvContent.toString());
+          saveSuccess = true;
+        } catch (e) {
+          var status = await Permission.storage.status;
+          if (!status.isGranted) status = await Permission.storage.request();
+
+          if (status.isGranted) {
+            try {
+              await file.writeAsString(csvContent.toString());
+              saveSuccess = true;
+            } catch (e2) { print("Echec permissions: $e2"); }
+          }
+        }
+
+        if (saveSuccess) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ Export réussi dans Téléchargements :\n$fileName'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 5),
+                action: SnackBarAction(label: 'Partager', textColor: Colors.white, onPressed: () { Share.shareXFiles([XFile(filePath)], text: 'Export CSV'); }),
+              )
+          );
+          return;
+        }
+      }
+
+      // Fallback (iOS ou Echec Android)
+      final directory = await getTemporaryDirectory();
+      final filePath = '${directory.path}/$fileName';
+      final file = File(filePath);
+      await file.writeAsString(csvContent.toString());
+
+      if (!mounted) return;
+      Share.shareXFiles([XFile(filePath)], text: 'Export CSV $suffixName');
+
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur export: $e'), backgroundColor: Colors.red));
+    }
+  }
+  // ------------------------------------------
 
   void _navigateToRecap() async {
     showDialog(context: context, barrierDismissible: false, builder: (ctx) => const AlertDialog(content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text("Chargement du récap..."),])));
@@ -142,7 +225,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  // --- SAISIE GUIDÉE : Validation ---
   void _validateAndProceed() async {
     if (!mounted) return;
     final provider = Provider.of<EntryProvider>(context, listen: false);
@@ -153,7 +235,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final inputQuantity = int.tryParse(_quantityController.text) ?? 0;
     int finalQuantity = inputQuantity;
 
-    // LOGIQUE CUMUL (Mode Guidé)
     if (appConfig.isCumulEnabled && provider.currentProduct != null && _isManualAccess) {
       showDialog(context: context, barrierDismissible: false, builder: (c) => const Center(child: CircularProgressIndicator()));
       try {
@@ -441,7 +522,26 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       onWillPop: _onWillPop,
       child: Scaffold(
         resizeToAvoidBottomInset: true,
-        appBar: AppBar(title: Text(widget.isQuickMode ? 'Saisie Rapide (Scan)' : 'Saisie Inventaire'), actions: [ IconButton(icon: const Icon(Icons.send), tooltip: 'Envoyer les données', onPressed: _sendDataToServer), IconButton(icon: const Icon(Icons.history), tooltip: 'Historique des cumuls', onPressed: () { if (!mounted) return; Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CumulHistoryScreen())); }), Consumer<EntryProvider>(builder: (context, provider, child) { if (provider.selectedRayon == null) return const SizedBox.shrink(); return Row(children: [ IconButton(icon: const Icon(Icons.list_alt_outlined), tooltip: 'Récapitulatif', onPressed: () { if (!mounted) return; _navigateToRecap(); }), IconButton(icon: const Icon(Icons.edit_note_outlined), tooltip: 'Correction écarts', onPressed: () { if (!mounted) return; Navigator.of(context).push(MaterialPageRoute(builder: (_) => VarianceScreen(inventoryId: widget.inventoryId, rayonId: provider.selectedRayon!.id, rayonName: provider.selectedRayon!.libelle))); }) ]); }) ]),
+        appBar: AppBar(
+            title: Text(widget.isQuickMode ? 'Saisie Rapide (Scan)' : 'Saisie Inventaire'),
+            actions: [
+              IconButton(icon: const Icon(Icons.send), tooltip: 'Envoyer les données', onPressed: _sendDataToServer),
+              IconButton(icon: const Icon(Icons.history), tooltip: 'Historique des cumuls', onPressed: () { if (!mounted) return; Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CumulHistoryScreen())); }),
+
+              // --- AJOUT : BOUTON EXPORT EN MODE RAPIDE ---
+              if (widget.isQuickMode)
+                Consumer<EntryProvider>(
+                  builder: (context, provider, child) => IconButton(
+                    icon: const Icon(Icons.file_download),
+                    tooltip: 'Exporter la session (CSV)',
+                    onPressed: () => _exportProductsToCsv(provider.allProducts, "Saisie_Rapide"),
+                  ),
+                ),
+              // --------------------------------------------
+
+              Consumer<EntryProvider>(builder: (context, provider, child) { if (provider.selectedRayon == null) return const SizedBox.shrink(); return Row(children: [ IconButton(icon: const Icon(Icons.list_alt_outlined), tooltip: 'Récapitulatif', onPressed: () { if (!mounted) return; _navigateToRecap(); }), IconButton(icon: const Icon(Icons.edit_note_outlined), tooltip: 'Correction écarts', onPressed: () { if (!mounted) return; Navigator.of(context).push(MaterialPageRoute(builder: (_) => VarianceScreen(inventoryId: widget.inventoryId, rayonId: provider.selectedRayon!.id, rayonName: provider.selectedRayon!.libelle))); }) ]); })
+            ]
+        ),
         body: Consumer<EntryProvider>(
           builder: (context, provider, child) {
             bool showLocationSelector = !widget.isQuickMode;
@@ -458,7 +558,40 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
             return Column(
               children: [
-                if (showLocationSelector) Container(margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0), decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.05), borderRadius: BorderRadius.circular(8.0), border: Border.all(color: Colors.grey.shade300)), child: Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(8.0), onTap: () => _showLocationSelector(context, provider), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0), child: Row(children: [ const Icon(Icons.touch_app_outlined, color: AppColors.primary), const SizedBox(width: 12), Expanded(child: Text(provider.selectedRayon?.libelle ?? 'Sélectionner un emplacement', style: TextStyle(color: provider.selectedRayon == null ? Colors.grey.shade700 : AppColors.primary, fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)), const Icon(Icons.arrow_drop_down, color: AppColors.primary) ]))))),
+                if (showLocationSelector)
+                  Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                      decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.05), borderRadius: BorderRadius.circular(8.0), border: Border.all(color: Colors.grey.shade300)),
+                      child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                              borderRadius: BorderRadius.circular(8.0),
+                              onTap: () => _showLocationSelector(context, provider),
+                              child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
+                                  child: Row(
+                                      children: [
+                                        const Icon(Icons.touch_app_outlined, color: AppColors.primary),
+                                        const SizedBox(width: 12),
+                                        Expanded(child: Text(provider.selectedRayon?.libelle ?? 'Sélectionner un emplacement', style: TextStyle(color: provider.selectedRayon == null ? Colors.grey.shade700 : AppColors.primary, fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+
+                                        // --- AJOUT : BOUTON EXPORT EN MODE GUIDÉ (À CÔTÉ DU RAYON) ---
+                                        if (provider.selectedRayon != null)
+                                          IconButton(
+                                            icon: const Icon(Icons.file_download, color: Colors.blue),
+                                            tooltip: "Exporter le rayon (CSV)",
+                                            onPressed: () => _exportProductsToCsv(provider.allProducts, "Rayon_${provider.selectedRayon!.libelle}"),
+                                          ),
+                                        // -----------------------------------------------------------
+
+                                        if (provider.selectedRayon == null) const Icon(Icons.arrow_drop_down, color: AppColors.primary)
+                                      ]
+                                  )
+                              )
+                          )
+                      )
+                  ),
+
                 if (showSearchAndBody) Padding(padding: const EdgeInsets.fromLTRB(16.0, 4.0, 16.0, 8.0), child: Row(children: [ Expanded(child: TextField(controller: _searchController, focusNode: _searchFocusNode, onSubmitted: (value) => _handleScanOrSearch(value, fromTyping: false), onChanged: _onSearchChanged, textInputAction: TextInputAction.search, autofocus: widget.isQuickMode, decoration: InputDecoration(labelText: 'Rechercher / Scanner', hintText: 'CIP, Nom ou Scan...', prefixIcon: const Icon(Icons.qr_code_scanner, size: 20), isDense: true, border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))), contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0), suffixIcon: _searchController.text.isNotEmpty ? IconButton(icon: const Icon(Icons.clear, size: 20), onPressed: () { _searchController.clear(); setState(() { _showSearchResults = false; _filteredProducts = []; }); _searchFocusNode.requestFocus(); }) : null))), if (!widget.isQuickMode) ...[ const SizedBox(width: 8), OutlinedButton(style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero), onPressed: provider.selectedRayon == null ? null : () => _showFilterDialog(context, provider), child: const Icon(Icons.filter_alt_outlined)), const SizedBox(width: 8), OutlinedButton(style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(12), minimumSize: Size.zero), onPressed: (provider.selectedRayon == null || !provider.activeFilter.isActive) ? null : () => provider.applyFilter(ProductFilter(type: FilterType.none)), child: const Icon(Icons.delete_outline)) ] ])),
                 const Divider(height: 1, thickness: 1),
                 if (showSearchAndBody) Expanded(child: Stack(children: [ (provider.isLoading && provider.products.isEmpty) ? const Center(child: CircularProgressIndicator()) : (provider.products.isEmpty || provider.currentProduct == null) ? Center(child: Text(provider.activeFilter.isActive ? 'Aucun produit.' : 'Aucun produit.')) : widget.isQuickMode ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.qr_code_scanner, size: 80, color: Colors.grey.shade300), const SizedBox(height: 16), const Text('Mode Saisie Rapide Activé', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey))])) : buildProductView(provider), if (_showSearchResults) Container(color: AppColors.background.withOpacity(0.98), child: _filteredProducts.isEmpty ? const Center(child: Text("Aucun produit trouvé")) : ListView.builder(itemCount: _filteredProducts.length, itemBuilder: (context, index) { final product = _filteredProducts[index]; return Card(margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), child: ListTile(title: Text(product.produitName, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [ Text('CIP: ${product.produitCip} / Stock Théo: ${product.quantiteInitiale}'), Text('Prix Vente: ${product.produitPrixUni.toStringAsFixed(0)} F', style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)) ]), onTap: () => _selectProduct(product))); })) ])),
