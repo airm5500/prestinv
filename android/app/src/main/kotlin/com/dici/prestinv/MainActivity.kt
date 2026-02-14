@@ -1,4 +1,4 @@
-package com.example.prestinv
+package com.dici.prestinv
 
 import io.flutter.embedding.android.FlutterActivity
 
