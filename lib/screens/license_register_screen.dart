@@ -72,7 +72,7 @@ class _LicenseRegisterScreenState extends State<LicenseRegisterScreen> {
             ),
             const SizedBox(height: 12),
             const Text(
-              "Veuillez saisir votre clé de licence pour continuer.",
+              "Veuillez saisir votre clé de licence pour continuer",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey),
             ),
