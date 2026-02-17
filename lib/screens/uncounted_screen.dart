@@ -11,8 +11,7 @@ import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
-// Import indispensable pour le Provider
-import 'package:prestinv/providers/entry_provider.dart';
+import 'package:prestinv/providers/entry_provider.dart'; // Import indispensable
 
 enum StockFilterType { none, less, more, lessEq, moreEq, diff, equal }
 
@@ -91,7 +90,8 @@ class _UncountedScreenState extends State<UncountedScreen> {
 
         // Initialisation des couleurs au chargement
         final provider = Provider.of<EntryProvider>(context, listen: false);
-        provider.loadRayonStatuses(_apiService, widget.inventoryId);
+        // On peuple le provider avec les rayons pour qu'il puisse calculer les statuts
+        provider.fetchRayons(_apiService, widget.inventoryId);
 
         _loadUntouchedProducts();
       }
@@ -432,10 +432,12 @@ class _UncountedScreenState extends State<UncountedScreen> {
           _applyFilters();
         });
 
-        // --- Actualisation des couleurs du menu déroulant ---
+        // --- Actualisation des couleurs du menu déroulant APRES saisie ---
         final provider = Provider.of<EntryProvider>(context, listen: false);
+        // On demande au provider de recalculer les statuts (Blanc/Orange/Vert)
+        // Cela mettra à jour visuellement les pastilles dans le Dropdown
         provider.loadRayonStatuses(_apiService, widget.inventoryId);
-        // ----------------------------------------------------
+        // -----------------------------------------------------------------
       }
     } catch (e) {
       if (mounted) {
@@ -525,6 +527,7 @@ class _UncountedScreenState extends State<UncountedScreen> {
                                     style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
                               ..._rayons.map((rayon) {
+                                // Récupération statut (couleur)
                                 final int status =
                                     provider.rayonStatuses[rayon.id] ?? 0;
                                 Color textColor = Colors.black;
@@ -558,6 +561,14 @@ class _UncountedScreenState extends State<UncountedScreen> {
                                   _selectedRayon = newValue;
                                 });
                                 _loadUntouchedProducts();
+
+                                // --- MODIFICATION : FOCUS AUTOMATIQUE ---
+                                // Une fois l'emplacement choisi, on remet le focus sur la barre de recherche
+                                // pour scanner directement.
+                                Future.delayed(const Duration(milliseconds: 100), () {
+                                  if (mounted) _searchFocusNode.requestFocus();
+                                });
+                                // ----------------------------------------
                               }
                             },
                           );
