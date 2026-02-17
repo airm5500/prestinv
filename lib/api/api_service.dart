@@ -361,4 +361,37 @@ class ApiService {
       rethrow;
     }
   }
+
+  // Ajoutez ces méthodes à la fin de la classe, avant la dernière accolade }
+
+  /// Vérifie si un rayon a été entamé (Liste des produits touchés non vide)
+  Future<bool> hasTouchedProductsInRayon(String inventoryId, String rayonId) async {
+    // On laisse query vide pour avoir tout le rayon
+    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/detailsTouchedRayon?idInventaire=$inventoryId&idRayon=$rayonId&query=');
+    try {
+      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+        return data.isNotEmpty;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Vérifie s'il reste des produits à faire (Liste des produits intouchés non vide)
+  Future<bool> hasUntouchedProductsInRayon(String inventoryId, String rayonId) async {
+    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/detailsUntouchedRayon?idInventaire=$inventoryId&idRayon=$rayonId&query=');
+    try {
+      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+        return data.isNotEmpty; // Si vide = tout est fini
+      }
+      return true; // En cas d'erreur, on suppose qu'il en reste (sécurité)
+    } catch (e) {
+      return true;
+    }
+  }
 }

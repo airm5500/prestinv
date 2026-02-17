@@ -18,13 +18,11 @@ import 'dart:async';
 import 'package:prestinv/models/product_filter.dart';
 import 'package:prestinv/screens/cumul_history_screen.dart';
 
-// --- IMPORTS AJOUTÉS POUR L'EXPORT CSV ---
 import 'dart:io';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
-// -----------------------------------------
 
 class InventoryEntryScreen extends StatefulWidget {
   final String inventoryId;
@@ -85,7 +83,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     super.dispose();
   }
 
-  // --- NOUVELLE MÉTHODE D'EXPORTATION CSV ---
   Future<void> _exportProductsToCsv(List<Product> products, String suffixName) async {
     if (products.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Aucune donnée à exporter.')));
@@ -93,16 +90,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
 
     final StringBuffer csvContent = StringBuffer();
-    csvContent.writeln('code_cip;quantite'); // En-tête demandé
+    csvContent.writeln('code_cip;quantite');
 
     for (final p in products) {
-      // On exporte uniquement si quantité saisie > 0 ou si c'est pertinent
-      // Ici on exporte tout ce qui est dans la liste (filtrée ou globale)
       csvContent.writeln('${p.produitCip};${p.quantiteSaisie}');
     }
 
     final timestamp = DateFormat('ddMMyyyy_HHmm').format(DateTime.now());
-    // Nettoyage du nom pour éviter les caractères spéciaux dans le fichier
     final cleanSuffix = suffixName.replaceAll(RegExp(r'[^\w\s]+'), '');
     final fileName = 'Export_${cleanSuffix}_$timestamp.csv';
 
@@ -147,7 +141,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         }
       }
 
-      // Fallback (iOS ou Echec Android)
       final directory = await getTemporaryDirectory();
       final filePath = '${directory.path}/$fileName';
       final file = File(filePath);
@@ -161,7 +154,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur export: $e'), backgroundColor: Colors.red));
     }
   }
-  // ------------------------------------------
 
   void _navigateToRecap() async {
     showDialog(context: context, barrierDismissible: false, builder: (ctx) => const AlertDialog(content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text("Chargement du récap..."),])));
@@ -481,7 +473,87 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   void _selectProduct(Product product) { _openQuickEntryDialog(product); }
 
   void _showLocationSelector(BuildContext context, EntryProvider provider) {
-    showDialog(context: context, builder: (ctx) { List<Rayon> filteredRayons = provider.rayons; return StatefulBuilder(builder: (context, setState) { return AlertDialog(title: const Text('Choisir un emplacement'), content: SizedBox(width: double.maxFinite, child: Column(mainAxisSize: MainAxisSize.min, children: [ TextField(decoration: const InputDecoration(labelText: 'Rechercher un rayon', prefixIcon: Icon(Icons.search), border: OutlineInputBorder()), onChanged: (value) { setState(() { filteredRayons = provider.rayons.where((r) => r.displayName.toLowerCase().contains(value.toLowerCase())).toList(); }); }), const SizedBox(height: 10), Expanded(child: filteredRayons.isEmpty ? const Center(child: Text("Aucun emplacement trouvé")) : ListView.builder(shrinkWrap: true, itemCount: filteredRayons.length, itemBuilder: (ctx, index) { final rayon = filteredRayons[index]; final isSelected = rayon.id == provider.selectedRayon?.id; return ListTile(leading: CircleAvatar(backgroundColor: isSelected ? AppColors.accent.withOpacity(0.1) : AppColors.primary.withOpacity(0.1), child: Icon(Icons.location_on, color: isSelected ? AppColors.accent : AppColors.primary, size: 20)), title: Text(rayon.libelle, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? AppColors.accent : Colors.black)), subtitle: Text(rayon.code, style: TextStyle(fontSize: 12, color: Colors.grey[600])), onTap: () { Navigator.of(ctx).pop(); _onLocationChanged(rayon); }); })) ])), actions: [ TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annuler')) ]); }); });
+    // 1. On lance le rafraîchissement des statuts (couleurs) dès l'ouverture
+    provider.loadRayonStatuses(_apiService, widget.inventoryId);
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        List<Rayon> filteredRayons = provider.rayons;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Choisir un emplacement'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      decoration: const InputDecoration(labelText: 'Rechercher un rayon', prefixIcon: Icon(Icons.search), border: OutlineInputBorder()),
+                      onChanged: (value) { setState(() { filteredRayons = provider.rayons.where((r) => r.displayName.toLowerCase().contains(value.toLowerCase())).toList(); }); },
+                    ),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      // 2. AJOUT DU CONSUMER ICI POUR ÉCOUTER LES MISES À JOUR DE COULEURS
+                      child: Consumer<EntryProvider>(
+                          builder: (context, entryProvider, child) {
+                            return filteredRayons.isEmpty
+                                ? const Center(child: Text("Aucun emplacement trouvé"))
+                                : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: filteredRayons.length,
+                              itemBuilder: (ctx, index) {
+                                final rayon = filteredRayons[index];
+                                final isSelected = rayon.id == entryProvider.selectedRayon?.id; // Utiliser entryProvider
+
+                                // On récupère le statut à jour
+                                final int status = entryProvider.rayonStatuses[rayon.id] ?? 0;
+
+                                Color bgColor;
+                                IconData icon;
+                                Color iconColor;
+
+                                if (status == 2) {
+                                  bgColor = Colors.green.shade100;
+                                  icon = Icons.check_circle;
+                                  iconColor = Colors.green;
+                                } else if (status == 1) {
+                                  bgColor = Colors.orange.shade100;
+                                  icon = Icons.hourglass_bottom;
+                                  iconColor = Colors.orange.shade800;
+                                } else {
+                                  bgColor = isSelected ? AppColors.primary.withOpacity(0.1) : Colors.transparent;
+                                  icon = Icons.location_on;
+                                  iconColor = isSelected ? AppColors.primary : Colors.grey;
+                                }
+
+                                return Container(
+                                  decoration: BoxDecoration(
+                                    color: bgColor,
+                                    border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+                                  ),
+                                  child: ListTile(
+                                    leading: Icon(icon, color: iconColor),
+                                    title: Text(rayon.libelle, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: Colors.black)),
+                                    subtitle: Text(rayon.code, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                                    onTap: () { Navigator.of(ctx).pop(); _onLocationChanged(rayon); },
+                                  ),
+                                );
+                              },
+                            );
+                          }
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [ TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annuler')) ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _showFilterDialog(BuildContext context, EntryProvider provider) {
@@ -528,7 +600,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               IconButton(icon: const Icon(Icons.send), tooltip: 'Envoyer les données', onPressed: _sendDataToServer),
               IconButton(icon: const Icon(Icons.history), tooltip: 'Historique des cumuls', onPressed: () { if (!mounted) return; Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CumulHistoryScreen())); }),
 
-              // --- AJOUT : BOUTON EXPORT EN MODE RAPIDE ---
               if (widget.isQuickMode)
                 Consumer<EntryProvider>(
                   builder: (context, provider, child) => IconButton(
@@ -537,7 +608,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                     onPressed: () => _exportProductsToCsv(provider.allProducts, "Saisie_Rapide"),
                   ),
                 ),
-              // --------------------------------------------
 
               Consumer<EntryProvider>(builder: (context, provider, child) { if (provider.selectedRayon == null) return const SizedBox.shrink(); return Row(children: [ IconButton(icon: const Icon(Icons.list_alt_outlined), tooltip: 'Récapitulatif', onPressed: () { if (!mounted) return; _navigateToRecap(); }), IconButton(icon: const Icon(Icons.edit_note_outlined), tooltip: 'Correction écarts', onPressed: () { if (!mounted) return; Navigator.of(context).push(MaterialPageRoute(builder: (_) => VarianceScreen(inventoryId: widget.inventoryId, rayonId: provider.selectedRayon!.id, rayonName: provider.selectedRayon!.libelle))); }) ]); })
             ]
@@ -575,14 +645,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                         const SizedBox(width: 12),
                                         Expanded(child: Text(provider.selectedRayon?.libelle ?? 'Sélectionner un emplacement', style: TextStyle(color: provider.selectedRayon == null ? Colors.grey.shade700 : AppColors.primary, fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
 
-                                        // --- AJOUT : BOUTON EXPORT EN MODE GUIDÉ (À CÔTÉ DU RAYON) ---
                                         if (provider.selectedRayon != null)
                                           IconButton(
                                             icon: const Icon(Icons.file_download, color: Colors.blue),
                                             tooltip: "Exporter le rayon (CSV)",
                                             onPressed: () => _exportProductsToCsv(provider.allProducts, "Rayon_${provider.selectedRayon!.libelle}"),
                                           ),
-                                        // -----------------------------------------------------------
 
                                         if (provider.selectedRayon == null) const Icon(Icons.arrow_drop_down, color: AppColors.primary)
                                       ]
@@ -608,14 +676,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     return AnimatedSwitcher(duration: const Duration(milliseconds: 300), transitionBuilder: (Widget child, Animation<double> animation) { return FadeTransition(opacity: animation, child: child); }, child: _notificationMessage == null ? const SizedBox(height: 48, key: ValueKey('empty')) : Container(key: const ValueKey('notification'), height: 48, child: Center(child: Text(_notificationMessage!, style: TextStyle(color: _notificationColor, fontWeight: FontWeight.bold, fontSize: 16)))));
   }
 
-// Dans lib/screens/inventory_entry_screen.dart
-
   Widget buildProductView(EntryProvider provider) {
     final Product product = provider.currentProduct!;
     final screenHeight = MediaQuery.of(context).size.height;
     final bool isSmallScreen = screenHeight < 700;
 
-    // Tailles de police
     double stockFontSize = isSmallScreen ? 14 : 16;
     double titleFontSize = isSmallScreen ? 14 : 16;
     double priceFontSize = isSmallScreen ? 13 : 16;
@@ -623,20 +688,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     double buttonSize = isSmallScreen ? 56 : 64;
     double buttonIconSize = isSmallScreen ? 28 : 30;
 
-    // --- CORRECTION HAUTEUR FIXE ---
-    // On définit une hauteur de ligne standard (ex: 1.3 fois la taille de police)
-    // On calcule la hauteur totale pour 2 lignes
-    // Hauteur = TaillePolice * HauteurLigne * NombreLignes
     const double lineHeightMultiplier = 1.3;
     final double fixedTitleHeight = titleFontSize * lineHeightMultiplier * 2;
-    // -------------------------------
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
       children: [
         const SizedBox(height: 8),
 
-        // Indicateur x/y et Filtre (Inchangé)
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Builder(builder: (context) {
             int currentGlobalIndex = provider.allProducts.indexWhere((p) => p.id == product.id);
@@ -649,10 +708,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
         const SizedBox(height: 8),
 
-        // --- ZONE NOM PRODUIT FIXE SUR 2 LIGNES ---
         SizedBox(
-          height: fixedTitleHeight, // Hauteur forçée
-          child: Align( // Alignement vertical (Top) pour que le texte commence en haut
+          height: fixedTitleHeight,
+          child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
                 '${product.produitCip} - ${product.produitName}',
@@ -660,18 +718,16 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   fontSize: titleFontSize,
                   fontWeight: FontWeight.bold,
                   color: AppColors.primary,
-                  height: lineHeightMultiplier, // Important : fixe l'espacement inter-ligne
+                  height: lineHeightMultiplier,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis
             ),
           ),
         ),
-        // -------------------------------------------
 
         const SizedBox(height: 12),
 
-        // Prix (Inchangé)
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text('PA: ${product.produitPrixAchat} F', style: TextStyle(fontSize: priceFontSize, color: Colors.orange)),
           Text('PV: ${product.produitPrixUni} F', style: TextStyle(fontSize: priceFontSize, color: AppColors.accent))
@@ -679,12 +735,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
         const SizedBox(height: 8),
 
-        // Stock Théorique (Inchangé)
         Consumer<AppConfig>(builder: (context, appConfig, child) { return Visibility(visible: appConfig.showTheoreticalStock, child: Text('Stock Théorique: ${product.quantiteInitiale}', style: TextStyle(fontSize: stockFontSize, fontWeight: FontWeight.bold, color: product.quantiteInitiale < 0 ? Colors.red.shade700 : const Color(0xFF1B5E20)))); }),
 
         const SizedBox(height: 8),
 
-        // Zone Saisie Quantité (Inchangé)
         Row(
             children: [
               SizedBox(
