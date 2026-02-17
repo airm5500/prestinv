@@ -260,7 +260,17 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     Future<void> proceedToNext(int quantityToSave) async {
       await provider.updateQuantity(quantityToSave.toString());
       _resetSendReminderTimer();
-      if (appConfig.sendMode == SendMode.direct) { try { await _apiService.updateProductQuantity(provider.currentProduct!.id, quantityToSave); if (mounted) _showNotification('Saisie envoyée !', Colors.green); } catch (e) { if (mounted) _showNotification('Erreur réseau.', Colors.red); } }
+      if (appConfig.sendMode == SendMode.direct) {
+        try {
+          await _apiService.updateProductQuantity(provider.currentProduct!.id, quantityToSave);
+          // CORRECTION : On marque le produit comme synchronisé immédiatement en cas de succès
+          await provider.markAsSynced(provider.currentProduct!.id);
+
+          if (mounted) _showNotification('Saisie envoyée !', Colors.green);
+        } catch (e) {
+          if (mounted) _showNotification('Erreur réseau.', Colors.red);
+        }
+      }
 
       bool isLastProduct = provider.currentProductIndex >= provider.totalProducts - 1;
       if (isLastProduct && provider.totalProducts > 0) {
@@ -467,7 +477,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     product.quantiteSaisie = quantity;
     await provider.updateSpecificProduct(product);
     if (mounted) { _showNotification('Saisie enregistrée : ${product.produitName}', Colors.green); }
-    if (appConfig.sendMode == SendMode.direct) { try { await _apiService.updateProductQuantity(product.id, quantity); } catch (e) { /* ... */ } }
+    if (appConfig.sendMode == SendMode.direct) {
+      try {
+        await _apiService.updateProductQuantity(product.id, quantity);
+        // CORRECTION : Pareil ici pour le mode saisie rapide
+        await provider.markAsSynced(product.id);
+      } catch (e) { /* ... */ }
+    }
   }
 
   void _selectProduct(Product product) { _openQuickEntryDialog(product); }

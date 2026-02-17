@@ -25,10 +25,10 @@ class EntryProvider with ChangeNotifier {
 
   bool _hasPendingSession = false;
 
-  // Historique des cumuls
+  // Liste pour stocker l'historique des cumuls
   List<Map<String, dynamic>> _cumulLogs = [];
 
-  // Map des statuts (0=Blanc, 1=Orange, 2=Vert)
+  // Map pour les statuts (couleurs) des rayons
   final Map<String, int> _rayonStatuses = {};
   bool _isLoadingStatuses = false;
 
@@ -56,7 +56,6 @@ class EntryProvider with ChangeNotifier {
 
   bool get hasUnsyncedData => _allProducts.any((p) => !p.isSynced);
 
-  // --- PERSISTANCE ---
   Future<void> _saveUnsyncedData() async {
     final String keySuffix = _selectedRayon?.id ?? 'global_${_isGlobalMode ? "quick" : "unknown"}';
     final prefs = await SharedPreferences.getInstance();
@@ -72,7 +71,20 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
-  // --- LOGS CUMUL ---
+  // --- NOUVELLE MÉTHODE : Marquer un produit comme synchronisé ---
+  Future<void> markAsSynced(int productId) async {
+    final index = _allProducts.indexWhere((p) => p.id == productId);
+    if (index != -1) {
+      _allProducts[index].isSynced = true;
+      // On sauvegarde l'état propre (pour retirer le produit des données en attente)
+      await _saveUnsyncedData();
+      notifyListeners();
+    }
+  }
+  // -------------------------------------------------------------
+
+  // --- GESTION DES LOGS DE CUMUL ---
+
   Future<void> addCumulLog(Product product, int oldQty, int addedQty) async {
     final log = {
       'date': DateTime.now().toIso8601String(),
@@ -83,38 +95,57 @@ class EntryProvider with ChangeNotifier {
       'newQty': oldQty + addedQty,
       'rayon': _selectedRayon?.libelle ?? 'Global',
     };
+
     _cumulLogs.add(log);
+
     final prefs = await SharedPreferences.getInstance();
     final keySuffix = _selectedRayon?.id ?? 'global';
     await prefs.setString('cumul_logs_$keySuffix', json.encode(_cumulLogs));
+
     notifyListeners();
   }
 
   Future<void> loadCumulLogs(String suffixId) async {
     final prefs = await SharedPreferences.getInstance();
     final String? logsString = prefs.getString('cumul_logs_$suffixId');
+
     if (logsString != null) {
       try {
         final List<dynamic> decoded = json.decode(logsString);
         _cumulLogs = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
-      } catch (e) { _cumulLogs = []; }
-    } else { _cumulLogs = []; }
+      } catch (e) {
+        _cumulLogs = [];
+      }
+    } else {
+      _cumulLogs = [];
+    }
   }
 
-  // --- CHECK QUANTITY ---
-  Future<int?> checkExistingQuantityForProduct(ApiService api, String cip, String inventoryId, SendMode sendMode) async {
+  // --- FIN GESTION LOGS ---
+
+  Future<int?> checkExistingQuantityForProduct(
+      ApiService api,
+      String cip,
+      String inventoryId,
+      SendMode sendMode
+      ) async {
+
     try {
       final localProduct = _allProducts.firstWhere((p) => p.produitCip == cip);
-      if (localProduct.quantiteSaisie > 0) return localProduct.quantiteSaisie;
-    } catch (e) { /* Pas trouvé localement */ }
+      if (localProduct.quantiteSaisie > 0) {
+        return localProduct.quantiteSaisie;
+      }
+    } catch (e) {
+      // Pas trouvé localement
+    }
 
     if (cip.isNotEmpty) {
       return await api.checkExistingProductQuantity(inventoryId, cip, rayonId: _selectedRayon?.id);
     }
+
     return null;
   }
 
-  // --- CHARGEMENT DONNÉES LOCALES ---
   Future<List<Product>> _loadAndMergeUnsyncedData(String rayonId, List<Product> apiProducts) async {
     final prefs = await SharedPreferences.getInstance();
     final key = 'unsynced_data_$rayonId';
@@ -124,6 +155,7 @@ class EntryProvider with ChangeNotifier {
     try {
       final savedProductsData = json.decode(savedDataString) as List;
       final savedProducts = savedProductsData.map((data) => Product.fromJson(data)).toList();
+
       if (savedProducts.isEmpty) { _hasPendingSession = false; return apiProducts; }
 
       _hasPendingSession = true;
@@ -135,10 +167,11 @@ class EntryProvider with ChangeNotifier {
         } catch (e) {}
         return apiProduct;
       }).toList();
-    } catch (e) { return apiProducts; }
+    } catch (e) {
+      return apiProducts;
+    }
   }
 
-  // --- GESTION FILTRES & INDEX ---
   void _saveCurrentIndex() async {
     if (_selectedRayon != null) {
       _lastIndexByRayon[_selectedRayon!.id] = _currentProductIndex;
@@ -185,16 +218,19 @@ class EntryProvider with ChangeNotifier {
           _filteredProducts = _allProducts.sublist(from, to);
         } catch (e) { _filteredProducts = []; }
         break;
+
       case FilterType.alphabetic:
         try {
           final from = _activeFilter.from.toLowerCase();
           final to = _activeFilter.to.toLowerCase() + '\uffff';
+
           _filteredProducts = _allProducts.where((p) {
             final name = p.produitName.toLowerCase();
             return name.compareTo(from) >= 0 && name.compareTo(to) <= 0;
           }).toList();
         } catch(e) { _filteredProducts = []; }
         break;
+
       case FilterType.none:
       default:
         _filteredProducts = List.from(_allProducts);
@@ -217,9 +253,8 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // --- APPELS API PRINCIPAUX ---
+  // --- CHARGEMENT RAYONS & STATUTS ---
 
-  /// 1. Charge les rayons ET lance le calcul des couleurs
   Future<void> fetchRayons(ApiService api, String inventoryId) async {
     _isLoading = true;
     _error = null;
@@ -227,7 +262,7 @@ class EntryProvider with ChangeNotifier {
     try {
       _rayons = await api.fetchRayons(inventoryId);
 
-      // On lance le calcul des couleurs en arrière-plan
+      // On lance le chargement des couleurs en arrière-plan
       loadRayonStatuses(api, inventoryId);
 
       if (_rayons.length == 1) {
@@ -240,52 +275,33 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// 2. Méthode optimisée pour charger les statuts (Couleurs)
-  /// Utilise Future.wait pour paralléliser les requêtes
   Future<void> loadRayonStatuses(ApiService api, String inventoryId) async {
-    // Si la liste est vide, on arrête
-    if (_rayons.isEmpty) return;
-
-    // Note : On retire le blocage strict (_isLoadingStatuses) pour permettre
-    // le rafraîchissement forcé quand on clique sur le bouton de choix d'emplacement.
+    if (_isLoadingStatuses || _rayons.isEmpty) return;
     _isLoadingStatuses = true;
 
-    try {
-      // On prépare toutes les tâches en parallèle
-      final List<Future<void>> tasks = _rayons.map((rayon) async {
-        try {
-          // 1. Est-ce qu'on a commencé ?
-          bool hasTouched = await api.hasTouchedProductsInRayon(inventoryId, rayon.id);
-          int status = 0; // Blanc
+    _rayonStatuses.clear();
 
-          if (hasTouched) {
-            // 2. Si commencé, est-ce qu'on a fini ?
-            bool hasUntouched = await api.hasUntouchedProductsInRayon(inventoryId, rayon.id);
-            status = !hasUntouched ? 2 : 1; // 2=Vert, 1=Orange
-          }
+    for (var rayon in _rayons) {
+      bool hasTouched = await api.hasTouchedProductsInRayon(inventoryId, rayon.id);
+      int status = 0; // Blanc
 
-          // Mise à jour atomique de la map
-          _rayonStatuses[rayon.id] = status;
-
-        } catch (e) {
-          // En cas d'erreur réseau sur un rayon, on le laisse en l'état ou 0
-          print("Erreur statut rayon ${rayon.libelle}: $e");
+      if (hasTouched) {
+        bool hasUntouched = await api.hasUntouchedProductsInRayon(inventoryId, rayon.id);
+        if (!hasUntouched) {
+          status = 2; // Vert
+        } else {
+          status = 1; // Orange
         }
-      }).toList();
+      }
 
-      // On attend que TOUT soit fini (ou on peut notifier au fur et à mesure)
-      // Pour un effet visuel "pop", on peut utiliser Future.wait
-      await Future.wait(tasks);
-
-      // Une fois tout fini, on notifie l'interface
-      notifyListeners();
-
-    } catch (e) {
-      print("Erreur globale statuts: $e");
-    } finally {
-      _isLoadingStatuses = false;
+      _rayonStatuses[rayon.id] = status;
+      notifyListeners(); // Mise à jour progressive
     }
+
+    _isLoadingStatuses = false;
   }
+
+  // --- FIN CHARGEMENT RAYONS ---
 
   Future<void> fetchProducts(ApiService api, String inventoryId, String rayonId) async {
     _isLoading = true;
@@ -296,34 +312,56 @@ class EntryProvider with ChangeNotifier {
     try {
       final apiProducts = await api.fetchProducts(inventoryId, rayonId);
       _allProducts = await _loadAndMergeUnsyncedData(rayonId, apiProducts);
+
       await loadCumulLogs(rayonId);
+
       _activeFilter = await _loadFilter(rayonId);
       _runFilterLogic();
       final lastIndex = _lastIndexByRayon[rayonId] ?? (await SharedPreferences.getInstance()).getInt('lastIndex_$rayonId') ?? 0;
       _currentProductIndex = (lastIndex >= 0 && lastIndex < _filteredProducts.length) ? lastIndex : 0;
       _lastIndexByRayon[rayonId] = _currentProductIndex;
-    } catch (e) { _error = e.toString(); }
+    } catch (e) {
+      _error = e.toString();
+    }
     _isLoading = false;
     notifyListeners();
   }
 
   Future<List<Product>> searchProductOnline(ApiService api, String inventoryId, String query) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
     List<Product> results = [];
+
     try {
       final rayonId = _selectedRayon?.id;
       results = await api.fetchProducts(inventoryId, rayonId, query: query);
-      if (results.isNotEmpty && rayonId == null) {
-        _allProducts = results; _filteredProducts = results;
-        _isGlobalMode = true; _currentProductIndex = 0;
+
+      if (results.isNotEmpty) {
+        if (rayonId == null) {
+          _allProducts = results;
+          _filteredProducts = results;
+          _isGlobalMode = true;
+          _currentProductIndex = 0;
+        }
       }
-    } catch (e) { _error = "Erreur recherche: $e"; results = []; }
-    _isLoading = false; notifyListeners();
+    } catch (e) {
+      _error = "Erreur recherche: $e";
+      results = [];
+    }
+
+    _isLoading = false;
+    notifyListeners();
     return results;
   }
 
   Future<void> loadGlobalInventory(ApiService api, String inventoryId) async {
-    _isLoading = true; _error = null; _isGlobalMode = true; _allProducts = []; _filteredProducts = [];
+    _isLoading = true;
+    _error = null;
+    _isGlobalMode = true;
+    _allProducts = [];
+    _filteredProducts = [];
     notifyListeners();
     try {
       final rayons = await api.fetchRayons(inventoryId);
@@ -332,32 +370,43 @@ class EntryProvider with ChangeNotifier {
 
       final List<Future<List<Product>>> downloadTasks = rayons.map((rayon) {
         return api.fetchProducts(inventoryId, rayon.id).then((products) async {
-          for (var p in products) { p.locationLabel = rayon.libelle; }
+          for (var p in products) {
+            p.locationLabel = rayon.libelle;
+          }
           return await _loadAndMergeUnsyncedData(rayon.id, products);
         });
       }).toList();
 
       final List<List<Product>> results = await Future.wait(downloadTasks);
-      for (var list in results) { _allProducts.addAll(list); }
+      for (var list in results) {
+        _allProducts.addAll(list);
+      }
 
       _filteredProducts = List.from(_allProducts);
-      if (rayons.isNotEmpty) { _selectedRayon = rayons.first; }
-      await loadCumulLogs(_selectedRayon?.id ?? 'global');
-    } catch (e) { _error = "Erreur chargement global : $e"; }
-    _isLoading = false; notifyListeners();
-  }
+      if (rayons.isNotEmpty) {
+        _selectedRayon = rayons.first;
+      }
 
-  // --- MISE À JOUR PRODUITS ---
+      await loadCumulLogs(_selectedRayon?.id ?? 'global');
+
+    } catch (e) {
+      _error = "Erreur chargement global : $e";
+    }
+    _isLoading = false;
+    notifyListeners();
+  }
 
   Future<void> updateSpecificProduct(Product productToUpdate) async {
     try {
       final index = _allProducts.indexWhere((p) => p.id == productToUpdate.id);
+
       if (index != -1) {
         _allProducts[index].quantiteSaisie = productToUpdate.quantiteSaisie;
         _allProducts[index].isSynced = false;
       } else {
         productToUpdate.isSynced = false;
         _allProducts.add(productToUpdate);
+
         if (_isGlobalMode) {
           final filterIndex = _filteredProducts.indexWhere((p) => p.id == productToUpdate.id);
           if (filterIndex != -1) {
@@ -368,7 +417,10 @@ class EntryProvider with ChangeNotifier {
           }
         }
       }
-    } catch (e) { print("Erreur updateSpecificProduct : $e"); }
+    } catch (e) {
+      print("Erreur updateSpecificProduct : $e");
+    }
+
     await _saveUnsyncedData();
     notifyListeners();
   }
