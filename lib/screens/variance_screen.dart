@@ -86,7 +86,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
   Future<void> _fetchAndSetupProducts() async {
     setState(() => _isLoading = true);
     try {
-      List<Product> allProductsFromServer = await _apiService.fetchProducts(widget.inventoryId, widget.rayonId);
+      List<Product> allProductsFromServer =
+      await _apiService.fetchProducts(widget.inventoryId, widget.rayonId);
 
       if (mounted) {
         setState(() {
@@ -113,7 +114,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
   void _updateCurrentProduct(int index) {
     setState(() {
       _currentProductIndex = index;
-      _quantityController.text = _productsWithVariance[index].quantiteSaisie.toString();
+      _quantityController.text =
+          _productsWithVariance[index].quantiteSaisie.toString();
       _isNewEntry = true;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -133,7 +135,9 @@ class _VarianceScreenState extends State<VarianceScreen> {
     if (matches.length == 1) {
       _openQuickEntryDialog(matches.first);
       _searchController.clear();
-      setState(() { _showSearchResults = false; });
+      setState(() {
+        _showSearchResults = false;
+      });
     } else if (matches.length > 1) {
       setState(() {
         _filteredProducts = matches;
@@ -141,7 +145,9 @@ class _VarianceScreenState extends State<VarianceScreen> {
       });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ce produit n\'est pas dans la liste des écarts.'), backgroundColor: Colors.red),
+        const SnackBar(
+            content: Text('Ce produit n\'est pas dans la liste des écarts.'),
+            backgroundColor: Colors.red),
       );
       _searchFocusNode.requestFocus();
       Future.delayed(const Duration(milliseconds: 50), () {
@@ -166,30 +172,30 @@ class _VarianceScreenState extends State<VarianceScreen> {
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Correction Rapide', style: TextStyle(fontSize: 14, color: Colors.grey)),
+              const Text('Correction Rapide',
+                  style: TextStyle(fontSize: 14, color: Colors.grey)),
               const SizedBox(height: 4),
-              Text(product.produitName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              Text('CIP: ${product.produitCip}', style: const TextStyle(fontSize: 14)),
+              Text(product.produitName,
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.bold)),
+              Text('CIP: ${product.produitCip}',
+                  style: const TextStyle(fontSize: 14)),
               const Divider(),
-              Consumer<AppConfig>(
-                builder: (context, appConfig, child) {
-                  return Visibility(
-                    visible: appConfig.showTheoreticalStock,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('Théo: ${product.quantiteInitiale}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text(
-                            'Écart Actuel: ${product.quantiteSaisie - product.quantiteInitiale}',
-                            style: TextStyle(
-                                color: (product.quantiteSaisie - product.quantiteInitiale) == 0 ? Colors.green : Colors.red,
-                                fontWeight: FontWeight.bold
-                            )
-                        ),
-                      ],
-                    ),
-                  );
-                },
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Théo: ${product.quantiteInitiale}',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                      'Écart Actuel: ${product.quantiteSaisie - product.quantiteInitiale}',
+                      style: TextStyle(
+                          color: (product.quantiteSaisie -
+                              product.quantiteInitiale) ==
+                              0
+                              ? Colors.green
+                              : Colors.red,
+                          fontWeight: FontWeight.bold)),
+                ],
               ),
             ],
           ),
@@ -201,7 +207,10 @@ class _VarianceScreenState extends State<VarianceScreen> {
                 TextField(
                   controller: quickQtyController,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.accent),
+                  style: const TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.accent),
                   decoration: const InputDecoration(
                     labelText: 'Nouvelle Qté',
                     border: OutlineInputBorder(),
@@ -229,10 +238,10 @@ class _VarianceScreenState extends State<VarianceScreen> {
                             }
                           }
                         });
-
                       } else if (key == 'DEL') {
                         if (quickQtyController.text.isNotEmpty) {
-                          quickQtyController.text = quickQtyController.text.substring(0, quickQtyController.text.length - 1);
+                          quickQtyController.text = quickQtyController.text
+                              .substring(0, quickQtyController.text.length - 1);
                         }
                       } else {
                         quickQtyController.text += key;
@@ -246,8 +255,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Annuler', style: TextStyle(color: Colors.red))
-            ),
+                child:
+                const Text('Annuler', style: TextStyle(color: Colors.red))),
           ],
         );
       },
@@ -257,7 +266,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
   void _applyQuickCorrection(Product product, int newQuantity) async {
     setState(() {
       product.quantiteSaisie = newQuantity;
-      if (_productsWithVariance.isNotEmpty && _productsWithVariance[_currentProductIndex].id == product.id) {
+      if (_productsWithVariance.isNotEmpty &&
+          _productsWithVariance[_currentProductIndex].id == product.id) {
         _quantityController.text = newQuantity.toString();
       }
     });
@@ -273,7 +283,12 @@ class _VarianceScreenState extends State<VarianceScreen> {
   void _filterProducts() {
     final query = _searchController.text.toLowerCase();
     if (query.isEmpty) {
-      if (mounted) { setState(() { _filteredProducts = []; _showSearchResults = false; }); }
+      if (mounted) {
+        setState(() {
+          _filteredProducts = [];
+          _showSearchResults = false;
+        });
+      }
       return;
     }
     if (mounted) {
@@ -297,13 +312,13 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 
   void _previousProduct() {
-    if(_currentProductIndex > 0) {
+    if (_currentProductIndex > 0) {
       _updateCurrentProduct(_currentProductIndex - 1);
     }
   }
 
   void _nextProduct() {
-    if(_currentProductIndex < _productsWithVariance.length - 1) {
+    if (_currentProductIndex < _productsWithVariance.length - 1) {
       _updateCurrentProduct(_currentProductIndex + 1);
     }
   }
@@ -311,7 +326,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
   void _onKeyPressed(String value) {
     if (value == 'DEL') {
       if (_quantityController.text.isNotEmpty) {
-        _quantityController.text = _quantityController.text.substring(0, _quantityController.text.length - 1);
+        _quantityController.text = _quantityController.text
+            .substring(0, _quantityController.text.length - 1);
       }
       _isNewEntry = false;
     } else if (value == 'OK') {
@@ -356,15 +372,18 @@ class _VarianceScreenState extends State<VarianceScreen> {
       _notificationColor = color;
     });
     _notificationTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) { setState(() => _notificationMessage = null); }
+      if (mounted) {
+        setState(() => _notificationMessage = null);
+      }
     });
   }
 
-  // --- PARTIE MODIFIÉE : GÉNÉRATION DU PDF ---
   Future<void> _printVariances() async {
     if (_isPrinting) return;
 
-    setState(() { _isPrinting = true; });
+    setState(() {
+      _isPrinting = true;
+    });
 
     showDialog(
       context: context,
@@ -387,11 +406,10 @@ class _VarianceScreenState extends State<VarianceScreen> {
     try {
       final doc = pw.Document();
 
-      // MODIFICATION ICI : Ordre des colonnes (CIP en premier)
       final tableData = <List<String>>[
         ['CIP', 'Désignation', 'Stock Théo.', 'Stock Corrigé', 'Écart'],
         ..._productsWithVariance.map((p) => [
-          p.produitCip, // CIP en premier
+          p.produitCip,
           p.produitName,
           p.quantiteInitiale.toString(),
           p.quantiteSaisie.toString(),
@@ -402,23 +420,22 @@ class _VarianceScreenState extends State<VarianceScreen> {
       doc.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
-          header: (context) => pw.Header(level: 0, text: 'Rapport des Écarts - ${widget.rayonName}'),
+          header: (context) => pw.Header(
+              level: 0, text: 'Rapport des Écarts - ${widget.rayonName}'),
           build: (context) => [
             pw.TableHelper.fromTextArray(
               context: context,
               data: tableData,
-              // MODIFICATION ICI : Taille de police réduite à 9
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+              headerStyle:
+              pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
               cellStyle: const pw.TextStyle(fontSize: 9),
-              // Alignement ajusté
               cellAlignments: {
-                0: pw.Alignment.centerLeft, // CIP
-                1: pw.Alignment.centerLeft, // Désignation
+                0: pw.Alignment.centerLeft,
+                1: pw.Alignment.centerLeft,
                 2: pw.Alignment.centerRight,
                 3: pw.Alignment.centerRight,
                 4: pw.Alignment.centerRight
               },
-              // Largeur relative pour donner de la place au Nom
               columnWidths: {
                 0: const pw.FlexColumnWidth(2),
                 1: const pw.FlexColumnWidth(5),
@@ -432,17 +449,20 @@ class _VarianceScreenState extends State<VarianceScreen> {
       );
 
       await Printing.layoutPdf(onLayout: (format) => doc.save());
-
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur lors de l\'impression : $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Erreur lors de l\'impression : $e'),
+              backgroundColor: Colors.red),
         );
       }
     } finally {
       if (mounted) {
         Navigator.of(context).pop();
-        setState(() { _isPrinting = false; });
+        setState(() {
+          _isPrinting = false;
+        });
       }
     }
   }
@@ -465,7 +485,12 @@ class _VarianceScreenState extends State<VarianceScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : (_productsWithVariance.isEmpty && !_isLoading)
-          ? const Center(child: Padding(padding: EdgeInsets.all(16.0), child: Text("Aucun produit avec un écart de stock n'a été trouvé.", textAlign: TextAlign.center, style: TextStyle(fontSize: 16))))
+          ? const Center(
+          child: Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text("Aucun produit avec un écart de stock n'a été trouvé.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16))))
           : Column(
         children: [
           Padding(
@@ -479,7 +504,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
                     onSubmitted: (value) => _handleScanOrSearch(value),
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
-                      labelText: 'Rechercher / Scanner un produit avec écart',
+                      labelText:
+                      'Rechercher / Scanner un produit avec écart',
                       prefixIcon: const Icon(Icons.search),
                       border: const OutlineInputBorder(),
                       suffixIcon: _searchController.text.isNotEmpty
@@ -488,14 +514,12 @@ class _VarianceScreenState extends State<VarianceScreen> {
                           onPressed: () {
                             _searchController.clear();
                             _searchFocusNode.requestFocus();
-                          }
-                      )
+                          })
                           : null,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-
                 Column(
                   children: [
                     Switch(
@@ -509,7 +533,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
                         }
                       },
                     ),
-                    const Text('Mode Scan', style: TextStyle(fontSize: 10)),
+                    const Text('Mode Scan',
+                        style: TextStyle(fontSize: 10)),
                   ],
                 ),
               ],
@@ -518,32 +543,45 @@ class _VarianceScreenState extends State<VarianceScreen> {
           Expanded(
             child: Stack(
               children: [
-                if (_productsWithVariance.isNotEmpty && !_showSearchResults)
-                  buildProductView(_productsWithVariance[_currentProductIndex]),
+                if (_productsWithVariance.isNotEmpty &&
+                    !_showSearchResults)
+                  buildProductView(
+                      _productsWithVariance[_currentProductIndex]),
                 if (_showSearchResults)
                   Container(
                     color: const Color(0xF2FFFFFF),
                     child: _filteredProducts.isEmpty
-                        ? const Center(child: Text("Ce produit ne fait pas partie des écarts."))
+                        ? const Center(
+                        child: Text(
+                            "Ce produit ne fait pas partie des écarts."))
                         : ListView.builder(
                       itemCount: _filteredProducts.length,
                       itemBuilder: (context, index) {
                         final product = _filteredProducts[index];
                         return Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
                           child: ListTile(
-                            title: Text(product.produitName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                            title: Text(product.produitName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
                             subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment:
+                              CrossAxisAlignment.start,
                               children: [
-                                Text('CIP: ${product.produitCip}'),
+                                Text(
+                                    'CIP: ${product.produitCip}'),
                                 Text(
                                     'Prix Vente: ${product.produitPrixUni.toStringAsFixed(0)} F',
-                                    style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)
-                                ),
+                                    style: TextStyle(
+                                        color: Colors
+                                            .grey.shade800,
+                                        fontWeight:
+                                        FontWeight.w500)),
                               ],
                             ),
-                            onTap: () => _selectProduct(_filteredProducts[index]),
+                            onTap: () => _selectProduct(
+                                _filteredProducts[index]),
                           ),
                         );
                       },
@@ -574,7 +612,10 @@ class _VarianceScreenState extends State<VarianceScreen> {
         child: Center(
           child: Text(
             _notificationMessage!,
-            style: TextStyle(color: _notificationColor, fontWeight: FontWeight.bold, fontSize: 16),
+            style: TextStyle(
+                color: _notificationColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 16),
           ),
         ),
       ),
@@ -592,29 +633,23 @@ class _VarianceScreenState extends State<VarianceScreen> {
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
               '${product.produitCip} - ${product.produitName}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primary),
+              style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           const SizedBox(height: 10),
-
-          Consumer<AppConfig>(
-            builder: (context, appConfig, child) => Visibility(
-              visible: appConfig.showTheoreticalStock,
-              child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Stock Théorique: ${product.quantiteInitiale}')
-              ),
-            ),
-          ),
+          Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Stock Théorique: ${product.quantiteInitiale}')),
           const SizedBox(height: 20),
-
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -625,28 +660,34 @@ class _VarianceScreenState extends State<VarianceScreen> {
                   style: OutlinedButton.styleFrom(
                     shape: const CircleBorder(),
                     padding: const EdgeInsets.all(12),
-                    side: BorderSide(color: Theme.of(context).colorScheme.secondary, width: 2),
+                    side: BorderSide(
+                        color: Theme.of(context).colorScheme.secondary,
+                        width: 2),
                   ),
-                  onPressed: _currentProductIndex > 0 ? _previousProduct : null,
-                  child: Icon(Icons.chevron_left, size: 30, color: Theme.of(context).colorScheme.secondary),
+                  onPressed:
+                  _currentProductIndex > 0 ? _previousProduct : null,
+                  child: Icon(Icons.chevron_left,
+                      size: 30,
+                      color: Theme.of(context).colorScheme.secondary),
                 ),
               ),
               const SizedBox(width: 8),
-
               Expanded(
                 child: TextField(
                   controller: _quantityController,
                   focusNode: _quantityFocusNode,
-                  decoration: const InputDecoration(labelText: 'Quantité Corrigée', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                      labelText: 'Quantité Corrigée',
+                      border: OutlineInputBorder()),
                   keyboardType: TextInputType.none,
                   readOnly: true,
                   showCursor: true,
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      fontSize: 24, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
               ),
               const SizedBox(width: 8),
-
               SizedBox(
                 width: 64,
                 height: 64,
@@ -654,10 +695,17 @@ class _VarianceScreenState extends State<VarianceScreen> {
                   style: OutlinedButton.styleFrom(
                     shape: const CircleBorder(),
                     padding: const EdgeInsets.all(12),
-                    side: BorderSide(color: Theme.of(context).colorScheme.secondary, width: 2),
+                    side: BorderSide(
+                        color: Theme.of(context).colorScheme.secondary,
+                        width: 2),
                   ),
-                  onPressed: _currentProductIndex < _productsWithVariance.length - 1 ? _nextProduct : null,
-                  child: Icon(Icons.chevron_right, size: 30, color: Theme.of(context).colorScheme.secondary),
+                  onPressed: _currentProductIndex <
+                      _productsWithVariance.length - 1
+                      ? _nextProduct
+                      : null,
+                  child: Icon(Icons.chevron_right,
+                      size: 30,
+                      color: Theme.of(context).colorScheme.secondary),
                 ),
               ),
             ],
