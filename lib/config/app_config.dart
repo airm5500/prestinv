@@ -11,12 +11,12 @@ class AppConfig with ChangeNotifier {
   late SharedPreferences _prefs;
 
   // --- Paramètres de Connexion API ---
-  String _localApiAddress = '';
+  String _localApiAddress = '192.168.1.50';
   String _localApiPort = '8080';
   String _distantApiAddress = '';
   String _distantApiPort = '8080';
   ApiMode _apiMode = ApiMode.local;
-  String _appName = 'laborex';
+  String _appName = 'prestige';
 
   // --- Paramètres de l'Application ---
   int _maxResult = 3;
@@ -82,13 +82,13 @@ class AppConfig with ChangeNotifier {
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
 
-    _localApiAddress = _prefs.getString('localApiAddress') ?? '';
+    _localApiAddress = _prefs.getString('localApiAddress') ?? '192.168.1.50';
     _localApiPort = _prefs.getString('localApiPort') ?? '8080';
     _distantApiAddress = _prefs.getString('distantApiAddress') ?? '';
     _distantApiPort = _prefs.getString('distantApiPort') ?? '8080';
     _appName = _prefs.getString('appName') ?? 'prestige';
 
-    _maxResult = _prefs.getInt('maxResult') ?? 3;
+    _maxResult = _prefs.getInt('maxResult') ?? 5;
     _showTheoreticalStock = _prefs.getBool('showTheoreticalStock') ?? true;
     _largeValueThreshold = _prefs.getInt('largeValueThreshold') ?? 1000;
     _autoLogoutMinutes = _prefs.getInt('autoLogoutMinutes') ?? 0;
