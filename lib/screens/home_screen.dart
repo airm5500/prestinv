@@ -163,7 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     // LES BOUTONS
                     _buildMenuButton(
-                      context, 'COMMENCER L\'INVENTAIRE\n(Mode Guidé)', Icons.inventory_2_outlined,
+                      context, 'SAISIE GUIDEE\n(Mode Guidé)', Icons.inventory_2_outlined,
                       AppColors.accent,
                           () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InventoryListScreen(isQuickMode: false))),
                     ),
