@@ -6,7 +6,7 @@ import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/providers/license_provider.dart';
-import 'package:prestinv/screens/config_screen.dart'; // Utile pour régler l'IP si ça ne marche pas
+import 'package:prestinv/screens/config_screen.dart';
 
 class LicenseRegisterScreen extends StatefulWidget {
   const LicenseRegisterScreen({super.key});
@@ -48,14 +48,48 @@ class _LicenseRegisterScreenState extends State<LicenseRegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // On peut récupérer l'erreur éventuelle pour l'afficher
+    final licenseProvider = Provider.of<LicenseProvider>(context);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Activation Licence"),
         actions: [
-          // Accès config au cas où l'URL API est mauvaise
+          // MODIFICATION ICI : Bouton intelligent qui relance la vérification au retour
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConfigScreen())),
+            tooltip: "Configuration Serveur",
+            onPressed: () async {
+              // 1. On ouvre l'écran de config et on ATTEND qu'il se ferme (await)
+              // Cela se produit quand vous cliquez sur "VALIDER LA CONFIGURATION" dans ConfigScreen
+              await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ConfigScreen())
+              );
+
+              // 2. Au retour, si l'écran est toujours affiché, on relance la vérification
+              if (mounted) {
+                // On affiche un petit message pour dire qu'on réessaie
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Reconnexion au serveur..."), duration: Duration(seconds: 1))
+                );
+
+                // On récupère les instances à jour (avec la nouvelle IP !)
+                final appConfig = Provider.of<AppConfig>(context, listen: false);
+                final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                final licProvider = Provider.of<LicenseProvider>(context, listen: false);
+
+                // On recrée le service API avec la NOUVELLE adresse IP
+                final api = ApiService(
+                  baseUrl: appConfig.currentApiUrl,
+                  sessionCookie: authProvider.sessionCookie,
+                );
+
+                // On lance la vérification.
+                // - Si OK : main.dart affichera LoginScreen.
+                // - Si KO : main.dart réaffichera cet écran (LicenseRegisterScreen).
+                licProvider.checkLicense(api);
+              }
+            },
           )
         ],
       ),
@@ -72,10 +106,22 @@ class _LicenseRegisterScreenState extends State<LicenseRegisterScreen> {
             ),
             const SizedBox(height: 12),
             const Text(
-              "Veuillez saisir votre clé de licence pour continuer",
+              "Veuillez saisir votre clé de licence pour continuer.\nSi vous n'avez pas de connexion, vérifiez la configuration via l'icône en haut à droite.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey),
             ),
+
+            // Affichage de l'erreur si présente (ex: "Impossible de joindre le serveur")
+            if (licenseProvider.error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16.0),
+                child: Text(
+                  licenseProvider.error!,
+                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+
             const SizedBox(height: 32),
             TextField(
               controller: _keyController,

@@ -29,9 +29,9 @@ android {
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         //versionCode = flutter.versionCode
-        versionCode = 2
+        versionCode = 3
         //versionName = flutter.versionName
-        versionName = "4.7.9"
+        versionName = "4.8.0"
     }
 
     // Ajouter ce bloc pour renommer les fichiers de sortie
