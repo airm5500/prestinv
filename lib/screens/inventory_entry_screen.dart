@@ -29,6 +29,7 @@ class InventoryEntryScreen extends StatefulWidget {
   final bool isQuickMode;
   const InventoryEntryScreen(
       {super.key, required this.inventoryId, this.isQuickMode = false});
+
   @override
   State<InventoryEntryScreen> createState() => _InventoryEntryScreenState();
 }
@@ -177,11 +178,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => const AlertDialog(content: Row(children: [
-          CircularProgressIndicator(),
-          SizedBox(width: 20),
-          Text("Chargement du récap..."),
-        ])));
+        builder: (ctx) => const AlertDialog(
+            content: Row(children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Text("Chargement du récap..."),
+            ])));
     try {
       final provider = Provider.of<EntryProvider>(context, listen: false);
       String targetRayonId = provider.selectedRayon?.id ?? "";
@@ -272,7 +274,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
     final ValueNotifier<String> progressNotifier =
     ValueNotifier('Préparation...');
-    if (mounted) showProgressDialog(context, progressNotifier); else return;
+    showProgressDialog(context, progressNotifier);
 
     int unsyncedCount = provider.allProducts.where((p) => !p.isSynced).length;
     await provider.sendDataToServer(_apiService, (int current, int total) {
@@ -284,6 +286,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  // --- LOGIQUE DE VALIDATION OPTIMISÉE (ZÉRO LENTEUR) ---
   void _validateAndProceed() async {
     if (!mounted) return;
     final provider = Provider.of<EntryProvider>(context, listen: false);
@@ -297,105 +300,92 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final inputQuantity = int.tryParse(_quantityController.text) ?? 0;
     int finalQuantity = inputQuantity;
 
-    if (appConfig.isCumulEnabled &&
-        provider.currentProduct != null &&
-        _isManualAccess) {
-      showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (c) => const Center(child: CircularProgressIndicator()));
-      try {
-        int? existingQty = await provider.checkExistingQuantityForProduct(
-            _apiService,
-            provider.currentProduct!.produitCip,
-            widget.inventoryId,
-            appConfig.sendMode);
-        Navigator.pop(context);
+    // --- 1. CONTRÔLE CUMUL SANS LENTEUR ---
+    if (appConfig.isCumulEnabled && provider.currentProduct != null) {
+      int? existingQty;
 
-        if (existingQty != null) {
-          bool? shouldCumulate = await showDialog<bool>(
+      if (widget.isQuickMode) {
+        // En mode scan, on doit confirmer avec le serveur (appel optimisé 5s)
+        showDialog(
             context: context,
-            builder: (BuildContext context) {
-              return AlertDialog(
-                title: const Text("⚠️ Déjà compté"),
-                backgroundColor: const Color(0xFFFFF3CD),
-                content: _buildCumulContent(provider.currentProduct!.produitName,
-                    existingQty, inputQuantity),
-                actions: [
-                  TextButton(
-                      child: const Text("NON (Écraser)",
-                          style: TextStyle(color: Colors.red)),
-                      onPressed: () => Navigator.of(context).pop(false)),
-                  ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          foregroundColor: Colors.white),
-                      child: const Text("OUI (Additionner)"),
-                      onPressed: () => Navigator.of(context).pop(true)),
-                ],
-              );
-            },
-          );
-
-          if (shouldCumulate == true) {
-            finalQuantity = existingQty + inputQuantity;
-            provider.addCumulLog(
-                provider.currentProduct!, existingQty, inputQuantity);
-          }
-        }
-      } catch (e) {
+            barrierDismissible: false,
+            builder: (c) => const Center(child: CircularProgressIndicator()));
+        existingQty = await _apiService.checkExistingProductQuantity(
+            widget.inventoryId, provider.currentProduct!.produitCip,
+            rayonId: provider.selectedRayon?.id);
         Navigator.pop(context);
+      } else {
+        // EN MODE GUIDÉ : CONTRÔLE LOCAL INSTANTANÉ (ZÉRO APPEL RÉSEAU ICI)
+        existingQty = await provider
+            .checkExistingQuantityLocal(provider.currentProduct!.produitCip);
+      }
+
+      if (existingQty != null) {
+        bool? shouldCumulate = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text("⚠️ Déjà compté"),
+              backgroundColor: const Color(0xFFFFF3CD),
+              content: _buildCumulContent(provider.currentProduct!.produitName,
+                  existingQty!, inputQuantity),
+              actions: [
+                TextButton(
+                    child: const Text("NON (Écraser)",
+                        style: TextStyle(color: Colors.red)),
+                    onPressed: () => Navigator.of(context).pop(false)),
+                ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white),
+                    child: const Text("OUI (Additionner)"),
+                    onPressed: () => Navigator.of(context).pop(true)),
+              ],
+            );
+          },
+        );
+
+        if (shouldCumulate == true) {
+          finalQuantity = existingQty + inputQuantity;
+          provider.addCumulLog(
+              provider.currentProduct!, existingQty, inputQuantity);
+        }
       }
     }
 
     Future<void> proceedToNext(int quantityToSave) async {
+      // 2. SAUVEGARDE LOCALE IMMÉDIATE
       await provider.updateQuantity(quantityToSave.toString());
       _resetSendReminderTimer();
-      if (appConfig.sendMode == SendMode.direct) {
-        try {
-          await _apiService.updateProductQuantity(
-              provider.currentProduct!.id, quantityToSave);
-          // CORRECTION : On marque le produit comme synchronisé immédiatement
-          await provider.markAsSynced(provider.currentProduct!.id);
 
-          if (mounted) _showNotification('Saisie envoyée !', Colors.green);
-        } catch (e) {
+      // 3. ENVOI ASYNC (Tâche de fond) : Ne bloque pas l'utilisateur
+      if (appConfig.sendMode == SendMode.direct) {
+        _apiService
+            .updateProductQuantity(provider.currentProduct!.id, quantityToSave)
+            .then((_) => provider.markAsSynced(provider.currentProduct!.id))
+            .catchError((e) {
           if (mounted) _showNotification('Erreur réseau.', Colors.red);
-        }
+        });
       }
 
+      // 4. NAVIGATION VERS LE SUIVANT
       bool isLastProduct =
           provider.currentProductIndex >= provider.totalProducts - 1;
       if (isLastProduct && provider.totalProducts > 0) {
         _sendReminderTimer?.cancel();
         if (!mounted) return;
-        bool isFilterActive = provider.activeFilter.isActive;
-        showDialog(
-            context: context,
-            builder: (ctx) => AlertDialog(
-                title: Text(isFilterActive
-                    ? 'Fin du filtre'
-                    : 'Fin de l\'emplacement'),
-                content: const Text('Envoyer les données ?'),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      child: const Text('Non')),
-                  TextButton(
-                      onPressed: () {
-                        Navigator.of(ctx).pop();
-                        _sendDataToServer();
-                      },
-                      child: const Text('Oui'))
-                ]));
+        _showFinishDialog();
       } else {
         provider.nextProduct();
         setState(() {
           _isManualAccess = false;
         });
+        _quantityController.clear();
+        _quantityFocusNode.requestFocus();
       }
     }
 
+    // Gestion du seuil de grande valeur
     if (finalQuantity > appConfig.largeValueThreshold) {
       final confirmed = await showDialog<bool>(
           context: context,
@@ -416,13 +406,35 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
+  void _showFinishDialog() {
+    bool isFilterActive =
+        Provider.of<EntryProvider>(context, listen: false).activeFilter.isActive;
+    showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+            title: Text(isFilterActive
+                ? 'Fin du filtre'
+                : 'Fin de l\'emplacement'),
+            content: const Text('Envoyer les données ?'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Non')),
+              TextButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    _sendDataToServer();
+                  },
+                  child: const Text('Oui'))
+            ]));
+  }
+
   Future<bool> _onWillPop() async {
     _sendReminderTimer?.cancel();
     final provider = Provider.of<EntryProvider>(context, listen: false);
     if (!provider.hasUnsyncedData) {
       return true;
     }
-    if (!mounted) return false;
     final bool? sendAndLeave = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -440,7 +452,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         ],
       ),
     );
-    if (!mounted) return false;
     if (sendAndLeave == true) {
       await _sendDataToServer();
       return true;
@@ -503,13 +514,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         _showSearchResults = false;
         if (newValue == null) {
           provider.reset();
-          _resetSendReminderTimer();
-          if (mounted) _searchFocusNode.requestFocus();
         } else {
           provider
               .fetchProducts(_apiService, widget.inventoryId, newValue.id)
               .then((_) {
-            provider.loadCumulLogs(newValue.id);
             _resetSendReminderTimer();
             if (mounted) _searchFocusNode.requestFocus();
           });
@@ -627,12 +635,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                               builder: (c) => const Center(
                                   child: CircularProgressIndicator()));
                           try {
-                            int? existingQty = await provider
-                                .checkExistingQuantityForProduct(
-                                _apiService,
-                                product.produitCip,
-                                widget.inventoryId,
-                                appConfig.sendMode);
+                            // Appel serveur optimisé car mode Scan
+                            int? existingQty = await _apiService
+                                .checkExistingProductQuantity(
+                                widget.inventoryId, product.produitCip);
                             Navigator.pop(ctx);
 
                             if (existingQty != null) {
@@ -649,18 +655,18 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                     actions: [
                                       TextButton(
                                           child: const Text("NON (Écraser)",
-                                              style:
-                                              TextStyle(color: Colors.red)),
-                                          onPressed: () =>
-                                              Navigator.of(context).pop(false)),
+                                              style: TextStyle(
+                                                  color: Colors.red)),
+                                          onPressed: () => Navigator.of(context)
+                                              .pop(false)),
                                       ElevatedButton(
                                           style: ElevatedButton.styleFrom(
                                               backgroundColor: Colors.blue,
                                               foregroundColor: Colors.white),
                                           child:
                                           const Text("OUI (Additionner)"),
-                                          onPressed: () =>
-                                              Navigator.of(context).pop(true)),
+                                          onPressed: () => Navigator.of(context)
+                                              .pop(true)),
                                     ],
                                   );
                                 },
@@ -683,23 +689,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                           _showSearchResults = false;
                           _filteredProducts = [];
                         });
-                        if (widget.isQuickMode) {
-                          Future.delayed(const Duration(milliseconds: 100), () {
-                            if (mounted) _searchFocusNode.requestFocus();
-                          });
-                        } else {
-                          Future.delayed(const Duration(milliseconds: 100), () {
-                            if (mounted) {
-                              FocusScope.of(context).unfocus();
-                              _quantityFocusNode.requestFocus();
-                            }
-                          });
-                        }
+                        Future.delayed(const Duration(milliseconds: 100), () {
+                          if (mounted) _searchFocusNode.requestFocus();
+                        });
                       } else if (key == 'DEL') {
                         if (quickQtyController.text.isNotEmpty) {
                           quickQtyController.text = quickQtyController.text
-                              .substring(
-                              0, quickQtyController.text.length - 1);
+                              .substring(0, quickQtyController.text.length - 1);
                         }
                       } else {
                         quickQtyController.text += key;
@@ -807,12 +803,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           'Saisie enregistrée : ${product.produitName}', Colors.green);
     }
     if (appConfig.sendMode == SendMode.direct) {
-      try {
-        await _apiService.updateProductQuantity(product.id, quantity);
-        await provider.markAsSynced(product.id);
-      } catch (e) {
-        /* ... */
-      }
+      _apiService
+          .updateProductQuantity(product.id, quantity)
+          .then((_) => provider.markAsSynced(product.id))
+          .catchError((e) {
+        print("Erreur sync direct scan: $e");
+      });
     }
   }
 
@@ -856,7 +852,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       child: Consumer<EntryProvider>(
                           builder: (context, entryProvider, child) {
                             return filteredRayons.isEmpty
-                                ? const Center(child: Text("Aucun emplacement trouvé"))
+                                ? const Center(
+                                child: Text("Aucun emplacement trouvé"))
                                 : ListView.builder(
                               shrinkWrap: true,
                               itemCount: filteredRayons.length,
@@ -866,7 +863,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                     entryProvider.selectedRayon?.id;
 
                                 final int status =
-                                    entryProvider.rayonStatuses[rayon.id] ?? 0;
+                                    entryProvider.rayonStatuses[rayon.id] ??
+                                        0;
 
                                 Color bgColor;
                                 IconData icon;
@@ -1033,8 +1031,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       onPressed: () {
                         ProductFilter newFilter = ProductFilter();
                         if (selectedType == FilterType.numeric) {
-                          int from =
-                              int.tryParse(_fromNumController.text) ?? 0;
+                          int from = int.tryParse(_fromNumController.text) ?? 0;
                           int to = int.tryParse(_toNumController.text) ?? 0;
                           if (from <= 0) from = 1;
                           if (to > totalProducts) to = totalProducts;
@@ -1052,8 +1049,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                               from: from.toString(),
                               to: to.toString());
                         } else if (selectedType == FilterType.alphabetic) {
-                          String from =
-                          _fromAlphaController.text.toUpperCase();
+                          String from = _fromAlphaController.text.toUpperCase();
                           String to = _toAlphaController.text.toUpperCase();
                           if (from.isEmpty || to.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -1092,8 +1088,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           return AlertDialog(
               title: const Text('Aller au produit'),
               content: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Text(
-                    "Entrez une position (ex: 45), un nom ou un code :"),
+                const Text("Entrez une position (ex: 45), un nom ou un code :"),
                 const SizedBox(height: 10),
                 TextField(
                     controller: jumpController,
@@ -1118,8 +1113,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         });
   }
 
-  void _performJump(BuildContext dialogContext, EntryProvider provider,
-      String input) {
+  void _performJump(
+      BuildContext dialogContext, EntryProvider provider, String input) {
     if (input.isEmpty) return;
     Navigator.of(dialogContext).pop();
     final products = provider.products;
@@ -1171,7 +1166,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   icon: const Icon(Icons.history),
                   tooltip: 'Historique des cumuls',
                   onPressed: () {
-                    if (!mounted) return;
                     Navigator.of(context).push(MaterialPageRoute(
                         builder: (_) => const CumulHistoryScreen()));
                   }),
@@ -1185,20 +1179,19 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   ),
                 ),
               Consumer<EntryProvider>(builder: (context, provider, child) {
-                if (provider.selectedRayon == null) return const SizedBox.shrink();
+                if (provider.selectedRayon == null)
+                  return const SizedBox.shrink();
                 return Row(children: [
                   IconButton(
                       icon: const Icon(Icons.list_alt_outlined),
                       tooltip: 'Récapitulatif',
                       onPressed: () {
-                        if (!mounted) return;
                         _navigateToRecap();
                       }),
                   IconButton(
                       icon: const Icon(Icons.edit_note_outlined),
                       tooltip: 'Correction écarts',
                       onPressed: () {
-                        if (!mounted) return;
                         Navigator.of(context).push(MaterialPageRoute(
                             builder: (_) => VarianceScreen(
                                 inventoryId: widget.inventoryId,
@@ -1316,8 +1309,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                             Radius.circular(8))),
                                     contentPadding: const EdgeInsets.symmetric(
                                         horizontal: 12.0, vertical: 10.0),
-                                    suffixIcon:
-                                    _searchController.text.isNotEmpty
+                                    suffixIcon: _searchController
+                                        .text.isNotEmpty
                                         ? IconButton(
                                         icon: const Icon(Icons.clear,
                                             size: 20),
@@ -1327,8 +1320,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                             _showSearchResults = false;
                                             _filteredProducts = [];
                                           });
-                                          _searchFocusNode
-                                              .requestFocus();
+                                          _searchFocusNode.requestFocus();
                                         })
                                         : null))),
                         if (!widget.isQuickMode) ...[
@@ -1364,8 +1356,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                             provider.currentProduct == null)
                             ? Center(
                             child: Text(provider.activeFilter.isActive
-                                ? 'Aucun produit.'
-                                : 'Aucun produit.'))
+                                ? 'Aucun produit correspondant au filtre.'
+                                : 'Aucun produit dans cet emplacement.'))
                             : widget.isQuickMode
                             ? Center(
                             child: Column(
@@ -1376,8 +1368,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                       size: 80,
                                       color: Colors.grey.shade300),
                                   const SizedBox(height: 16),
-                                  const Text(
-                                      'Mode Saisie Rapide Activé',
+                                  const Text('Mode Saisie Rapide Activé',
                                       style: TextStyle(
                                           fontSize: 20,
                                           fontWeight: FontWeight.bold,
@@ -1388,13 +1379,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                           Container(
                               color: AppColors.background.withOpacity(0.98),
                               child: _filteredProducts.isEmpty
-                                  ? const Center(child: Text("Aucun produit trouvé"))
+                                  ? const Center(
+                                  child: Text("Aucun produit trouvé"))
                                   : ListView.builder(
                                   itemCount: _filteredProducts.length,
                                   itemBuilder: (context, index) {
                                     final product = _filteredProducts[index];
-                                    final appConfig =
-                                    Provider.of<AppConfig>(context,
+                                    final appConfig = Provider.of<AppConfig>(
+                                        context,
                                         listen: false);
                                     return Card(
                                         margin: const EdgeInsets.symmetric(
@@ -1415,8 +1407,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                                   Text(
                                                       'Prix Vente: ${product.produitPrixUni.toStringAsFixed(0)} F',
                                                       style: TextStyle(
-                                                          color: Colors.grey
-                                                              .shade800,
+                                                          color: Colors
+                                                              .grey.shade800,
                                                           fontWeight:
                                                           FontWeight.w500))
                                                 ]),
@@ -1513,7 +1505,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           Text('PA: ${product.produitPrixAchat} F',
               style: TextStyle(fontSize: priceFontSize, color: Colors.orange)),
           Text('PV: ${product.produitPrixUni} F',
-              style: TextStyle(fontSize: priceFontSize, color: AppColors.accent))
+              style: TextStyle(
+                  fontSize: priceFontSize, color: AppColors.accent))
         ]),
         const SizedBox(height: 8),
         Consumer<AppConfig>(builder: (context, appConfig, child) {

@@ -48,8 +48,9 @@ class ApiService {
   // --- CUMUL / VERIFICATION ---
 
   /// Vérifie si un produit a déjà été touché sur le serveur.
-  /// Renvoie NULL si non trouvé ou liste vide (pas de popup).
-  /// Renvoie la quantité si trouvé (popup cumul).
+  /// LOGIQUE CORRIGÉE : Utilise dtUpdated comme preuve absolue de comptage.
+  /// Renvoie NULL si non trouvé ou dtUpdated absent.
+  /// Renvoie la quantité si trouvé avec une date de mise à jour (popup cumul).
   Future<int?> checkExistingProductQuantity(String inventoryId, String query, {String? rayonId}) async {
     try {
       if (query.isEmpty) return null;
@@ -64,35 +65,34 @@ class ApiService {
         if (rayonId != null && rayonId.isNotEmpty) 'idRayon': rayonId,
       });
 
-      print("API CHECK URL: $uri");
+      print("API CUMUL CHECK URL: $uri");
 
-      final response = await http.get(uri, headers: _getHeaders()).timeout(const Duration(seconds: 10));
+      // Timeout court (5s) pour garantir la fluidité en mode scan
+      final response = await http.get(uri, headers: _getHeaders()).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
 
-        // LOGIQUE STRICTE :
         // 1. Si vide = Pas touché -> return null (Pas de popup)
         if (data.isEmpty) {
           return null;
         }
 
         // 2. Si contient des données, on cherche la correspondance exacte avec le CIP
-        // pour éviter d'additionner des produits qui ressemblent mais ne sont pas le bon.
         for (var item in data) {
           String itemCip = item['produitCip']?.toString() ?? '';
 
-          // Sécurité : on s'assure que c'est bien le produit demandé
-          if (itemCip == query) {
+          // Sécurité : on s'assure que c'est bien le produit demandé ET qu'il a été modifié (dtUpdated)
+          if (itemCip == query && item['dtUpdated'] != null) {
             if (item['quantiteSaisie'] != null) {
               int qte = (item['quantiteSaisie'] as num).toInt();
-              print("Quantité trouvée API: $qte");
+              print("Produit déjà compté trouvé (dtUpdated présent). Quantité: $qte");
               return qte;
             }
           }
         }
 
-        return null; // Pas de correspondance exacte trouvée dans la liste
+        return null; // Pas de correspondance avec dtUpdated trouvée
       } else {
         print('Erreur API Check: ${response.statusCode}');
         return null;
@@ -361,8 +361,6 @@ class ApiService {
       rethrow;
     }
   }
-
-  // Ajoutez ces méthodes à la fin de la classe, avant la dernière accolade }
 
   /// Vérifie si un rayon a été entamé (Liste des produits touchés non vide)
   Future<bool> hasTouchedProductsInRayon(String inventoryId, String rayonId) async {

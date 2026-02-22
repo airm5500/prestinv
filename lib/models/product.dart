@@ -9,8 +9,7 @@ class Product {
   final int quantiteInitiale;
   int quantiteSaisie;
   bool isSynced;
-
-  // NOUVEAU : Pour stocker le nom de l'emplacement (utile en mode Global)
+  final String? dtUpdated; // Nouveau champ pour la date de mise à jour
   String? locationLabel;
 
   Product({
@@ -22,20 +21,22 @@ class Product {
     required this.quantiteInitiale,
     required this.quantiteSaisie,
     this.isSynced = true,
+    this.dtUpdated,
     this.locationLabel,
   });
 
   factory Product.fromJson(Map<String, dynamic> json) {
     return Product(
       id: json['id'],
-      produitCip: json['produitCip'],
-      produitName: json['produitName'],
-      produitPrixAchat: (json['produitPrixAchat'] as num).toDouble(),
-      produitPrixUni: (json['produitPrixUni'] as num).toDouble(),
-      quantiteInitiale: json['quantiteInitiale'],
-      quantiteSaisie: json['quantiteSaisie'],
+      produitCip: json['produitCip'] ?? '',
+      produitName: json['produitName'] ?? '',
+      produitPrixAchat: (json['produitPrixAchat'] as num?)?.toDouble() ?? 0.0,
+      produitPrixUni: (json['produitPrixUni'] as num?)?.toDouble() ?? 0.0,
+      quantiteInitiale: json['quantiteInitiale'] ?? 0,
+      quantiteSaisie: json['quantiteSaisie'] ?? 0,
       isSynced: json['isSynced'] ?? true,
-      locationLabel: json['locationLabel'], // Récupération si sauvegardé
+      dtUpdated: json['dtUpdated'], // Récupération de la date
+      locationLabel: json['locationLabel'],
     );
   }
 
@@ -49,7 +50,8 @@ class Product {
       'quantiteInitiale': quantiteInitiale,
       'quantiteSaisie': quantiteSaisie,
       'isSynced': isSynced,
-      'locationLabel': locationLabel, // Sauvegarde
+      'dtUpdated': dtUpdated,
+      'locationLabel': locationLabel,
     };
   }
 }
