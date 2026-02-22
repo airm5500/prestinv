@@ -91,6 +91,12 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     super.dispose();
   }
 
+  String _getFilterDisplay(ProductFilter filter) {
+    if (!filter.isActive) return "";
+    String prefix = filter.type == FilterType.numeric ? "N°" : "";
+    return " ($prefix${filter.from} à $prefix${filter.to})";
+  }
+
   Future<void> _exportProductsToCsv(
       List<Product> products, String suffixName) async {
     if (products.isEmpty) {
@@ -274,6 +280,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
     final ValueNotifier<String> progressNotifier =
     ValueNotifier('Préparation...');
+
+    // CORRECTION : Utilisation du bon nom de méthode défini dans app_utils.dart
     showProgressDialog(context, progressNotifier);
 
     int unsyncedCount = provider.allProducts.where((p) => !p.isSynced).length;
@@ -286,7 +294,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  // --- LOGIQUE DE VALIDATION OPTIMISÉE (ZÉRO LENTEUR) ---
   void _validateAndProceed() async {
     if (!mounted) return;
     final provider = Provider.of<EntryProvider>(context, listen: false);
@@ -300,12 +307,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final inputQuantity = int.tryParse(_quantityController.text) ?? 0;
     int finalQuantity = inputQuantity;
 
-    // --- 1. CONTRÔLE CUMUL SANS LENTEUR ---
     if (appConfig.isCumulEnabled && provider.currentProduct != null) {
       int? existingQty;
 
       if (widget.isQuickMode) {
-        // En mode scan, on doit confirmer avec le serveur (appel optimisé 5s)
         showDialog(
             context: context,
             barrierDismissible: false,
@@ -315,7 +320,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
             rayonId: provider.selectedRayon?.id);
         Navigator.pop(context);
       } else {
-        // EN MODE GUIDÉ : CONTRÔLE LOCAL INSTANTANÉ (ZÉRO APPEL RÉSEAU ICI)
         existingQty = await provider
             .checkExistingQuantityLocal(provider.currentProduct!.produitCip);
       }
@@ -354,11 +358,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
 
     Future<void> proceedToNext(int quantityToSave) async {
-      // 2. SAUVEGARDE LOCALE IMMÉDIATE
       await provider.updateQuantity(quantityToSave.toString());
       _resetSendReminderTimer();
 
-      // 3. ENVOI ASYNC (Tâche de fond) : Ne bloque pas l'utilisateur
       if (appConfig.sendMode == SendMode.direct) {
         _apiService
             .updateProductQuantity(provider.currentProduct!.id, quantityToSave)
@@ -368,7 +370,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         });
       }
 
-      // 4. NAVIGATION VERS LE SUIVANT
       bool isLastProduct =
           provider.currentProductIndex >= provider.totalProducts - 1;
       if (isLastProduct && provider.totalProducts > 0) {
@@ -385,7 +386,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       }
     }
 
-    // Gestion du seuil de grande valeur
     if (finalQuantity > appConfig.largeValueThreshold) {
       final confirmed = await showDialog<bool>(
           context: context,
@@ -635,7 +635,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                               builder: (c) => const Center(
                                   child: CircularProgressIndicator()));
                           try {
-                            // Appel serveur optimisé car mode Scan
                             int? existingQty = await _apiService
                                 .checkExistingProductQuantity(
                                 widget.inventoryId, product.produitCip);
@@ -1476,13 +1475,19 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 style: TextStyle(
                     fontWeight: FontWeight.bold, fontSize: stockFontSize));
           }),
+          // COMPTEUR DE FILTRE RESTAURÉ ET ÉVOLUTIF
           if (provider.activeFilter.isActive)
             Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
                     color: Colors.blue.shade100,
                     borderRadius: BorderRadius.circular(12)),
-                child: const Text('Filtré', style: TextStyle(fontSize: 12)))
+                child: Text(
+                    'Filtré${_getFilterDisplay(provider.activeFilter)} : ${provider.currentProductIndex + 1}/${provider.totalProducts}',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue))),
         ]),
         const SizedBox(height: 8),
         SizedBox(
