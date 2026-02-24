@@ -1,5 +1,3 @@
-// lib/providers/entry_provider.dart
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
@@ -24,13 +22,12 @@ class EntryProvider with ChangeNotifier {
   final Map<String, int> _lastIndexByRayon = {};
 
   bool _hasPendingSession = false;
-
-  // Liste pour stocker l'historique des cumuls
   List<Map<String, dynamic>> _cumulLogs = [];
-
-  // Map pour les statuts (couleurs) des rayons
   final Map<String, int> _rayonStatuses = {};
   bool _isLoadingStatuses = false;
+
+  // LA MÉMOIRE LOCALE INFAILLIBLE : Stocke les IDs des produits touchés pendant cette session
+  final Set<int> _locallyTouchedProductIds = {};
 
   List<Rayon> get rayons => _rayons;
   Rayon? get selectedRayon => _selectedRayon;
@@ -56,29 +53,71 @@ class EntryProvider with ChangeNotifier {
 
   bool get hasUnsyncedData => _allProducts.any((p) => !p.isSynced);
 
-  // --- VÉRIFICATION LOCALE INSTANTANÉE (ZÉRO LENTEUR) ---
+  String _getPrefKey(String inventoryId, String suffix, {String? rayonId}) {
+    return rayonId != null
+        ? 'inv_${inventoryId}_ray_${rayonId}_$suffix'
+        : 'inv_${inventoryId}_$suffix';
+  }
 
-  /// Cette méthode vérifie en mémoire locale si le produit a déjà été compté.
-  /// Elle se base sur dtUpdated (preuve serveur) ou sur une saisie locale non synchronisée.
   Future<int?> checkExistingQuantityLocal(String cip) async {
     try {
       final product = _allProducts.firstWhere((p) => p.produitCip == cip);
-
-      // On considère comme "déjà compté" si le serveur a une date de modif (dtUpdated)
-      // OU si l'utilisateur a déjà saisi une quantité localement dans cette session (!isSynced)
-      if (product.dtUpdated != null || (!product.isSynced && product.quantiteSaisie > 0)) {
+      if (product.dtUpdated != null || (!product.isSynced && product.quantiteSaisie >= 0)) {
         return product.quantiteSaisie;
       }
-    } catch (e) {
-      // Produit non trouvé dans la liste locale chargée
-    }
+    } catch (e) {}
     return null;
   }
 
-  Future<void> _saveUnsyncedData() async {
-    final String keySuffix = _selectedRayon?.id ?? 'global_${_isGlobalMode ? "quick" : "unknown"}';
+  // --- NOUVEAU DÉCOMPTE INFAILLIBLE ---
+  int get uncountedProductsCount {
+    if (_allProducts.isEmpty) return 0;
+    return _allProducts.where((p) {
+      // RÈGLE : Un produit est oublié SEULEMENT s'il n'a pas de date serveur
+      // ET qu'il n'a pas été touché localement pendant cette session
+      return p.dtUpdated == null && !_locallyTouchedProductIds.contains(p.id);
+    }).length;
+  }
+
+  void filterToUncounted() {
+    _filteredProducts = _allProducts.where((p) =>
+    p.dtUpdated == null && !_locallyTouchedProductIds.contains(p.id)
+    ).toList();
+
+    _currentProductIndex = 0;
+    _activeFilter = ProductFilter(type: FilterType.numeric, from: "Rattrapage", to: "Oublis");
+
+    notifyListeners();
+  }
+
+  // --- PERSISTANCE ET SYNC ---
+
+  Future<void> _saveCurrentIndex(String inventoryId) async {
+    if (_selectedRayon != null) {
+      _lastIndexByRayon[_selectedRayon!.id] = _currentProductIndex;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_getPrefKey(inventoryId, 'index', rayonId: _selectedRayon!.id), _currentProductIndex);
+    }
+  }
+
+  Future<void> _saveFilter(String inventoryId) async {
+    if (_selectedRayon != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_getPrefKey(inventoryId, 'filter', rayonId: _selectedRayon!.id), _activeFilter.toRawJson());
+    }
+  }
+
+  Future<ProductFilter> _loadFilter(String inventoryId, String rayonId) async {
     final prefs = await SharedPreferences.getInstance();
-    final key = 'unsynced_data_$keySuffix';
+    final rawJson = prefs.getString(_getPrefKey(inventoryId, 'filter', rayonId: rayonId)) ?? '';
+    if (rawJson.isEmpty) return ProductFilter();
+    return ProductFilter.fromRawJson(rawJson);
+  }
+
+  Future<void> _saveUnsyncedData(String inventoryId) async {
+    if (_selectedRayon == null) return;
+    final String key = _getPrefKey(inventoryId, 'unsynced', rayonId: _selectedRayon!.id);
+    final prefs = await SharedPreferences.getInstance();
 
     final unsyncedProducts = _allProducts.where((p) => !p.isSynced).toList();
 
@@ -90,16 +129,27 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
-  Future<void> markAsSynced(int productId) async {
+  Future<void> markAsSynced(int productId, String inventoryId) async {
     final index = _allProducts.indexWhere((p) => p.id == productId);
     if (index != -1) {
       _allProducts[index].isSynced = true;
-      await _saveUnsyncedData();
+      // On conserve l'information qu'il a été touché, même après synchro !
+      _locallyTouchedProductIds.add(productId);
+      await _saveUnsyncedData(inventoryId);
       notifyListeners();
     }
   }
 
-  // --- GESTION DES LOGS DE CUMUL ---
+  // C'est cette méthode qui permet de repasser le nuage au vert sans casser la compilation
+  void markAsConfirmedFromServer(int productId) {
+    final index = _allProducts.indexWhere((p) => p.id == productId);
+    if (index != -1) {
+      _allProducts[index].isSynced = true;
+      // La ligne "_allProducts[index].dtUpdated = ..." a été supprimée
+      // La sécurité fonctionne quand même grâce à _locallyTouchedProductIds
+      notifyListeners();
+    }
+  }
 
   Future<void> addCumulLog(Product product, int oldQty, int addedQty) async {
     final log = {
@@ -111,62 +161,22 @@ class EntryProvider with ChangeNotifier {
       'newQty': oldQty + addedQty,
       'rayon': _selectedRayon?.libelle ?? 'Global',
     };
-
     _cumulLogs.add(log);
-
     final prefs = await SharedPreferences.getInstance();
     final keySuffix = _selectedRayon?.id ?? 'global';
     await prefs.setString('cumul_logs_$keySuffix', json.encode(_cumulLogs));
-
     notifyListeners();
   }
 
   Future<void> loadCumulLogs(String suffixId) async {
     final prefs = await SharedPreferences.getInstance();
     final String? logsString = prefs.getString('cumul_logs_$suffixId');
-
     if (logsString != null) {
       try {
         final List<dynamic> decoded = json.decode(logsString);
         _cumulLogs = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
-      } catch (e) {
-        _cumulLogs = [];
-      }
-    } else {
-      _cumulLogs = [];
-    }
-    notifyListeners();
-  }
-
-  // --- RESTE DU PROVIDER (LOGIQUE FILTRES ET PERSISTANCE) ---
-
-  void _saveCurrentIndex() async {
-    if (_selectedRayon != null) {
-      _lastIndexByRayon[_selectedRayon!.id] = _currentProductIndex;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('lastIndex_${_selectedRayon!.id}', _currentProductIndex);
-    }
-  }
-
-  Future<void> _saveFilter() async {
-    if (_selectedRayon != null) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('filter_${_selectedRayon!.id}', _activeFilter.toRawJson());
-    }
-  }
-
-  Future<ProductFilter> _loadFilter(String rayonId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final rawJson = prefs.getString('filter_$rayonId') ?? '';
-    return ProductFilter.fromRawJson(rawJson);
-  }
-
-  Future<void> applyFilter(ProductFilter newFilter) async {
-    _activeFilter = newFilter;
-    await _saveFilter();
-    _runFilterLogic();
-    _currentProductIndex = 0;
-    _saveCurrentIndex();
+      } catch (e) { _cumulLogs = []; }
+    } else { _cumulLogs = []; }
     notifyListeners();
   }
 
@@ -175,6 +185,8 @@ class EntryProvider with ChangeNotifier {
       _filteredProducts = List.from(_allProducts);
       return;
     }
+    if (_activeFilter.from == "Rattrapage") return;
+
     switch (_activeFilter.type) {
       case FilterType.numeric:
         try {
@@ -182,73 +194,49 @@ class EntryProvider with ChangeNotifier {
           int to = int.parse(_activeFilter.to);
           if (from < 0) from = 0;
           if (to > _allProducts.length) to = _allProducts.length;
-          if (from >= to) {
-            _filteredProducts = [];
-            return;
-          }
           _filteredProducts = _allProducts.sublist(from, to);
-        } catch (e) {
-          _filteredProducts = [];
-        }
+        } catch (e) { _filteredProducts = []; }
         break;
-
       case FilterType.alphabetic:
         try {
           final from = _activeFilter.from.toLowerCase();
           final to = _activeFilter.to.toLowerCase() + '\uffff';
-
           _filteredProducts = _allProducts.where((p) {
             final name = p.produitName.toLowerCase();
             return name.compareTo(from) >= 0 && name.compareTo(to) <= 0;
           }).toList();
-        } catch (e) {
-          _filteredProducts = [];
-        }
+        } catch (e) { _filteredProducts = []; }
         break;
-
       default:
         _filteredProducts = List.from(_allProducts);
         break;
     }
   }
 
-  void reset() {
-    _rayons = [];
-    _allProducts = [];
-    _filteredProducts = [];
-    _cumulLogs = [];
-    _rayonStatuses.clear();
-    _selectedRayon = null;
+  Future<void> applyFilter(ProductFilter newFilter, String inventoryId) async {
+    _activeFilter = newFilter;
+    await _saveFilter(inventoryId);
+    _runFilterLogic();
     _currentProductIndex = 0;
-    _error = null;
-    _hasPendingSession = false;
-    _activeFilter = ProductFilter();
-    _isGlobalMode = false;
+    await _saveCurrentIndex(inventoryId);
     notifyListeners();
   }
 
   Future<void> fetchRayons(ApiService api, String inventoryId) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    _isLoading = true; _error = null; notifyListeners();
     try {
       _rayons = await api.fetchRayons(inventoryId);
       loadRayonStatuses(api, inventoryId);
       if (_rayons.length == 1) {
         await fetchProducts(api, inventoryId, _rayons.first.id);
       }
-    } catch (e) {
-      _error = e.toString();
-    }
-    _isLoading = false;
-    notifyListeners();
+    } catch (e) { _error = e.toString(); }
+    _isLoading = false; notifyListeners();
   }
 
   Future<void> loadRayonStatuses(ApiService api, String inventoryId) async {
     if (_isLoadingStatuses || _rayons.isEmpty) return;
     _isLoadingStatuses = true;
-    _rayonStatuses.clear();
-
     for (var rayon in _rayons) {
       bool hasTouched = await api.hasTouchedProductsInRayon(inventoryId, rayon.id);
       int status = 0;
@@ -263,156 +251,147 @@ class EntryProvider with ChangeNotifier {
   }
 
   Future<void> fetchProducts(ApiService api, String inventoryId, String rayonId) async {
-    _isLoading = true;
-    _error = null;
-    _isGlobalMode = false;
-    _selectedRayon = _rayons.firstWhere((r) => r.id == rayonId,
-        orElse: () => Rayon(id: rayonId, code: '', libelle: 'Inconnu'));
+    _isLoading = true; _error = null; _isGlobalMode = false;
+    _locallyTouchedProductIds.clear(); // On vide la mémoire au changement de rayon
+
+    _selectedRayon = _rayons.firstWhere((r) => r.id == rayonId, orElse: () => Rayon(id: rayonId, code: '', libelle: 'Inconnu'));
     notifyListeners();
     try {
       final apiProducts = await api.fetchProducts(inventoryId, rayonId);
-      _allProducts = await _loadAndMergeUnsyncedData(rayonId, apiProducts);
-
+      _allProducts = await _loadAndMergeUnsyncedData(inventoryId, rayonId, apiProducts);
       await loadCumulLogs(rayonId);
 
-      _activeFilter = await _loadFilter(rayonId);
+      _activeFilter = await _loadFilter(inventoryId, rayonId);
       _runFilterLogic();
 
-      final lastIndex = _lastIndexByRayon[rayonId] ??
-          (await SharedPreferences.getInstance()).getInt('lastIndex_$rayonId') ?? 0;
-
+      final prefs = await SharedPreferences.getInstance();
+      final lastIndex = prefs.getInt(_getPrefKey(inventoryId, 'index', rayonId: rayonId)) ?? 0;
       _currentProductIndex = (lastIndex >= 0 && lastIndex < _filteredProducts.length) ? lastIndex : 0;
-      _lastIndexByRayon[rayonId] = _currentProductIndex;
-    } catch (e) {
-      _error = e.toString();
-    }
-    _isLoading = false;
-    notifyListeners();
+    } catch (e) { _error = e.toString(); }
+    _isLoading = false; notifyListeners();
   }
 
-  Future<List<Product>> _loadAndMergeUnsyncedData(String rayonId, List<Product> apiProducts) async {
+  Future<List<Product>> _loadAndMergeUnsyncedData(String inventoryId, String rayonId, List<Product> apiProducts) async {
     final prefs = await SharedPreferences.getInstance();
-    final key = 'unsynced_data_$rayonId';
-    final savedDataString = prefs.getString(key);
-    if (savedDataString == null) {
-      _hasPendingSession = false;
-      return apiProducts;
-    }
-
+    final saved = prefs.getString(_getPrefKey(inventoryId, 'unsynced', rayonId: rayonId));
+    if (saved == null) { _hasPendingSession = false; return apiProducts; }
     try {
-      final savedProductsData = json.decode(savedDataString) as List;
-      final savedProducts = savedProductsData.map((data) => Product.fromJson(data)).toList();
-
-      if (savedProducts.isEmpty) {
-        _hasPendingSession = false;
-        return apiProducts;
-      }
-
+      final List decoded = json.decode(saved);
+      final savedP = decoded.map((d) => Product.fromJson(d)).toList();
+      if (savedP.isEmpty) { _hasPendingSession = false; return apiProducts; }
       _hasPendingSession = true;
-      return apiProducts.map((apiProduct) {
+      return apiProducts.map((a) {
         try {
-          final savedVersion = savedProducts.firstWhere((p) => p.id == apiProduct.id);
-          apiProduct.quantiteSaisie = savedVersion.quantiteSaisie;
-          apiProduct.isSynced = savedVersion.isSynced;
+          final s = savedP.firstWhere((p) => p.id == a.id);
+          a.quantiteSaisie = s.quantiteSaisie;
+          a.isSynced = s.isSynced;
+          _locallyTouchedProductIds.add(a.id); // Ajout à la mémoire
         } catch (e) {}
-        return apiProduct;
+        return a;
       }).toList();
-    } catch (e) {
-      return apiProducts;
-    }
+    } catch (e) { return apiProducts; }
   }
 
   Future<List<Product>> searchProductOnline(ApiService api, String inventoryId, String query) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    _isLoading = true; _error = null; notifyListeners();
     List<Product> results = [];
     try {
-      final rayonId = _selectedRayon?.id;
-      results = await api.fetchProducts(inventoryId, rayonId, query: query);
-      if (results.isNotEmpty && rayonId == null) {
+      results = await api.fetchProducts(inventoryId, _selectedRayon?.id, query: query);
+      if (results.isNotEmpty && _selectedRayon == null) {
         _allProducts = results;
         _filteredProducts = results;
         _isGlobalMode = true;
         _currentProductIndex = 0;
       }
-    } catch (e) {
-      _error = "Erreur recherche: $e";
-    }
-    _isLoading = false;
-    notifyListeners();
+    } catch (e) { _error = "Erreur recherche: $e"; }
+    _isLoading = false; notifyListeners();
     return results;
   }
 
-  Future<void> updateSpecificProduct(Product productToUpdate) async {
+  Future<void> loadGlobalInventory(ApiService api, String inventoryId) async {
+    _isLoading = true; _isGlobalMode = true; _error = null; notifyListeners();
     try {
-      final index = _allProducts.indexWhere((p) => p.id == productToUpdate.id);
-      if (index != -1) {
-        _allProducts[index].quantiteSaisie = productToUpdate.quantiteSaisie;
-        _allProducts[index].isSynced = false;
-      } else {
-        productToUpdate.isSynced = false;
-        _allProducts.add(productToUpdate);
+      final rs = await api.fetchRayons(inventoryId);
+      _rayons = rs;
+      _allProducts = [];
+      for (var r in rs) {
+        final ps = await api.fetchProducts(inventoryId, r.id);
+        for(var p in ps) p.locationLabel = r.libelle;
+        _allProducts.addAll(await _loadAndMergeUnsyncedData(inventoryId, r.id, ps));
       }
-    } catch (e) {}
-    await _saveUnsyncedData();
-    notifyListeners();
+      _filteredProducts = List.from(_allProducts);
+    } catch (e) { _error = "Err global: $e"; }
+    _isLoading = false; notifyListeners();
   }
 
-  Future<void> updateQuantity(String value) async {
+  Future<void> updateQuantity(String value, String inventoryId) async {
     if (currentProduct != null) {
-      final int quantity = int.tryParse(value) ?? 0;
-      if (quantity >= 0) {
-        currentProduct!.quantiteSaisie = quantity;
-        await updateSpecificProduct(currentProduct!);
-      }
+      final qte = int.tryParse(value) ?? 0;
+      currentProduct!.quantiteSaisie = qte;
+      currentProduct!.isSynced = false;
+      _locallyTouchedProductIds.add(currentProduct!.id); // Ajout mémoire
+      await _saveUnsyncedData(inventoryId);
+      notifyListeners();
     }
   }
 
-  void nextProduct() {
+  Future<void> updateSpecificProduct(Product p, String inventoryId) async {
+    final index = _allProducts.indexWhere((item) => item.id == p.id);
+    if (index != -1) {
+      _allProducts[index].quantiteSaisie = p.quantiteSaisie;
+      _allProducts[index].isSynced = false;
+      _locallyTouchedProductIds.add(p.id); // Ajout mémoire
+      await _saveUnsyncedData(inventoryId);
+      notifyListeners();
+    }
+  }
+
+  void nextProduct(String inventoryId) {
     if (_currentProductIndex < _filteredProducts.length - 1) {
       _currentProductIndex++;
-      _saveCurrentIndex();
+      _saveCurrentIndex(inventoryId);
       notifyListeners();
     }
   }
 
-  void previousProduct() {
+  void previousProduct(String inventoryId) {
     if (_currentProductIndex > 0) {
       _currentProductIndex--;
-      _saveCurrentIndex();
+      _saveCurrentIndex(inventoryId);
       notifyListeners();
     }
   }
 
-  void jumpToProduct(Product product) {
-    final index = _filteredProducts.indexWhere((p) => p.id == product.id);
-    if (index != -1) {
-      _currentProductIndex = index;
-      _saveCurrentIndex();
+  void jumpToProduct(Product p, String inventoryId) {
+    final idx = _filteredProducts.indexWhere((item) => item.id == p.id);
+    if (idx != -1) {
+      _currentProductIndex = idx;
+      _saveCurrentIndex(inventoryId);
       notifyListeners();
     }
   }
 
-  Future<void> sendDataToServer(ApiService api, [Function(int, int)? onProgress]) async {
-    List<Product> unsyncedProducts = _allProducts.where((p) => !p.isSynced).toList();
-    int total = unsyncedProducts.length;
-    int sentCount = 0;
-    try {
-      for (var product in unsyncedProducts) {
-        await api.updateProductQuantity(product.id, product.quantiteSaisie);
-        product.isSynced = true;
-        sentCount++;
-        onProgress?.call(sentCount, total);
+  Future<void> sendDataToServer(ApiService api, String inventoryId, [Function(int, int)? onProgress]) async {
+    List<Product> unsynced = _allProducts.where((p) => !p.isSynced).toList();
+    int total = unsynced.length;
+    if (total == 0) return;
+    for (int i = 0; i < total; i++) {
+      try {
+        await api.updateProductQuantity(unsynced[i].id, unsynced[i].quantiteSaisie);
+        unsynced[i].isSynced = true;
+        _locallyTouchedProductIds.add(unsynced[i].id); // Ajout mémoire
+        onProgress?.call(i + 1, total);
+      } catch (e) {
+        print("Error syncing: $e");
       }
-    } catch (e) {
-      await _saveUnsyncedData();
-      notifyListeners();
-      rethrow;
     }
-    await _saveUnsyncedData();
+    await _saveUnsyncedData(inventoryId);
     notifyListeners();
   }
 
+  void reset() {
+    _allProducts = []; _filteredProducts = []; _selectedRayon = null; _currentProductIndex = 0;
+    _activeFilter = ProductFilter(); _isGlobalMode = false; _locallyTouchedProductIds.clear(); notifyListeners();
+  }
   void acknowledgedPendingSession() => _hasPendingSession = false;
 }

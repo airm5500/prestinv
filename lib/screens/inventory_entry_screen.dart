@@ -93,6 +93,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   String _getFilterDisplay(ProductFilter filter) {
     if (!filter.isActive) return "";
+    if (filter.from == "Rattrapage") return " (Oublis)";
     String prefix = filter.type == FilterType.numeric ? "N°" : "";
     return " ($prefix${filter.from} à $prefix${filter.to})";
   }
@@ -271,6 +272,13 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   Future<void> _sendDataToServer() async {
     if (!mounted) return;
     final provider = Provider.of<EntryProvider>(context, listen: false);
+    final appConfig = Provider.of<AppConfig>(context, listen: false);
+
+    if (appConfig.sendMode == SendMode.direct && !provider.hasUnsyncedData) {
+      _showNotification('Mode Direct : Tout est déjà synchronisé.', Colors.blue);
+      return;
+    }
+
     if (!provider.hasUnsyncedData) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Aucune donnée en attente d\'envoi.'),
@@ -278,16 +286,16 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           duration: Duration(seconds: 2)));
       return;
     }
-    final ValueNotifier<String> progressNotifier =
-    ValueNotifier('Préparation...');
 
-    // CORRECTION : Utilisation du bon nom de méthode défini dans app_utils.dart
+    final ValueNotifier<String> progressNotifier = ValueNotifier('Préparation...');
     showProgressDialog(context, progressNotifier);
 
     int unsyncedCount = provider.allProducts.where((p) => !p.isSynced).length;
-    await provider.sendDataToServer(_apiService, (int current, int total) {
+
+    await provider.sendDataToServer(_apiService, widget.inventoryId, (int current, int total) {
       progressNotifier.value = 'Envoi... ($current/$total)';
     });
+
     progressNotifier.value = '$unsyncedCount article(s) traité(s).';
     _sendReminderTimer?.cancel();
     await Future.delayed(const Duration(seconds: 2));
@@ -307,7 +315,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final inputQuantity = int.tryParse(_quantityController.text) ?? 0;
     int finalQuantity = inputQuantity;
 
-    if (appConfig.isCumulEnabled && provider.currentProduct != null) {
+    // Gestion du produit actuel pour éviter les références nulles pendant l'asynchrone
+    final currentProductAtClick = provider.currentProduct;
+    if (currentProductAtClick == null) return;
+
+    if (appConfig.isCumulEnabled) {
       int? existingQty;
 
       if (widget.isQuickMode) {
@@ -316,12 +328,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
             barrierDismissible: false,
             builder: (c) => const Center(child: CircularProgressIndicator()));
         existingQty = await _apiService.checkExistingProductQuantity(
-            widget.inventoryId, provider.currentProduct!.produitCip,
-            rayonId: provider.selectedRayon?.id);
-        Navigator.pop(context);
+            widget.inventoryId, currentProductAtClick.produitCip);
+        if (mounted) Navigator.pop(context);
       } else {
         existingQty = await provider
-            .checkExistingQuantityLocal(provider.currentProduct!.produitCip);
+            .checkExistingQuantityLocal(currentProductAtClick.produitCip);
       }
 
       if (existingQty != null) {
@@ -331,7 +342,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
             return AlertDialog(
               title: const Text("⚠️ Déjà compté"),
               backgroundColor: const Color(0xFFFFF3CD),
-              content: _buildCumulContent(provider.currentProduct!.produitName,
+              content: _buildCumulContent(currentProductAtClick.produitName,
                   existingQty!, inputQuantity),
               actions: [
                 TextButton(
@@ -352,24 +363,31 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         if (shouldCumulate == true) {
           finalQuantity = existingQty + inputQuantity;
           provider.addCumulLog(
-              provider.currentProduct!, existingQty, inputQuantity);
+              currentProductAtClick, existingQty, inputQuantity);
         }
       }
     }
 
-    Future<void> proceedToNext(int quantityToSave) async {
-      await provider.updateQuantity(quantityToSave.toString());
+    Future<void> proceedToNext(int quantityToSave, Product productToUpdate) async {
+      // 1. Mise à jour locale (isSynced passe à false -> Nuage Orange)
+      await provider.updateQuantity(quantityToSave.toString(), widget.inventoryId);
       _resetSendReminderTimer();
 
+      // 2. Envoi Direct
       if (appConfig.sendMode == SendMode.direct) {
         _apiService
-            .updateProductQuantity(provider.currentProduct!.id, quantityToSave)
-            .then((_) => provider.markAsSynced(provider.currentProduct!.id))
+            .updateProductQuantity(productToUpdate.id, quantityToSave)
+            .then((_) {
+          // SUCCESS: Le serveur a répondu, on marque comme synchronisé (Nuage Vert)
+          // On passe l'ID pour être sûr de marquer le bon produit même si on a déjà avancé au suivant
+          provider.markAsSynced(productToUpdate.id, widget.inventoryId);
+        })
             .catchError((e) {
-          if (mounted) _showNotification('Erreur réseau.', Colors.red);
+          if (mounted) _showNotification('Erreur réseau : Donnée sauvegardée localement.', Colors.red);
         });
       }
 
+      // 3. Navigation vers le produit suivant
       bool isLastProduct =
           provider.currentProductIndex >= provider.totalProducts - 1;
       if (isLastProduct && provider.totalProducts > 0) {
@@ -377,7 +395,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         if (!mounted) return;
         _showFinishDialog();
       } else {
-        provider.nextProduct();
+        provider.nextProduct(widget.inventoryId);
         setState(() {
           _isManualAccess = false;
         });
@@ -386,6 +404,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       }
     }
 
+    // Vérification du seuil de grande quantité
     if (finalQuantity > appConfig.largeValueThreshold) {
       final confirmed = await showDialog<bool>(
           context: context,
@@ -400,65 +419,114 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                     onPressed: () => Navigator.of(ctx).pop(true),
                     child: const Text('Oui'))
               ]));
-      if (confirmed == true) await proceedToNext(finalQuantity);
+      if (confirmed == true) await proceedToNext(finalQuantity, currentProductAtClick);
     } else {
-      await proceedToNext(finalQuantity);
+      await proceedToNext(finalQuantity, currentProductAtClick);
     }
   }
 
   void _showFinishDialog() {
-    bool isFilterActive =
-        Provider.of<EntryProvider>(context, listen: false).activeFilter.isActive;
+    final provider = Provider.of<EntryProvider>(context, listen: false);
+    int remaining = provider.uncountedProductsCount;
+
     showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-            title: Text(isFilterActive
-                ? 'Fin du filtre'
-                : 'Fin de l\'emplacement'),
-            content: const Text('Envoyer les données ?'),
+            title: Text(remaining > 0 ? "⚠️ Emplacement incomplet" : "Fin de l'emplacement"),
+            content: Text(remaining > 0
+                ? "Il reste $remaining produits n'ayant jamais été touchés (dtUpdated est NULL).\n\nVoulez-vous les traiter maintenant ?"
+                : "Tous les produits ont été touchés. Voulez-vous envoyer les données ?"),
             actions: [
-              TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('Non')),
-              TextButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    _sendDataToServer();
-                  },
-                  child: const Text('Oui'))
+              if (remaining > 0)
+                ElevatedButton(onPressed: () { Navigator.pop(ctx); provider.filterToUncounted(); }, child: const Text("OUI (Traiter oublis)")),
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Non')),
+              TextButton(onPressed: () { Navigator.of(ctx).pop(); _sendDataToServer(); }, child: const Text('Oui'))
             ]));
   }
 
-  Future<bool> _onWillPop() async {
+  // --- LOGIQUE DE SÉCURITÉ DE SORTIE RÉVISÉE ---
+  Future<bool> _handleExitSecurity() async {
     _sendReminderTimer?.cancel();
     final provider = Provider.of<EntryProvider>(context, listen: false);
-    if (!provider.hasUnsyncedData) {
+    final appConfig = Provider.of<AppConfig>(context, listen: false);
+
+    // RÈGLE D'ANTICIPATION : On compte les produits oubliés (dtUpdated NULL et isSynced TRUE).
+    // Si isSynced est FALSE, cela signifie que le produit est en cours d'envoi et donc plus "oublié".
+    int remaining = provider.uncountedProductsCount;
+    bool hasUnsynced = provider.hasUnsyncedData;
+
+    // CAS 1 : Si tout est traité (y compris le dernier produit 1/1 en cours d'envoi), on sort sans message
+    if (remaining == 0) {
       return true;
     }
-    final bool? sendAndLeave = await showDialog<bool>(
+
+    // CAS 2 : Mode ENVOI DIRECT
+    if (appConfig.sendMode == SendMode.direct) {
+      return await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Quitter l\'inventaire ?'),
+          content: Text('Il reste encore $remaining produit(s) jamais touchés dans ce rayon.'),
+          actions: [
+            ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00A38D)),
+                onPressed: () {
+                  Navigator.pop(ctx, false);
+                  provider.filterToUncounted();
+                },
+                child: const Text("Voir les oublis")
+            ),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Ignorer et Quitter', style: TextStyle(color: Colors.red))
+            ),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Rester')
+            ),
+          ],
+        ),
+      ) ?? false;
+    }
+
+    // CAS 3 : Mode COLLECTE
+    return await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: const Text('Quitter l\'inventaire ?'),
-        content: const Text(
-            'Des données n\'ont pas été envoyées. Voulez-vous les envoyer avant de quitter ?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasUnsynced)
+              const Text('⚠️ Des données n\'ont pas été envoyées vers le serveur.',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+            const SizedBox(height: 8),
+            Text('Il reste encore $remaining produit(s) jamais touchés dans ce rayon.'),
+          ],
+        ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Annuler')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Rester')),
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Envoyer et Quitter')),
+              child: const Text('Ignorer et Quitter', style: TextStyle(color: Colors.red))
+          ),
+          if (hasUnsynced)
+            ElevatedButton(
+                onPressed: () async {
+                  await _sendDataToServer();
+                  if (mounted) Navigator.of(ctx).pop(true);
+                },
+                child: const Text('Envoyer et Quitter')),
         ],
       ),
-    );
-    if (sendAndLeave == true) {
-      await _sendDataToServer();
-      return true;
-    } else {
-      _resetSendReminderTimer();
-      return false;
-    }
+    ) ?? false;
+  }
+
+  Future<bool> _onWillPop() async {
+    return await _handleExitSecurity();
   }
 
   void _showPendingDataDialog() {
@@ -488,26 +556,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   void _onLocationChanged(Rayon? newValue) async {
     final provider = Provider.of<EntryProvider>(context, listen: false);
     if (newValue?.id != provider.selectedRayon?.id) {
-      if (provider.hasUnsyncedData) {
-        final bool? confirmed = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Changer d\'emplacement ?'),
-            content: const Text(
-                'Les données actuelles seront envoyées au serveur avant de changer.'),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(false),
-                  child: const Text('Annuler')),
-              TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(true),
-                  child: const Text('Continuer')),
-            ],
-          ),
-        );
-        if (confirmed != true) return;
-        await _sendDataToServer();
-      }
+
+      bool canChange = await _handleExitSecurity();
+      if (!canChange) return;
+
       if (mounted) {
         _sendReminderTimer?.cancel();
         _searchController.clear();
@@ -796,7 +848,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final appConfig = Provider.of<AppConfig>(context, listen: false);
     product.quantiteSaisie = quantity;
-    await provider.updateSpecificProduct(product);
+
+    await provider.updateSpecificProduct(product, widget.inventoryId);
+
     if (mounted) {
       _showNotification(
           'Saisie enregistrée : ${product.produitName}', Colors.green);
@@ -804,7 +858,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     if (appConfig.sendMode == SendMode.direct) {
       _apiService
           .updateProductQuantity(product.id, quantity)
-          .then((_) => provider.markAsSynced(product.id))
+          .then((_) {
+        provider.markAsSynced(product.id, widget.inventoryId);
+      })
           .catchError((e) {
         print("Erreur sync direct scan: $e");
       });
@@ -1071,7 +1127,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                               from: from,
                               to: to);
                         }
-                        provider.applyFilter(newFilter);
+
+                        provider.applyFilter(newFilter, widget.inventoryId);
                         Navigator.of(ctx).pop();
                       })
                 ]);
@@ -1134,7 +1191,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         _isManualAccess = true;
       });
       final targetProduct = products[targetIndex];
-      provider.jumpToProduct(targetProduct);
+
+      provider.jumpToProduct(targetProduct, widget.inventoryId);
+
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
               'Position ${targetIndex + 1} : ${targetProduct.produitName}'),
@@ -1149,14 +1208,35 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      onWillPop: _onWillPop,
+      onWillPop: _handleExitSecurity,
       child: Scaffold(
         resizeToAvoidBottomInset: true,
         appBar: AppBar(
+            leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () async { if (await _handleExitSecurity()) Navigator.pop(context); }
+            ),
             title: Text(widget.isQuickMode
-                ? 'Saisie Rapide (Scan)'
+                ? 'Scan'
                 : 'Saisie Inventaire'),
             actions: [
+              // --- INDICATEUR DE SYNCHRONISATION ---
+              Consumer<EntryProvider>(
+                builder: (context, provider, child) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: provider.hasUnsyncedData
+                        ? const Tooltip(
+                      message: "Envoi au serveur...",
+                      child: Icon(Icons.cloud_upload, color: Colors.orangeAccent),
+                    )
+                        : const Tooltip(
+                      message: "Serveur à jour",
+                      child: Icon(Icons.cloud_done, color: Colors.greenAccent),
+                    ),
+                  );
+                },
+              ),
               IconButton(
                   icon: const Icon(Icons.send),
                   tooltip: 'Envoyer les données',
@@ -1341,7 +1421,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                   !provider.activeFilter.isActive)
                                   ? null
                                   : () => provider.applyFilter(
-                                  ProductFilter(type: FilterType.none)),
+                                  ProductFilter(type: FilterType.none), widget.inventoryId),
                               child: const Icon(Icons.delete_outline))
                         ]
                       ])),
@@ -1475,7 +1555,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 style: TextStyle(
                     fontWeight: FontWeight.bold, fontSize: stockFontSize));
           }),
-          // COMPTEUR DE FILTRE RESTAURÉ ET ÉVOLUTIF
           if (provider.activeFilter.isActive)
             Container(
                 padding: const EdgeInsets.all(6),
@@ -1536,7 +1615,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                     side: const BorderSide(color: Colors.deepPurple, width: 2),
                     padding: EdgeInsets.zero,
                   ),
-                  onPressed: provider.previousProduct,
+                  onPressed: () => provider.previousProduct(widget.inventoryId),
                   child: Icon(Icons.chevron_left,
                       size: buttonIconSize, color: Colors.deepPurple))),
           const SizedBox(width: 8),
@@ -1570,4 +1649,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       ],
     );
   }
+
+
 }
