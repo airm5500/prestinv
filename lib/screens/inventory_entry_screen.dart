@@ -315,7 +315,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final inputQuantity = int.tryParse(_quantityController.text) ?? 0;
     int finalQuantity = inputQuantity;
 
-    // Gestion du produit actuel pour éviter les références nulles pendant l'asynchrone
     final currentProductAtClick = provider.currentProduct;
     if (currentProductAtClick == null) return;
 
@@ -369,25 +368,20 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
 
     Future<void> proceedToNext(int quantityToSave, Product productToUpdate) async {
-      // 1. Mise à jour locale (isSynced passe à false -> Nuage Orange)
       await provider.updateQuantity(quantityToSave.toString(), widget.inventoryId);
       _resetSendReminderTimer();
 
-      // 2. Envoi Direct
       if (appConfig.sendMode == SendMode.direct) {
         _apiService
             .updateProductQuantity(productToUpdate.id, quantityToSave)
             .then((_) {
-          // SUCCESS: Le serveur a répondu, on marque comme synchronisé (Nuage Vert)
-          // On passe l'ID pour être sûr de marquer le bon produit même si on a déjà avancé au suivant
-          provider.markAsSynced(productToUpdate.id, widget.inventoryId);
+          provider.markAsConfirmedFromServer(productToUpdate.id);
         })
             .catchError((e) {
-          if (mounted) _showNotification('Erreur réseau : Donnée sauvegardée localement.', Colors.red);
+          if (mounted) _showNotification('Erreur réseau.', Colors.red);
         });
       }
 
-      // 3. Navigation vers le produit suivant
       bool isLastProduct =
           provider.currentProductIndex >= provider.totalProducts - 1;
       if (isLastProduct && provider.totalProducts > 0) {
@@ -404,7 +398,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       }
     }
 
-    // Vérification du seuil de grande quantité
     if (finalQuantity > appConfig.largeValueThreshold) {
       final confirmed = await showDialog<bool>(
           context: context,
@@ -434,7 +427,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         builder: (ctx) => AlertDialog(
             title: Text(remaining > 0 ? "⚠️ Emplacement incomplet" : "Fin de l'emplacement"),
             content: Text(remaining > 0
-                ? "Il reste $remaining produits n'ayant jamais été touchés (dtUpdated est NULL).\n\nVoulez-vous les traiter maintenant ?"
+                ? "Il reste $remaining produits n'ayant jamais été touchés.\n\nVoulez-vous les traiter maintenant ?"
                 : "Tous les produits ont été touchés. Voulez-vous envoyer les données ?"),
             actions: [
               if (remaining > 0)
@@ -447,21 +440,19 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   // --- LOGIQUE DE SÉCURITÉ DE SORTIE RÉVISÉE ---
   Future<bool> _handleExitSecurity() async {
     _sendReminderTimer?.cancel();
+
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final appConfig = Provider.of<AppConfig>(context, listen: false);
 
-    // RÈGLE D'ANTICIPATION : On compte les produits oubliés (dtUpdated NULL et isSynced TRUE).
-    // Si isSynced est FALSE, cela signifie que le produit est en cours d'envoi et donc plus "oublié".
     int remaining = provider.uncountedProductsCount;
     bool hasUnsynced = provider.hasUnsyncedData;
 
-    // CAS 1 : Si tout est traité (y compris le dernier produit 1/1 en cours d'envoi), on sort sans message
-    if (remaining == 0) {
+    if (remaining == 0 && !hasUnsynced) {
       return true;
     }
 
-    // CAS 2 : Mode ENVOI DIRECT
     if (appConfig.sendMode == SendMode.direct) {
+      if (remaining == 0) return true;
       return await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -490,7 +481,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       ) ?? false;
     }
 
-    // CAS 3 : Mode COLLECTE
     return await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -504,15 +494,28 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               const Text('⚠️ Des données n\'ont pas été envoyées vers le serveur.',
                   style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
             const SizedBox(height: 8),
-            Text('Il reste encore $remaining produit(s) jamais touchés dans ce rayon.'),
+            if (remaining > 0)
+              Text('Il reste encore $remaining produit(s) jamais touchés dans ce rayon.'),
           ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Rester')),
+
+          if (remaining > 0)
+            ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00A38D)),
+                onPressed: () {
+                  Navigator.pop(ctx, false);
+                  provider.filterToUncounted();
+                },
+                child: const Text("Voir les oublis")
+            ),
+
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(true),
               child: const Text('Ignorer et Quitter', style: TextStyle(color: Colors.red))
           ),
+
           if (hasUnsynced)
             ElevatedButton(
                 onPressed: () async {
@@ -1220,7 +1223,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 ? 'Scan'
                 : 'Saisie Inventaire'),
             actions: [
-              // --- INDICATEUR DE SYNCHRONISATION ---
               Consumer<EntryProvider>(
                 builder: (context, provider, child) {
                   return Padding(
@@ -1593,17 +1595,37 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   fontSize: priceFontSize, color: AppColors.accent))
         ]),
         const SizedBox(height: 8),
-        Consumer<AppConfig>(builder: (context, appConfig, child) {
-          return Visibility(
-              visible: appConfig.showTheoreticalStock,
-              child: Text('Stock Théorique: ${product.quantiteInitiale}',
-                  style: TextStyle(
-                      fontSize: stockFontSize,
-                      fontWeight: FontWeight.bold,
-                      color: product.quantiteInitiale < 0
-                          ? Colors.red.shade700
-                          : const Color(0xFF1B5E20))));
-        }),
+
+        // --- NOUVEAU BLOC : STOCK THÉORIQUE ET QUANTITÉ SAISIE ---
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Consumer<AppConfig>(builder: (context, appConfig, child) {
+              return Visibility(
+                  visible: appConfig.showTheoreticalStock,
+                  child: Text('Stock Théo: ${product.quantiteInitiale}',
+                      style: TextStyle(
+                          fontSize: stockFontSize,
+                          fontWeight: FontWeight.bold,
+                          color: product.quantiteInitiale < 0
+                              ? Colors.red.shade700
+                              : const Color(0xFF1B5E20))));
+            }),
+            Builder(builder: (context) {
+              final isTouched = product.dtUpdated != null || provider.isProductTouched(product.id);
+              if (isTouched) {
+                return Text('Compté : ${product.quantiteSaisie}',
+                    style: TextStyle(
+                        fontSize: stockFontSize,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.blue));
+              }
+              return const SizedBox.shrink();
+            }),
+          ],
+        ),
+        // --------------------------------------------------------
+
         const SizedBox(height: 8),
         Row(children: [
           SizedBox(
@@ -1649,6 +1671,4 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       ],
     );
   }
-
-
 }

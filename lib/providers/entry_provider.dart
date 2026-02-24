@@ -1,3 +1,5 @@
+// lib/providers/entry_provider.dart
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
@@ -59,6 +61,11 @@ class EntryProvider with ChangeNotifier {
         : 'inv_${inventoryId}_$suffix';
   }
 
+  // --- NOUVELLE MÉTHODE POUR L'AFFICHAGE DU "COMPTÉ : X" ---
+  bool isProductTouched(int productId) {
+    return _locallyTouchedProductIds.contains(productId);
+  }
+
   Future<int?> checkExistingQuantityLocal(String cip) async {
     try {
       final product = _allProducts.firstWhere((p) => p.produitCip == cip);
@@ -73,8 +80,6 @@ class EntryProvider with ChangeNotifier {
   int get uncountedProductsCount {
     if (_allProducts.isEmpty) return 0;
     return _allProducts.where((p) {
-      // RÈGLE : Un produit est oublié SEULEMENT s'il n'a pas de date serveur
-      // ET qu'il n'a pas été touché localement pendant cette session
       return p.dtUpdated == null && !_locallyTouchedProductIds.contains(p.id);
     }).length;
   }
@@ -133,20 +138,16 @@ class EntryProvider with ChangeNotifier {
     final index = _allProducts.indexWhere((p) => p.id == productId);
     if (index != -1) {
       _allProducts[index].isSynced = true;
-      // On conserve l'information qu'il a été touché, même après synchro !
       _locallyTouchedProductIds.add(productId);
       await _saveUnsyncedData(inventoryId);
       notifyListeners();
     }
   }
 
-  // C'est cette méthode qui permet de repasser le nuage au vert sans casser la compilation
   void markAsConfirmedFromServer(int productId) {
     final index = _allProducts.indexWhere((p) => p.id == productId);
     if (index != -1) {
       _allProducts[index].isSynced = true;
-      // La ligne "_allProducts[index].dtUpdated = ..." a été supprimée
-      // La sécurité fonctionne quand même grâce à _locallyTouchedProductIds
       notifyListeners();
     }
   }
@@ -252,7 +253,7 @@ class EntryProvider with ChangeNotifier {
 
   Future<void> fetchProducts(ApiService api, String inventoryId, String rayonId) async {
     _isLoading = true; _error = null; _isGlobalMode = false;
-    _locallyTouchedProductIds.clear(); // On vide la mémoire au changement de rayon
+    _locallyTouchedProductIds.clear();
 
     _selectedRayon = _rayons.firstWhere((r) => r.id == rayonId, orElse: () => Rayon(id: rayonId, code: '', libelle: 'Inconnu'));
     notifyListeners();
@@ -285,7 +286,7 @@ class EntryProvider with ChangeNotifier {
           final s = savedP.firstWhere((p) => p.id == a.id);
           a.quantiteSaisie = s.quantiteSaisie;
           a.isSynced = s.isSynced;
-          _locallyTouchedProductIds.add(a.id); // Ajout à la mémoire
+          _locallyTouchedProductIds.add(a.id);
         } catch (e) {}
         return a;
       }).toList();
@@ -329,7 +330,7 @@ class EntryProvider with ChangeNotifier {
       final qte = int.tryParse(value) ?? 0;
       currentProduct!.quantiteSaisie = qte;
       currentProduct!.isSynced = false;
-      _locallyTouchedProductIds.add(currentProduct!.id); // Ajout mémoire
+      _locallyTouchedProductIds.add(currentProduct!.id);
       await _saveUnsyncedData(inventoryId);
       notifyListeners();
     }
@@ -340,7 +341,7 @@ class EntryProvider with ChangeNotifier {
     if (index != -1) {
       _allProducts[index].quantiteSaisie = p.quantiteSaisie;
       _allProducts[index].isSynced = false;
-      _locallyTouchedProductIds.add(p.id); // Ajout mémoire
+      _locallyTouchedProductIds.add(p.id);
       await _saveUnsyncedData(inventoryId);
       notifyListeners();
     }
@@ -379,7 +380,7 @@ class EntryProvider with ChangeNotifier {
       try {
         await api.updateProductQuantity(unsynced[i].id, unsynced[i].quantiteSaisie);
         unsynced[i].isSynced = true;
-        _locallyTouchedProductIds.add(unsynced[i].id); // Ajout mémoire
+        _locallyTouchedProductIds.add(unsynced[i].id);
         onProgress?.call(i + 1, total);
       } catch (e) {
         print("Error syncing: $e");
