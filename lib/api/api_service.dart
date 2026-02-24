@@ -378,6 +378,28 @@ class ApiService {
     }
   }
 
+  Future<List<Product>> fetchTouchedProductsByRayon(String inventoryId, String rayonId, {String? query}) async {
+    // On construit l'URL avec les paramètres obligatoires
+    String url = '$baseUrl/api/v1/ws/inventaires/detailsTouchedRayon?idInventaire=$inventoryId&idRayon=$rayonId';
+
+    // Si on fait une recherche/scan, on ajoute le query à l'URL
+    if (query != null && query.isNotEmpty) {
+      url += '&query=$query';
+    }
+
+    final response = await http.get(
+      Uri.parse(url),
+      headers: {'Cookie': sessionCookie ?? ''},
+    );
+
+    if (response.statusCode == 200) {
+      final List<dynamic> data = json.decode(response.body);
+      return data.map((json) => Product.fromJson(json)).toList();
+    } else {
+      throw Exception('Erreur lors du chargement des écarts de cet emplacement');
+    }
+  }
+
   /// Vérifie s'il reste des produits à faire (Liste des produits intouchés non vide)
   Future<bool> hasUntouchedProductsInRayon(String inventoryId, String rayonId) async {
     final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/detailsUntouchedRayon?idInventaire=$inventoryId&idRayon=$rayonId&query=');
