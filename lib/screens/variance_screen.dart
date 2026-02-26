@@ -43,7 +43,10 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
   bool _isLoading = true;
   bool _showSearchResults = false;
+
+  // Cette variable sert à savoir si on doit remplacer le texte au lieu de l'ajouter
   bool _isNewEntry = true;
+
   late ApiService _apiService;
 
   bool _isPrinting = false;
@@ -114,9 +117,14 @@ class _VarianceScreenState extends State<VarianceScreen> {
   void _updateCurrentProduct(int index) {
     setState(() {
       _currentProductIndex = index;
-      _quantityController.text =
-          _productsWithVariance[index].quantiteSaisie.toString();
-      _isNewEntry = true;
+      _quantityController.text = _productsWithVariance[index].quantiteSaisie.toString();
+      _isNewEntry = true; // Signale qu'on vient de charger un nouveau produit
+
+      // Surligne tout le texte pour la sélection visuelle
+      _quantityController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _quantityController.text.length,
+      );
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _quantityFocusNode.requestFocus();
@@ -162,102 +170,127 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 
   void _openQuickEntryDialog(Product product) {
-    final quickQtyController = TextEditingController();
+    final quickQtyController = TextEditingController(text: product.quantiteSaisie.toString());
+    final appConfig = Provider.of<AppConfig>(context, listen: false);
+
+    // Surlignage du texte dès l'ouverture
+    quickQtyController.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: quickQtyController.text.length,
+    );
+    bool isQuickNewEntry = true;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        return AlertDialog(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Correction Rapide',
-                  style: TextStyle(fontSize: 14, color: Colors.grey)),
-              const SizedBox(height: 4),
-              Text(product.produitName,
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold)),
-              Text('CIP: ${product.produitCip}',
-                  style: const TextStyle(fontSize: 14)),
-              const Divider(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Théo: ${product.quantiteInitiale}',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text(
-                      'Écart Actuel: ${product.quantiteSaisie - product.quantiteInitiale}',
-                      style: TextStyle(
-                          color: (product.quantiteSaisie -
-                              product.quantiteInitiale) ==
-                              0
-                              ? Colors.green
-                              : Colors.red,
-                          fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: quickQtyController,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.accent),
-                  decoration: const InputDecoration(
-                    labelText: 'Nouvelle Qté',
-                    border: OutlineInputBorder(),
-                  ),
-                  readOnly: true,
-                  autofocus: true,
-                  showCursor: true,
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 280,
-                  child: NumericKeyboard(
-                    onKeyPressed: (key) {
-                      if (key == 'OK') {
-                        final int qty = int.tryParse(quickQtyController.text) ?? 0;
-                        _applyQuickCorrection(product, qty);
-                        Navigator.of(ctx).pop();
+        return StatefulBuilder(
+            builder: (context, setDialogState) {
 
-                        Future.delayed(const Duration(milliseconds: 100), () {
-                          if (mounted) {
-                            if (_continuousScanMode) {
-                              _searchFocusNode.requestFocus();
+              // Calcul de l'écart en direct
+              int currentQty = int.tryParse(quickQtyController.text) ?? 0;
+              int ecart = currentQty - product.quantiteInitiale;
+
+              Color ecartColor;
+              if (ecart > 0) ecartColor = Colors.green;
+              else if (ecart < 0) ecartColor = Colors.red;
+              else ecartColor = Colors.blue;
+
+              return AlertDialog(
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Correction Rapide', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                    const SizedBox(height: 4),
+                    Text(product.produitName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('CIP: ${product.produitCip}', style: const TextStyle(fontSize: 14)),
+                    const Divider(),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Condition Théo
+                        if (appConfig.showTheoreticalStock)
+                          Text('Théo: ${product.quantiteInitiale}', style: const TextStyle(fontWeight: FontWeight.bold))
+                        else
+                          const Text('Théo: ***', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+
+                        // Écart en direct
+                        Text(
+                            'Écart: ${(ecart > 0) ? "+$ecart" : "$ecart"}',
+                            style: TextStyle(
+                                color: ecartColor,
+                                fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ],
+                ),
+                content: SizedBox(
+                  width: double.maxFinite,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: quickQtyController,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.accent),
+                        decoration: const InputDecoration(labelText: 'Nouvelle Qté', border: OutlineInputBorder()),
+                        readOnly: true,
+                        autofocus: true,
+                        showCursor: true,
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 280,
+                        child: NumericKeyboard(
+                          onKeyPressed: (key) {
+                            if (key == 'OK') {
+                              final int qty = int.tryParse(quickQtyController.text) ?? 0;
+                              _applyQuickCorrection(product, qty);
+                              Navigator.of(ctx).pop();
+
+                              Future.delayed(const Duration(milliseconds: 100), () {
+                                if (mounted) {
+                                  if (_continuousScanMode) {
+                                    _searchFocusNode.requestFocus();
+                                  } else {
+                                    _quantityFocusNode.requestFocus();
+                                  }
+                                }
+                              });
+                            } else if (key == 'DEL') {
+                              setDialogState(() {
+                                if (quickQtyController.text.isNotEmpty) {
+                                  quickQtyController.text = quickQtyController.text.substring(0, quickQtyController.text.length - 1);
+                                }
+                                isQuickNewEntry = false;
+                                // Replace le curseur à la fin
+                                quickQtyController.selection = TextSelection.collapsed(offset: quickQtyController.text.length);
+                              });
                             } else {
-                              _quantityFocusNode.requestFocus();
+                              setDialogState(() {
+                                if (isQuickNewEntry) {
+                                  quickQtyController.text = key;
+                                  isQuickNewEntry = false;
+                                } else {
+                                  quickQtyController.text += key;
+                                }
+                                // Replace le curseur à la fin
+                                quickQtyController.selection = TextSelection.collapsed(offset: quickQtyController.text.length);
+                              });
                             }
-                          }
-                        });
-                      } else if (key == 'DEL') {
-                        if (quickQtyController.text.isNotEmpty) {
-                          quickQtyController.text = quickQtyController.text
-                              .substring(0, quickQtyController.text.length - 1);
-                        }
-                      } else {
-                        quickQtyController.text += key;
-                      }
-                    },
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child:
-                const Text('Annuler', style: TextStyle(color: Colors.red))),
-          ],
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Annuler', style: TextStyle(color: Colors.red))),
+                ],
+              );
+            }
         );
       },
     );
@@ -269,6 +302,12 @@ class _VarianceScreenState extends State<VarianceScreen> {
       if (_productsWithVariance.isNotEmpty &&
           _productsWithVariance[_currentProductIndex].id == product.id) {
         _quantityController.text = newQuantity.toString();
+        // On remet la sélection après la correction rapide si c'était le même produit à l'écran
+        _quantityController.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _quantityController.text.length,
+        );
+        _isNewEntry = true;
       }
     });
 
@@ -323,22 +362,28 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }
   }
 
+  // Comportement de saisie dans l'écran principal
   void _onKeyPressed(String value) {
     if (value == 'DEL') {
-      if (_quantityController.text.isNotEmpty) {
-        _quantityController.text = _quantityController.text
-            .substring(0, _quantityController.text.length - 1);
-      }
-      _isNewEntry = false;
+      setState(() {
+        if (_quantityController.text.isNotEmpty) {
+          _quantityController.text = _quantityController.text.substring(0, _quantityController.text.length - 1);
+        }
+        _isNewEntry = false;
+        _quantityController.selection = TextSelection.collapsed(offset: _quantityController.text.length);
+      });
     } else if (value == 'OK') {
       _updateQuantityAndSend();
     } else {
-      if (_isNewEntry) {
-        _quantityController.text = value;
-        _isNewEntry = false;
-      } else {
-        _quantityController.text += value;
-      }
+      setState(() {
+        if (_isNewEntry) {
+          _quantityController.text = value; // Écrase le texte
+          _isNewEntry = false;
+        } else {
+          _quantityController.text += value; // Ajoute à la suite
+        }
+        _quantityController.selection = TextSelection.collapsed(offset: _quantityController.text.length);
+      });
     }
   }
 
@@ -623,6 +668,17 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 
   Widget buildProductView(Product product) {
+    final appConfig = Provider.of<AppConfig>(context);
+
+    // Calcul de l'écart dynamique basé sur ce qu'il y a dans le champ texte
+    int currentQty = int.tryParse(_quantityController.text) ?? product.quantiteSaisie;
+    int ecart = currentQty - product.quantiteInitiale;
+
+    Color ecartColor;
+    if (ecart > 0) ecartColor = Colors.green;
+    else if (ecart < 0) ecartColor = Colors.red;
+    else ecartColor = Colors.blue;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
       child: Column(
@@ -646,9 +702,22 @@ class _VarianceScreenState extends State<VarianceScreen> {
             ),
           ),
           const SizedBox(height: 10),
-          Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Stock Théorique: ${product.quantiteInitiale}')),
+
+          // Théo & Écart
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              if (appConfig.showTheoreticalStock)
+                Text('Stock Théorique: ${product.quantiteInitiale}', style: const TextStyle(fontWeight: FontWeight.bold))
+              else
+                const Text('Stock Théorique: ***', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+
+              Text('Écart: ${(ecart > 0) ? "+$ecart" : "$ecart"}',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: ecartColor)
+              ),
+            ],
+          ),
+
           const SizedBox(height: 20),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
