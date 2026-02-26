@@ -287,18 +287,29 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       return;
     }
 
-    final ValueNotifier<String> progressNotifier = ValueNotifier('Préparation...');
+    final ValueNotifier<String> progressNotifier = ValueNotifier('Connexion au serveur...');
     showProgressDialog(context, progressNotifier);
 
     int unsyncedCount = provider.allProducts.where((p) => !p.isSynced).length;
 
-    await provider.sendDataToServer(_apiService, widget.inventoryId, (int current, int total) {
+    // On récupère le nombre exact de succès
+    int successCount = await provider.sendDataToServer(_apiService, widget.inventoryId, (int current, int total) {
       progressNotifier.value = 'Envoi... ($current/$total)';
     });
 
-    progressNotifier.value = '$unsyncedCount article(s) traité(s).';
+    // On adapte le message final en fonction du résultat
+    if (successCount == unsyncedCount) {
+      progressNotifier.value = '✅ $successCount article(s) traité(s) avec succès.';
+    } else if (successCount > 0) {
+      progressNotifier.value = '⚠️ Réseau instable : $successCount/$unsyncedCount envoyé(s).';
+    } else {
+      progressNotifier.value = '❌ Échec : Vérifiez votre connexion au serveur.';
+    }
+
     _sendReminderTimer?.cancel();
-    await Future.delayed(const Duration(seconds: 2));
+
+    // On laisse le message affiché 2.5 secondes pour que l'utilisateur puisse lire l'erreur
+    await Future.delayed(const Duration(milliseconds: 2500));
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -375,7 +386,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         _apiService
             .updateProductQuantity(productToUpdate.id, quantityToSave)
             .then((_) {
-          provider.markAsConfirmedFromServer(productToUpdate.id);
+          // LA CORRECTION EST ICI : On passe l'inventoryId pour nettoyer le cache
+          provider.markAsConfirmedFromServer(productToUpdate.id, widget.inventoryId);
         })
             .catchError((e) {
           if (mounted) _showNotification('Erreur réseau.', Colors.red);
@@ -862,7 +874,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       _apiService
           .updateProductQuantity(product.id, quantity)
           .then((_) {
-        provider.markAsSynced(product.id, widget.inventoryId);
+        // LA CORRECTION EST ICI AUSSI pour le scan direct
+        provider.markAsConfirmedFromServer(product.id, widget.inventoryId);
       })
           .catchError((e) {
         print("Erreur sync direct scan: $e");
@@ -1596,7 +1609,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         ]),
         const SizedBox(height: 8),
 
-        // --- NOUVEAU BLOC : STOCK THÉORIQUE ET QUANTITÉ SAISIE ---
+        // --- BLOC : STOCK THÉORIQUE ET QUANTITÉ SAISIE ---
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [

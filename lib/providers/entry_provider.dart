@@ -144,10 +144,12 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
-  void markAsConfirmedFromServer(int productId) {
+  void markAsConfirmedFromServer(int productId, String inventoryId) {
     final index = _allProducts.indexWhere((p) => p.id == productId);
     if (index != -1) {
       _allProducts[index].isSynced = true;
+      // LA CORRECTION EST ICI : On met à jour le fichier de secours local pour effacer le fantôme
+      _saveUnsyncedData(inventoryId);
       notifyListeners();
     }
   }
@@ -372,22 +374,31 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
-  Future<void> sendDataToServer(ApiService api, String inventoryId, [Function(int, int)? onProgress]) async {
+  Future<int> sendDataToServer(ApiService api, String inventoryId, [Function(int, int)? onProgress]) async {
     List<Product> unsynced = _allProducts.where((p) => !p.isSynced).toList();
     int total = unsynced.length;
-    if (total == 0) return;
+    int successCount = 0; // NOUVEAU : On compte les vrais succès
+
+    if (total == 0) return 0;
+
     for (int i = 0; i < total; i++) {
       try {
         await api.updateProductQuantity(unsynced[i].id, unsynced[i].quantiteSaisie);
+        // Ces lignes ne s'exécutent QUE si le serveur a répondu OK
         unsynced[i].isSynced = true;
         _locallyTouchedProductIds.add(unsynced[i].id);
-        onProgress?.call(i + 1, total);
+        successCount++;
+        onProgress?.call(successCount, total);
       } catch (e) {
-        print("Error syncing: $e");
+        print("Erreur réseau détectée : $e");
+        break; // NOUVEAU : On stoppe la boucle si le réseau est coupé !
       }
     }
+
     await _saveUnsyncedData(inventoryId);
     notifyListeners();
+
+    return successCount; // On renvoie le vrai nombre de produits envoyés
   }
 
   void reset() {
