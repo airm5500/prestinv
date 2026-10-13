@@ -2,6 +2,8 @@
 // Cette version garantit que chaque test est indépendant et teste des scénarios réalistes,
 // y compris la synchronisation des données avec le serveur.
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -10,6 +12,7 @@ import 'package:prestinv/main.dart'; // Importe PrestinvApp
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/providers/inventory_provider.dart';
+import 'package:prestinv/providers/license_provider.dart';
 import 'package:prestinv/screens/home_screen.dart';
 import 'package:prestinv/screens/inventory_entry_screen.dart';
 import 'package:prestinv/screens/inventory_list_screen.dart';
@@ -20,6 +23,28 @@ import 'package:prestinv/screens/variance_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// Identifiants et serveur de test : JAMAIS dans le code. À fournir au lancement, par exemple :
+//   flutter test integration_test --dart-define=PRESTINV_TEST_LOGIN=admin \
+//     --dart-define=PRESTINV_TEST_PASSWORD=... --dart-define=PRESTINV_TEST_HOST=192.168.1.7
+// (ou variables d'environnement du même nom sur la machine qui lance les tests).
+String _param(String nom, String defaut) {
+      const fromDefine = {
+            'PRESTINV_TEST_LOGIN': String.fromEnvironment('PRESTINV_TEST_LOGIN'),
+            'PRESTINV_TEST_PASSWORD': String.fromEnvironment('PRESTINV_TEST_PASSWORD'),
+            'PRESTINV_TEST_HOST': String.fromEnvironment('PRESTINV_TEST_HOST'),
+            'PRESTINV_TEST_PORT': String.fromEnvironment('PRESTINV_TEST_PORT'),
+      };
+      final v = fromDefine[nom] ?? '';
+      if (v.isNotEmpty) return v;
+      return Platform.environment[nom] ?? defaut;
+}
+
+final String _testLogin = _param('PRESTINV_TEST_LOGIN', 'admin');
+final String _testPassword = _param('PRESTINV_TEST_PASSWORD', '');
+final String _testHost = _param('PRESTINV_TEST_HOST', '');
+final String _testPort = _param('PRESTINV_TEST_PORT', '8080');
+final bool _sansServeur = _testPassword.isEmpty || _testHost.isEmpty;
+
 // Helper function pour la connexion
 Future<void> login(WidgetTester tester) async {
       print('--- DÉBUT: Procédure de Connexion ---');
@@ -27,8 +52,8 @@ Future<void> login(WidgetTester tester) async {
 
       expect(find.byType(LoginScreen), findsOneWidget);
 
-      await tester.enterText(find.widgetWithText(TextField, 'Identifiant'), 'admin');
-      await tester.enterText(find.widgetWithText(TextField, 'Mot de passe'), 'dcph1995');
+      await tester.enterText(find.widgetWithText(TextField, 'Identifiant'), _testLogin);
+      await tester.enterText(find.widgetWithText(TextField, 'Mot de passe'), _testPassword);
 
       await tester.tap(find.text('CONNEXION'));
 
@@ -48,10 +73,10 @@ Future<void> launchApp(WidgetTester tester) async {
 
       // Configuration de l'IP du serveur pour le test
       appConfig.setApiConfig(
-            localAddress: "192.168.1.7",
-            localPort: "8080",
-            distantAddress: "192.168.1.7",
-            distantPort: "8080",
+            localAddress: _testHost,
+            localPort: _testPort,
+            distantAddress: _testHost,
+            distantPort: _testPort,
       );
 
       await tester.pumpWidget(
@@ -61,6 +86,7 @@ Future<void> launchApp(WidgetTester tester) async {
                         ChangeNotifierProvider.value(value: authProvider),
                         ChangeNotifierProvider(create: (_) => InventoryProvider()),
                         ChangeNotifierProvider(create: (_) => EntryProvider()),
+                        ChangeNotifierProvider(create: (_) => LicenseProvider()),
                   ],
                   child: const PrestinvApp(),
             ),
@@ -71,7 +97,7 @@ Future<void> launchApp(WidgetTester tester) async {
 void main() {
       IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-      group('Suite de Tests Complets de Prestinv', () {
+      group('Suite de Tests Complets de Prestinv', skip: _sansServeur ? 'PRESTINV_TEST_PASSWORD / PRESTINV_TEST_HOST non fournis' : null, () {
 
             // --- TEST N°1 : FLUX PRINCIPAL ---
             testWidgets('Flux principal : de la connexion à la saisie', (tester) async {
