@@ -8,6 +8,7 @@ import 'package:prestinv/screens/config_screen.dart';
 import 'package:prestinv/interface_version.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:prestinv/services/identifiants_securises.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -34,7 +35,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (authProvider.rememberMe) {
       _loginController.text = prefs.getString('savedLogin') ?? '';
-      _passwordController.text = prefs.getString('savedPassword') ?? '';
+      // Mot de passe lu dans le stockage sécurisé (migré depuis l'ancienne clé en clair).
+      final motDePasse = await IdentifiantsSecurises.instance.lire();
+      if (!mounted) return;
+      _passwordController.text = motDePasse ?? '';
     }
   }
 

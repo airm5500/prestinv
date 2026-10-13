@@ -1,6 +1,7 @@
 // lib/screens/inventory_entry_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:prestinv/utils/journal.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prestinv/api/api_service.dart';
@@ -133,7 +134,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           try {
             await downloadDir.create(recursive: true);
           } catch (e) {
-            print("Err create dir: $e");
+            journal("Err create dir: $e");
           }
         }
 
@@ -154,7 +155,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               await file.writeAsString(csvContent.toString());
               saveSuccess = true;
             } catch (e2) {
-              print("Echec permissions: $e2");
+              journal("Echec permissions: $e2");
             }
           }
         }

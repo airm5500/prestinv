@@ -3,6 +3,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:prestinv/utils/journal.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -253,7 +254,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
           try {
             await downloadDir.create(recursive: true);
           } catch(e) {
-            print("Impossible de créer le dossier Download: $e");
+            journal("Impossible de créer le dossier Download: $e");
           }
         }
 
@@ -267,7 +268,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
           await file.writeAsString(csvContent.toString());
           saveSuccess = true;
         } catch (e) {
-          print("Échec écriture directe, tentative avec permission... ($e)");
+          journal("Échec écriture directe, tentative avec permission... ($e)");
 
           // TENTATIVE 2 : Demande de permission classique (Android 10 et moins)
           var status = await Permission.storage.status;
@@ -280,7 +281,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
               await file.writeAsString(csvContent.toString());
               saveSuccess = true;
             } catch (e2) {
-              print("Échec après permission: $e2");
+              journal("Échec après permission: $e2");
             }
           }
         }

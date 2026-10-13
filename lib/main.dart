@@ -14,6 +14,7 @@ import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
 import 'package:prestinv/saisie/saisie_store.dart';
+import 'package:prestinv/services/identifiants_securises.dart';
 
 // --- IMPORTS PROVIDERS ---
 import 'package:prestinv/providers/auth_provider.dart';
@@ -34,6 +35,9 @@ void main() async {
   final appConfig = AppConfig();
   await appConfig.load();
   await InterfaceVersion.load();
+
+  // Mot de passe mémorisé : migration silencieuse de l'ancienne clé en clair vers le stockage sécurisé.
+  await IdentifiantsSecurises.instance.migrer();
 
   final authProvider = AuthProvider();
 

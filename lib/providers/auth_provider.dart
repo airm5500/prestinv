@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/user.dart';
+import 'package:prestinv/services/identifiants_securises.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthProvider with ChangeNotifier {
@@ -65,13 +66,15 @@ class AuthProvider with ChangeNotifier {
           _isLoggedIn = true;
           _parseAndSetCookie(response);
 
+          // « Rester connecté » : identifiant dans les préférences, mot de passe dans le stockage
+          // SÉCURISÉ (plus jamais en clair). Le cookie de session reste en mémoire seulement.
           final prefs = await SharedPreferences.getInstance();
           if (_rememberMe) {
             await prefs.setString('savedLogin', login);
-            await prefs.setString('savedPassword', password);
+            await IdentifiantsSecurises.instance.ecrire(password);
           } else {
             await prefs.remove('savedLogin');
-            await prefs.remove('savedPassword');
+            await IdentifiantsSecurises.instance.effacer();
           }
 
           _isLoading = false;
@@ -110,7 +113,7 @@ class AuthProvider with ChangeNotifier {
     await prefs.setBool('rememberMe', value);
     if (!value) {
       await prefs.remove('savedLogin');
-      await prefs.remove('savedPassword');
+      await IdentifiantsSecurises.instance.effacer();
     }
     notifyListeners();
   }
@@ -135,7 +138,7 @@ class AuthProvider with ChangeNotifier {
     await prefs.remove('sessionCookie');
     if (!rememberMe) {
       await prefs.remove('savedLogin');
-      await prefs.remove('savedPassword');
+      await IdentifiantsSecurises.instance.effacer();
     }
 
     notifyListeners();
