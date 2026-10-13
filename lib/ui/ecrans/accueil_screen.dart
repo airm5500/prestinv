@@ -520,7 +520,8 @@ class _CarteEnCours extends StatelessWidget {
                   side: const BorderSide(color: Colors.white54),
                   minimumSize: const Size(48, 48),
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5),
+                  // Style du thème (police de l'application), seulement plus gras.
+                  textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontWeight: FontWeight.w600, fontSize: 14.5),
                 ),
                 onPressed: calculAilleurs ? null : onActualiser,
                 icon: const Icon(Icons.refresh, size: 20),
@@ -569,7 +570,7 @@ class _ProgressionAvancement extends StatelessWidget {
         const SizedBox(width: 12),
         TextButton(
           key: const ValueKey('nv-annuler-avancement'),
-          style: TextButton.styleFrom(foregroundColor: Colors.white, minimumSize: const Size(48, 48), textStyle: const TextStyle(fontWeight: FontWeight.w600)),
+          style: TextButton.styleFrom(foregroundColor: Colors.white, minimumSize: const Size(48, 48), textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontWeight: FontWeight.w600)),
           onPressed: onAnnuler,
           child: const Text('Annuler'),
         ),

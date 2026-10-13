@@ -355,7 +355,9 @@ class CadreScan extends StatelessWidget {
   Widget build(BuildContext context) {
     final nv = context.nv;
     final theme = Theme.of(context);
-    final sansBord = OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none);
+    // Bord « souligné » invisible (et non « contour ») : le libellé flottant reste DANS le cadre vert au
+    // lieu d'être posé à cheval sur sa bordure (il la barrait).
+    const sansBord = UnderlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide.none);
     return Container(
       decoration: BoxDecoration(
         color: nv.scan.bg,
@@ -372,7 +374,7 @@ class CadreScan extends StatelessWidget {
             enabledBorder: sansBord,
             focusedBorder: sansBord,
             labelStyle: TextStyle(color: nv.scan.fg, fontWeight: FontWeight.bold),
-            floatingLabelStyle: TextStyle(color: nv.scan.fg, fontWeight: FontWeight.bold),
+            floatingLabelStyle: TextStyle(color: nv.scan.fg, fontWeight: FontWeight.bold, fontSize: 13.5),
             prefixIconColor: nv.scan.fg,
             suffixIconColor: nv.scan.fg,
           ),
