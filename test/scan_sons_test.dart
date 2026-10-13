@@ -6,11 +6,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/scan/retour_scan.dart';
 import 'package:prestinv/screens/config_screen.dart';
+import 'package:prestinv/screens/inventory_entry_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'helpers/banc_essai.dart';
+import 'helpers/douchette_essai.dart';
 
 void main() {
+  setUp(reinitialiserDouchette);
+
   test('RetourScan : le son et la vibration suivent les réglages', () async {
     final f = installerFauxRetour();
     await RetourScan.jouer(TypeRetour.succes, son: true, vibration: true);
@@ -24,6 +28,72 @@ void main() {
   test('RetourScan : un lecteur en panne ne gêne jamais la saisie', () async {
     RetourScan.lecteur = _LecteurEnPanne();
     await RetourScan.jouer(TypeRetour.erreur, son: true, vibration: true); // ne lève pas
+  });
+
+  testWidgets('scan : trouvé = bip court, déjà compté = double bip, introuvable = bip long', (tester) async {
+    ecranTerminal(tester);
+    final f = installerFauxRetour();
+    final b = await preparerBanc(mode: SendMode.collect);
+    b.serveur.produits[1]
+      ..saisi = 6
+      ..dtUpdated = '2026-10-13T08:55:00'; // compté par un collègue
+    await tester.pumpWidget(monter(b, const InventoryEntryScreen(inventoryId: 'INV1', isQuickMode: true)));
+    await tester.pumpAndSettle();
+
+    await douchette(tester, b.serveur.produits[0].cip);
+    await tester.pumpAndSettle();
+    expect(f.bips.last, 'succes');
+    await tester.tap(find.text('Annuler'));
+    await tester.pumpAndSettle();
+
+    await douchette(tester, b.serveur.produits[1].cip);
+    await tester.pumpAndSettle();
+    expect(f.bips.last, 'dejaCompte');
+    expect(find.textContaining('Déjà compté : 6'), findsOneWidget);
+    await tester.tap(find.text('Annuler'));
+    await tester.pumpAndSettle();
+
+    await douchette(tester, '1111111111111');
+    await tester.pumpAndSettle();
+    expect(f.bips.last, 'erreur');
+    expect(f.vibrations, ['succes', 'dejaCompte', 'erreur']);
+    await demonter(tester);
+  });
+
+  testWidgets('déjà compté + cumul activé : double bip puis la question « Additionner ? » (inchangée)', (tester) async {
+    ecranTerminal(tester);
+    final f = installerFauxRetour();
+    final b = await preparerBanc(mode: SendMode.collect, cumul: true);
+    b.serveur.produits[2]
+      ..saisi = 6
+      ..dtUpdated = '2026-10-13T08:55:00';
+    await tester.pumpWidget(monter(b, const InventoryEntryScreen(inventoryId: 'INV1', isQuickMode: true)));
+    await tester.pumpAndSettle();
+    await douchette(tester, b.serveur.produits[2].cip);
+    await tester.pumpAndSettle();
+    expect(f.bips.last, 'dejaCompte');
+    expect(find.textContaining('Remplacer ou Ajouter vous sera demandé'), findsOneWidget);
+    await taperQuantite(tester, '4');
+    await tester.pumpAndSettle();
+    expect(find.text('⚠️ Déjà compté'), findsOneWidget);
+    await tester.tap(find.text('OUI (Additionner)'));
+    await tester.pumpAndSettle();
+    expect(b.disque.saisies.single.quantite, 10);
+    await demonter(tester);
+  });
+
+  testWidgets('son coupé dans les réglages : plus aucun bip, la vibration reste', (tester) async {
+    ecranTerminal(tester);
+    final f = installerFauxRetour();
+    final b = await preparerBanc(mode: SendMode.collect, prefsEnPlus: {'scanSon': false});
+    expect(b.config.sonScan, isFalse);
+    await tester.pumpWidget(monter(b, const InventoryEntryScreen(inventoryId: 'INV1', isQuickMode: true)));
+    await tester.pumpAndSettle();
+    await douchette(tester, '1111111111111');
+    await tester.pumpAndSettle();
+    expect(f.bips, isEmpty);
+    expect(f.vibrations, ['erreur']);
+    await demonter(tester);
   });
 
   testWidgets('Configuration : couper le son et la vibration, quantité proposée — enregistrés', (tester) async {
@@ -59,21 +129,6 @@ void main() {
     expect(relu.quantiteScanDefaut, isNull);
     await demonter(tester);
   });
-}
-
-class FauxLecteurRetour implements LecteurRetour {
-  final List<String> bips = [];
-  final List<String> vibrations = [];
-  @override
-  Future<void> bip(TypeRetour type) async => bips.add(type.name);
-  @override
-  Future<void> vibrer(TypeRetour type) async => vibrations.add(type.name);
-}
-
-FauxLecteurRetour installerFauxRetour() {
-  final f = FauxLecteurRetour();
-  RetourScan.lecteur = f;
-  return f;
 }
 
 class _LecteurEnPanne implements LecteurRetour {

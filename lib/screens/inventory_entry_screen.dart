@@ -23,6 +23,13 @@ import 'package:prestinv/saisie/saisie_serveur.dart';
 import 'package:prestinv/utils/saisie_input.dart';
 import 'package:prestinv/widgets/chargement_erreur.dart';
 import 'package:prestinv/widgets/reconnexion.dart';
+import 'package:prestinv/saisie/saisie.dart';
+import 'package:prestinv/scan/champ_douchette.dart';
+import 'package:prestinv/scan/code_scan.dart';
+import 'package:prestinv/scan/douchette.dart';
+import 'package:prestinv/scan/file_scans.dart';
+import 'package:prestinv/scan/journal_scans.dart';
+import 'package:prestinv/scan/retour_scan.dart';
 
 import 'dart:io';
 import 'package:intl/intl.dart';
@@ -41,7 +48,7 @@ class InventoryEntryScreen extends StatefulWidget {
   State<InventoryEntryScreen> createState() => _InventoryEntryScreenState();
 }
 
-class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
+class _InventoryEntryScreenState extends State<InventoryEntryScreen> with DouchetteCibleMixin {
   final _quantityController = TextEditingController();
   final _quantityFocusNode = FocusNode();
   int? _lastDisplayedProductId;
@@ -62,6 +69,22 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   /// OK en cours de traitement : un second appui est ignoré (double appui = produit sauté / cumul doublé).
   bool _validationEnCours = false;
 
+  // --- Douchette toujours prête (étape 3) ---
+  /// Codes scannés en attente de traitement (rafales : aucun perdu).
+  late final FileScans _fileScans;
+
+  /// Fenêtre de quantité ouverte (les scans continuent d'arriver dans la file).
+  bool _feuilleOuverte = false;
+
+  /// Clavier à l'écran affiché dans le champ de scan (recherche par nom).
+  bool _clavierTexte = false;
+
+  /// Codes lus sans saisie (introuvables, recherche impossible) : journal « à vérifier ».
+  final List<ScanSansSaisie> _sansSaisie = [];
+
+  /// Produits trouvés par scan (prix, stock… pour corriger une saisie depuis le journal).
+  final Map<int, Product> _produitsVus = {};
+
   @override
   void initState() {
     super.initState();
@@ -70,11 +93,24 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
         cookie: () => authProvider.sessionCookie);
 
+    // Le pavé numérique ne se cache que si le clavier à l'écran est affiché (recherche par nom) :
+    // le champ de scan garde le focus en permanence sans le masquer.
     _searchFocusNode.addListener(() {
+      if (!mounted) return;
       setState(() {
-        _isSearching = _searchFocusNode.hasFocus;
+        _isSearching = _searchFocusNode.hasFocus && _clavierTexte;
       });
     });
+
+    _fileScans = FileScans(traiter: _traiterCode, pret: _pretPourScan);
+    brancherDouchette(CibleDouchette(
+      active: () => mounted && (_routeCourante || _feuilleOuverte),
+      onCode: _recevoirCode,
+      onChiffres: widget.isQuickMode ? null : (t) => t.split('').forEach(_onKeyPressed),
+      onEffacer: widget.isQuickMode ? null : () => _onKeyPressed('DEL'),
+      onValider: widget.isQuickMode ? null : () => _onKeyPressed('OK'),
+      onToucheScan: _reprendreFocusScan,
+    ));
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -89,8 +125,173 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     });
   }
 
+  bool get _routeCourante => ModalRoute.of(context)?.isCurrent ?? true;
+
+  /// Le champ de scan reprend le focus (après OK, après une fenêtre, après une erreur).
+  void _reprendreFocusScan() {
+    if (!mounted) return;
+    if (_searchFocusNode.canRequestFocus) _searchFocusNode.requestFocus();
+  }
+
+  /// Le code suivant peut être traité : écran au premier plan, aucune validation en cours.
+  bool _pretPourScan() => mounted && _routeCourante && !_validationEnCours && !_feuilleOuverte;
+
+  /// Code lu par la douchette (ou validé dans le champ de scan) : mis en file, traité dans l'ordre.
+  void _recevoirCode(String code) {
+    final c = CodeScan.nettoyer(code);
+    if (c.isEmpty) return;
+    _fileScans.ajouter(c);
+  }
+
+  void _retour(TypeRetour type) {
+    final config = Provider.of<AppConfig>(context, listen: false);
+    RetourScan.jouer(type, son: config.sonScan, vibration: config.vibrationScan);
+  }
+
+  void _noterSansSaisie(String code, String raison, {bool aRelancer = false}) {
+    setState(() {
+      _sansSaisie.add(ScanSansSaisie(code, DateTime.now(), raison, aRelancer: aRelancer));
+      if (_sansSaisie.length > 50) _sansSaisie.removeAt(0);
+    });
+  }
+
+  /// Traite UN code scanné : recherche dans l'inventaire (variantes du code), puis fenêtre de quantité.
+  /// Introuvable ou erreur : message clair + bip long, la file continue avec le code suivant.
+  Future<void> _traiterCode(String code) async {
+    final provider = Provider.of<EntryProvider>(context, listen: false);
+    if (!widget.isQuickMode && provider.selectedRayon == null) {
+      _retour(TypeRetour.erreur);
+      _showNotification('Choisissez d\'abord un emplacement.', Colors.red);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Code lu : choisissez d\'abord un emplacement.'), backgroundColor: Colors.red));
+      return;
+    }
+    final candidats = CodeScan.candidats(code);
+    if (candidats.isEmpty) return;
+    Product? exact;
+    final possibles = <int, Product>{};
+    try {
+      for (final c in candidats) {
+        final r = await provider.searchProductOnline(_apiService, widget.inventoryId, c);
+        if (!mounted) return;
+        final memeCode = r.where((p) => p.produitCip.trim() == c).toList();
+        if (memeCode.length == 1) {
+          exact = memeCode.first;
+          break;
+        }
+        // Un seul produit pour ce code (EAN reconnu par le serveur) : c'est lui.
+        if (r.length == 1) {
+          exact = r.first;
+          break;
+        }
+        for (final p in r) {
+          possibles[p.id] = p;
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _retour(TypeRetour.erreur);
+      _noterSansSaisie(code, 'recherche impossible (${estSessionExpiree(e) ? 'session expirée' : 'réseau'}) — toucher pour relancer', aRelancer: true);
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Code lu : ${CodeScan.affichage(code)} — ${messageErreur(e)}'),
+          backgroundColor: Colors.red,
+          action: estSessionExpiree(e)
+              ? SnackBarAction(label: 'Se reconnecter', textColor: Colors.white, onPressed: () => demanderReconnexion(context))
+              : null));
+      _reprendreFocusScan();
+      return;
+    }
+    if (!mounted) return;
+    if (exact == null && possibles.isNotEmpty) {
+      exact = await _choisirParmi(code, possibles.values.toList());
+      if (!mounted) return;
+      if (exact == null) {
+        _reprendreFocusScan();
+        return;
+      }
+    }
+    if (exact == null) {
+      _retour(TypeRetour.erreur);
+      final message = widget.isQuickMode
+          ? CodeScan.messageIntrouvable(code)
+          : 'Code lu : ${CodeScan.affichage(code)} — introuvable dans cet emplacement';
+      _noterSansSaisie(code, widget.isQuickMode ? 'pas dans cet inventaire' : 'pas dans cet emplacement');
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          key: const ValueKey('code-introuvable'), content: Text(message), backgroundColor: Colors.red, duration: const Duration(seconds: 3)));
+      _reprendreFocusScan();
+      return;
+    }
+    await _ouvrirProduitScanne(exact);
+  }
+
+  /// Plusieurs produits pour un code : l'opérateur choisit (la file attend).
+  Future<Product?> _choisirParmi(String code, List<Product> produits) {
+    _retour(TypeRetour.dejaCompte);
+    return showDialog<Product>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text('Code ${CodeScan.affichage(code)} : plusieurs produits', maxLines: 2, overflow: TextOverflow.ellipsis),
+        children: [
+          for (final p in produits.take(20))
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(ctx).pop(p),
+              child: Text('${p.produitCip} — ${p.produitName}', maxLines: 2, overflow: TextOverflow.ellipsis),
+            ),
+          SimpleDialogOption(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annuler', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+  }
+
+  /// Quantité déjà comptée connue sans requête : saisie gardée sur l'appareil, sinon date de comptage
+  /// renvoyée par le serveur avec le produit.
+  int? _dejaCompteConnu(Product p) {
+    final locale = _queue?.ligne(widget.inventoryId, p.id);
+    if (locale != null) return locale.quantite;
+    if (p.dtUpdated != null) return p.quantiteSaisie;
+    return null;
+  }
+
+  Future<void> _ouvrirProduitScanne(Product p) async {
+    _produitsVus[p.id] = p;
+    final deja = _dejaCompteConnu(p);
+    _retour(deja != null ? TypeRetour.dejaCompte : TypeRetour.succes);
+    _searchController.clear();
+    if (_showSearchResults) {
+      setState(() {
+        _showSearchResults = false;
+        _filteredProducts = [];
+      });
+    }
+    await _openQuickEntryDialog(p, dejaCompte: deja);
+  }
+
+  /// Correction rapide d'une saisie du journal (la quantité saisie remplace la précédente).
+  Future<void> _corrigerSaisie(SaisieLigne s) async {
+    if (_fileScans.occupe || _feuilleOuverte) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Patientez : un scan est en cours de traitement.')));
+      return;
+    }
+    final p = _produitsVus[s.ligneId] ??
+        Product(
+          id: s.ligneId,
+          produitCip: s.cip,
+          produitName: s.nom,
+          produitPrixAchat: 0,
+          produitPrixUni: 0,
+          quantiteInitiale: 0,
+          quantiteSaisie: s.quantite,
+          locationLabel: s.rayonLibelle,
+        );
+    await _openQuickEntryDialog(p, correction: s.quantite);
+    _fileScans.relancer();
+  }
+
   @override
   void dispose() {
+    _fileScans.dispose();
     _quantityController.dispose();
     _quantityFocusNode.dispose();
     _notificationTimer?.cancel();
@@ -369,6 +570,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       await _validerEtAvancer();
     } finally {
       _validationEnCours = false;
+      _reprendreFocusScan();
+      _fileScans.relancer();
     }
   }
 
@@ -458,7 +661,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       } else {
         provider.nextProduct(widget.inventoryId);
         _quantityController.clear();
-        _quantityFocusNode.requestFocus();
+        // Le champ de scan garde le focus : un scan juste après OK n'est plus perdu (avant, le focus
+        // allait au champ Quantité en lecture seule, qui ignorait la douchette).
+        _reprendreFocusScan();
       }
     }
 
@@ -642,7 +847,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               .fetchProducts(_apiService, widget.inventoryId, newValue.id)
               .then((_) {
             _resetSendReminderTimer();
-            if (mounted) _searchFocusNode.requestFocus();
+            _reprendreFocusScan();
           });
         }
       }
@@ -688,7 +893,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         });
         if (!fromTyping) {
           if (onlineMatches.length == 1) {
-            _openQuickEntryDialog(onlineMatches.first);
+            _ouvrirProduitScanne(onlineMatches.first);
             _searchController.clear();
             setState(() {
               _showSearchResults = false;
@@ -719,135 +924,243 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
-  void _openQuickEntryDialog(Product product) {
-    final quickQtyController = TextEditingController();
+  /// Fenêtre de quantité après un scan (ou une correction depuis le journal).
+  /// - [dejaCompte] : quantité déjà comptée connue (affichée ; la question Remplacer / Ajouter reste
+  ///   celle du réglage « Cumul », inchangée) ;
+  /// - [correction] : quantité actuelle de la saisie corrigée (elle est remplacée, sans question) ;
+  /// - quantité proposée : réglage « Quantité proposée après un scan » (1 par défaut) ; elle est
+  ///   remplacée dès qu'on tape un chiffre ; bornes 0 à 99 999 ;
+  /// - clavier physique / douchette : chiffres, Retour arrière, Entrée = OK ; un code scanné pendant
+  ///   que la fenêtre est ouverte attend son tour dans la file (jamais perdu).
+  /// Se termine quand la fenêtre est fermée.
+  Future<void> _openQuickEntryDialog(Product product, {int? dejaCompte, int? correction}) async {
     final appConfig = Provider.of<AppConfig>(context, listen: false);
     final provider = Provider.of<EntryProvider>(context, listen: false);
+    final proposee = correction ?? appConfig.quantiteScanDefaut;
+    final quickQtyController = TextEditingController(text: proposee?.toString() ?? '');
+    // Valeur proposée : remplacée par le premier chiffre tapé.
+    final estProposee = ValueNotifier<bool>(proposee != null);
+    final catcherController = TextEditingController();
+    final catcherFocus = FocusNode();
     // OK verrouillé pendant le traitement (double appui = cumul proposé deux fois).
     var okEnCours = false;
+    var ouverte = true;
+    BuildContext? dialogCtx;
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          title: _buildQuickDialogTitle(product, appConfig),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                    controller: quickQtyController,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.accent),
-                    decoration: const InputDecoration(
-                        labelText: 'Quantité', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.none,
-                    readOnly: true,
-                    autofocus: true,
-                    showCursor: true),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 280,
-                  child: NumericKeyboard(
-                    onKeyPressed: (key) async {
-                      if (key == 'OK') {
-                        if (okEnCours) return;
-                        final int? saisie = SaisieInput.parseQuantite(quickQtyController.text);
-                        if (saisie == null) return;
-                        okEnCours = true;
-                        int inputQty = saisie;
-                        int finalQty = inputQty;
+    void poser(String texte) {
+      quickQtyController.text = texte;
+      estProposee.value = false;
+    }
 
-                        if (appConfig.isCumulEnabled) {
-                          // P2 : un échec de la vérification ne veut JAMAIS dire « jamais compté ».
-                          final verif = await _verifierDejaCompte(ctx, product);
-                          if (!verif.ok) {
-                            okEnCours = false;
-                            return; // rien n'est enregistré, la fenêtre reste ouverte
-                          }
-                          final int? existingQty = verif.quantite;
-                          {
-                            if (existingQty != null) {
-                              bool? shouldCumulate = await showDialog<bool>(
-                                context: ctx,
-                                builder: (BuildContext context) {
-                                  return AlertDialog(
-                                    title: const Text("⚠️ Déjà compté"),
-                                    backgroundColor: const Color(0xFFFFF3CD),
-                                    content: _buildCumulContent(
-                                        product.produitName,
-                                        existingQty,
-                                        inputQty),
-                                    actions: [
-                                      TextButton(
-                                          child: const Text("NON (Écraser)",
-                                              style: TextStyle(
-                                                  color: Colors.red)),
-                                          onPressed: () => Navigator.of(context)
-                                              .pop(false)),
-                                      ElevatedButton(
-                                          style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.blue,
-                                              foregroundColor: Colors.white),
-                                          child:
-                                          const Text("OUI (Additionner)"),
-                                          onPressed: () => Navigator.of(context)
-                                              .pop(true)),
-                                    ],
-                                  );
-                                },
-                              );
-                              if (shouldCumulate == true) {
-                                finalQty = existingQty + inputQty;
-                                provider.addCumulLog(
-                                    product, existingQty, inputQty);
-                              }
-                            }
-                          }
-                        }
+    Future<void> valider(BuildContext ctx) async {
+      if (okEnCours) return;
+      final erreur = SaisieInput.erreurQuantite(quickQtyController.text);
+      if (erreur != null) {
+        _retour(TypeRetour.erreur);
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erreur), backgroundColor: Colors.orange));
+        return;
+      }
+      final int saisie = SaisieInput.parseQuantite(quickQtyController.text)!;
+      okEnCours = true;
+      try {
+        int inputQty = saisie;
+        int finalQty = inputQty;
 
-                        // Enregistrée sur l'appareil AVANT de fermer la fenêtre.
-                        final enregistre = await _saveScannedQuantity(product, finalQty);
-                        okEnCours = false;
-                        if (!enregistre) return;
-                        if (!ctx.mounted) return;
-                        Navigator.of(ctx).pop();
-                        _searchController.clear();
-                        setState(() {
-                          _showSearchResults = false;
-                          _filteredProducts = [];
-                        });
-                        Future.delayed(const Duration(milliseconds: 100), () {
-                          if (mounted) _searchFocusNode.requestFocus();
-                        });
-                      } else if (key == 'DEL') {
-                        if (quickQtyController.text.isNotEmpty) {
-                          quickQtyController.text = quickQtyController.text
-                              .substring(0, quickQtyController.text.length - 1);
-                        }
-                      } else {
-                        quickQtyController.text = SaisieInput.ajouterChiffre(quickQtyController.text, key);
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child:
-                const Text('Annuler', style: TextStyle(color: Colors.red))),
-          ],
-        );
+        if (appConfig.isCumulEnabled && correction == null) {
+          // P2 : un échec de la vérification ne veut JAMAIS dire « jamais compté ».
+          final verif = await _verifierDejaCompte(ctx, product);
+          if (!verif.ok) return; // rien n'est enregistré, la fenêtre reste ouverte
+          final int? existingQty = verif.quantite;
+          if (existingQty != null && ctx.mounted) {
+            bool? shouldCumulate = await showDialog<bool>(
+              context: ctx,
+              builder: (BuildContext context) {
+                return AlertDialog(
+                  title: const Text("⚠️ Déjà compté"),
+                  backgroundColor: const Color(0xFFFFF3CD),
+                  content: _buildCumulContent(product.produitName, existingQty, inputQty),
+                  actions: [
+                    TextButton(
+                        child: const Text("NON (Écraser)", style: TextStyle(color: Colors.red)),
+                        onPressed: () => Navigator.of(context).pop(false)),
+                    ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+                        child: const Text("OUI (Additionner)"),
+                        onPressed: () => Navigator.of(context).pop(true)),
+                  ],
+                );
+              },
+            );
+            if (shouldCumulate == true) {
+              finalQty = existingQty + inputQty;
+              provider.addCumulLog(product, existingQty, inputQty);
+            }
+          }
+        }
+        if (finalQty > SaisieInput.maxQuantite) {
+          _retour(TypeRetour.erreur);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('Total $finalQty : au-delà de ${SaisieInput.maxQuantite}, non enregistré.'), backgroundColor: Colors.red));
+          }
+          return;
+        }
+        // Seuil « grande quantité » (comme en saisie guidée).
+        if (finalQty > appConfig.largeValueThreshold && ctx.mounted) {
+          final confirme = await showDialog<bool>(
+              context: ctx,
+              builder: (c) => AlertDialog(title: const Text('Alerte Grande Quantité'), content: Text('Total : $finalQty. Confirmer ?'), actions: [
+                    TextButton(onPressed: () => Navigator.of(c).pop(false), child: const Text('Non')),
+                    TextButton(onPressed: () => Navigator.of(c).pop(true), child: const Text('Oui')),
+                  ]));
+          if (confirme != true) return;
+        }
+
+        // Enregistrée sur l'appareil AVANT de fermer la fenêtre.
+        final enregistre = await _saveScannedQuantity(product, finalQty);
+        if (!enregistre) {
+          _retour(TypeRetour.erreur);
+          return;
+        }
+        if (!ctx.mounted) return;
+        Navigator.of(ctx).pop();
+      } finally {
+        okEnCours = false;
+      }
+    }
+
+    void appui(String key) {
+      final ctx = dialogCtx;
+      if (okEnCours || ctx == null) return;
+      if (key == 'OK') {
+        valider(ctx);
+      } else if (key == 'DEL') {
+        if (estProposee.value) {
+          poser('');
+        } else if (quickQtyController.text.isNotEmpty) {
+          poser(quickQtyController.text.substring(0, quickQtyController.text.length - 1));
+        }
+      } else if (key == '+1' || key == '-1') {
+        final v = SaisieInput.parseQuantite(quickQtyController.text) ?? 0;
+        final n = (v + (key == '+1' ? 1 : -1)).clamp(0, SaisieInput.maxQuantite);
+        poser('$n');
+      } else {
+        poser(SaisieInput.ajouterChiffre(estProposee.value ? '' : quickQtyController.text, key));
+      }
+    }
+
+    final cible = CibleDouchette(
+      active: () => ouverte,
+      onChiffres: (t) => t.split('').forEach(appui),
+      onEffacer: () => appui('DEL'),
+      onValider: () => appui('OK'),
+      onEchap: () {
+        final ctx = dialogCtx;
+        if (!okEnCours && ctx != null && ctx.mounted) Navigator.of(ctx).pop();
       },
     );
+    Douchette.instance.ajouter(cible);
+    setState(() => _feuilleOuverte = true);
+
+    try {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          dialogCtx = ctx;
+          // Contrôleurs libérés quand la fenêtre disparaît (après son animation de fermeture).
+          return _Liberer(
+            objets: [quickQtyController, catcherController, catcherFocus, estProposee],
+            child: AlertDialog(
+            scrollable: true,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+            title: _buildQuickDialogTitle(product, appConfig, dejaCompte: dejaCompte, correction: correction),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Champ de scan invisible : garde le focus pendant la fenêtre (douchette en
+                  // « remplissage direct » : le code lu attend son tour dans la file).
+                  SizedBox(
+                    width: 1,
+                    height: 1,
+                    child: Opacity(
+                      opacity: 0,
+                      child: ChampDouchette(
+                        key: const ValueKey('champ-scan-feuille'),
+                        controller: catcherController,
+                        focusNode: catcherFocus,
+                        onCode: _recevoirCode,
+                        label: '',
+                        hint: '',
+                      ),
+                    ),
+                  ),
+                  Row(children: [
+                    IconButton(
+                      key: const ValueKey('qte-moins'),
+                      tooltip: '−1',
+                      icon: const Icon(Icons.remove_circle_outline, size: 32),
+                      onPressed: () => appui('-1'),
+                    ),
+                    Expanded(
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: estProposee,
+                        builder: (_, prop, __) => TextField(
+                            key: const ValueKey('qte-scan'),
+                            controller: quickQtyController,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: prop ? Colors.grey.shade600 : AppColors.accent),
+                            decoration: InputDecoration(
+                                labelText: prop ? 'Quantité (proposée)' : 'Quantité', border: const OutlineInputBorder()),
+                            keyboardType: TextInputType.none,
+                            readOnly: true,
+                            showCursor: true),
+                      ),
+                    ),
+                    IconButton(
+                      key: const ValueKey('qte-plus'),
+                      tooltip: '+1',
+                      icon: const Icon(Icons.add_circle_outline, size: 32),
+                      onPressed: () => appui('+1'),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 280,
+                    child: NumericKeyboard(onKeyPressed: appui),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Annuler', style: TextStyle(color: Colors.red))),
+            ],
+          ),
+          );
+        },
+      );
+    } finally {
+      ouverte = false;
+      Douchette.instance.retirer(cible);
+      if (mounted) {
+        setState(() {
+          _feuilleOuverte = false;
+          _showSearchResults = false;
+          _filteredProducts = [];
+        });
+        _searchController.clear();
+        // Après la fenêtre (OK ou Annuler), le champ de scan reprend le focus et la file continue.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _reprendreFocusScan();
+          _fileScans.relancer();
+        });
+      }
+    }
   }
 
   /// Le produit est-il déjà compté (cumul) ?
@@ -924,14 +1237,37 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
-  Widget _buildQuickDialogTitle(Product product, AppConfig appConfig) {
+  Widget _buildQuickDialogTitle(Product product, AppConfig appConfig, {int? dejaCompte, int? correction}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('Saisie Rapide',
             style: TextStyle(fontSize: 14, color: Colors.grey)),
+        if (correction != null)
+          Container(
+            key: const ValueKey('bandeau-correction'),
+            margin: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(6)),
+            child: Text('Correction : saisie actuelle $correction (la nouvelle quantité la remplace)',
+                style: TextStyle(fontSize: 13, color: Colors.blue.shade900, fontWeight: FontWeight.bold)),
+          )
+        else if (dejaCompte != null)
+          Container(
+            key: const ValueKey('bandeau-deja-compte'),
+            margin: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(color: const Color(0xFFFFF3CD), borderRadius: BorderRadius.circular(6)),
+            child: Text(
+                appConfig.isCumulEnabled
+                    ? 'Déjà compté : $dejaCompte — Remplacer ou Ajouter vous sera demandé'
+                    : 'Déjà compté : $dejaCompte — votre saisie le remplacera',
+                style: const TextStyle(fontSize: 13, color: Color(0xFF7A4B00), fontWeight: FontWeight.bold)),
+          ),
         const SizedBox(height: 4),
         Text(product.produitName,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
         Text('CIP: ${product.produitCip}',
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
@@ -993,7 +1329,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   }
 
   void _selectProduct(Product product) {
-    _openQuickEntryDialog(product);
+    _produitsVus[product.id] = product;
+    _openQuickEntryDialog(product, dejaCompte: _dejaCompteConnu(product));
   }
 
   void _showLocationSelector(BuildContext context, EntryProvider provider) {
@@ -1435,7 +1772,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) {
                   _quantityController.clear();
-                  _quantityFocusNode.requestFocus();
+                  _reprendreFocusScan();
                 }
               });
             }
@@ -1498,42 +1835,32 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                       padding: const EdgeInsets.fromLTRB(16.0, 4.0, 16.0, 8.0),
                       child: Row(children: [
                         Expanded(
-                            child: TextField(
+                            // Champ de scan : garde le focus, sans clavier à l'écran (icône ⌨ pour
+                            // chercher par nom). La douchette n'y est jamais perdue.
+                            child: ChampDouchette(
+                                key: const ValueKey('champ-scan'),
                                 controller: _searchController,
-                                inputFormatters: SaisieInput.rechercheFormatters,
                                 focusNode: _searchFocusNode,
-                                onSubmitted: (value) => _handleScanOrSearch(
-                                    value,
-                                    fromTyping: false),
-                                onChanged: _onSearchChanged,
-                                textInputAction: TextInputAction.search,
-                                autofocus: widget.isQuickMode,
-                                decoration: InputDecoration(
-                                    labelText: 'Rechercher / Scanner',
-                                    hintText: 'CIP, Nom ou Scan...',
-                                    prefixIcon: const Icon(
-                                        Icons.qr_code_scanner,
-                                        size: 20),
-                                    isDense: true,
-                                    border: const OutlineInputBorder(
-                                        borderRadius: BorderRadius.all(
-                                            Radius.circular(8))),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                        horizontal: 12.0, vertical: 10.0),
-                                    suffixIcon: _searchController
-                                        .text.isNotEmpty
-                                        ? IconButton(
-                                        icon: const Icon(Icons.clear,
-                                            size: 20),
-                                        onPressed: () {
-                                          _searchController.clear();
-                                          setState(() {
-                                            _showSearchResults = false;
-                                            _filteredProducts = [];
-                                          });
-                                          _searchFocusNode.requestFocus();
-                                        })
-                                        : null))),
+                                autofocus: true,
+                                label: 'Rechercher / Scanner',
+                                hint: widget.isQuickMode ? 'Scannez le produit suivant' : 'Scan, ou ⌨ pour chercher',
+                                onCode: (texte) {
+                                  // Clavier à l'écran : texte tapé → recherche (un code tapé suit le chemin du scan).
+                                  if (_clavierTexte && !CodeScan.ressembleACode(texte)) {
+                                    _handleScanOrSearch(texte, fromTyping: false);
+                                  } else {
+                                    _recevoirCode(texte);
+                                  }
+                                },
+                                onTexte: _onSearchChanged,
+                                onClavier: (v) => setState(() {
+                                  _clavierTexte = v;
+                                  _isSearching = _searchFocusNode.hasFocus && v;
+                                  if (!v) {
+                                    _showSearchResults = false;
+                                    _filteredProducts = [];
+                                  }
+                                }))),
                         if (!widget.isQuickMode) ...[
                           const SizedBox(width: 8),
                           OutlinedButton(
@@ -1561,6 +1888,31 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 if (showSearchAndBody)
                   Expanded(
                       child: Stack(children: [
+                        // Scan continu : journal des 10 dernières saisies (maquette B), quel que soit
+                        // le résultat du dernier scan.
+                        if (widget.isQuickMode)
+                          ListenableBuilder(
+                            listenable: _fileScans,
+                            builder: (context, _) => Column(children: [
+                              if (provider.isLoading)
+                                const LinearProgressIndicator(minHeight: 2)
+                              else
+                                const SizedBox(height: 2),
+                              Expanded(
+                                child: JournalScans(
+                                  inventaireId: widget.inventoryId,
+                                  sansSaisie: _sansSaisie,
+                                  scansEnAttente: _fileScans.enAttente,
+                                  onCorriger: _corrigerSaisie,
+                                  onRelancer: (c) {
+                                    setState(() => _sansSaisie.remove(c));
+                                    _recevoirCode(c.code);
+                                  },
+                                ),
+                              ),
+                            ]),
+                          )
+                        else
                         (provider.isLoading && provider.products.isEmpty)
                             ? const Center(child: CircularProgressIndicator())
                             : (provider.products.isEmpty ||
@@ -1569,22 +1921,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                             child: Text(provider.activeFilter.isActive
                                 ? 'Aucun produit correspondant au filtre.'
                                 : 'Aucun produit dans cet emplacement.'))
-                            : widget.isQuickMode
-                            ? Center(
-                            child: Column(
-                                mainAxisAlignment:
-                                MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.qr_code_scanner,
-                                      size: 80,
-                                      color: Colors.grey.shade300),
-                                  const SizedBox(height: 16),
-                                  const Text('Mode Saisie Rapide Activé',
-                                      style: TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.grey))
-                                ]))
                             : buildProductView(provider),
                         if (_showSearchResults)
                           Container(
@@ -1801,4 +2137,27 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       ],
     );
   }
+}
+
+/// Libère des contrôleurs quand le widget quitte l'écran (fenêtre fermée, animation terminée).
+class _Liberer extends StatefulWidget {
+  final List<ChangeNotifier> objets;
+  final Widget child;
+  const _Liberer({required this.objets, required this.child});
+
+  @override
+  State<_Liberer> createState() => _LibererState();
+}
+
+class _LibererState extends State<_Liberer> {
+  @override
+  void dispose() {
+    for (final o in widget.objets) {
+      o.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
