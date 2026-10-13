@@ -119,7 +119,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(NvCreationInventaireScreen), findsOneWidget);
       await tester.enterText(find.byKey(const ValueKey('libelle-inventaire')), 'Réserve novembre');
-      await tester.tap(find.byKey(const ValueKey('bouton-creer')));
+      await toucher(tester, find.byKey(const ValueKey('bouton-creer')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('confirmer-creation')));
       await tester.pumpAndSettle();
@@ -319,12 +319,17 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('nv-deverrouiller')));
       await tester.pumpAndSettle();
       await tester.enterText(adresse, '192.168.1.60');
-      await tester.enterText(find.widgetWithText(TextFormField, 'Seuil d\'alerte « grande quantité »'), '500');
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('nv-valider-config')), 300, scrollable: find.byType(Scrollable).first);
-      await tester.tap(find.byKey(const ValueKey('nv-valider-config')));
+      final port = find.widgetWithText(TextFormField, 'Port').first;
+      await tester.enterText(port, '99999');
+      await toucher(tester, find.byKey(const ValueKey('nv-valider-config')));
       await tester.pumpAndSettle();
-      expect(b.config.localApiAddress, '192.168.1.60');
-      expect(b.config.largeValueThreshold, 500);
+      expect(b.config.localApiAddress, isNot('192.168.1.60'), reason: 'port absurde : rien n\'est enregistré');
+      await tester.pump(const Duration(seconds: 4)); // fin du message (il couvre le bouton)
+      await tester.pumpAndSettle();
+      await tester.enterText(port, '8081');
+      await toucher(tester, find.byKey(const ValueKey('nv-valider-config')));
+      await tester.pumpAndSettle();
+      expect((b.config.localApiAddress, b.config.localApiPort), ('192.168.1.60', '8081'));
       await demonter(tester);
     });
 
@@ -336,12 +341,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('reglage-son-scan')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Erreur'));
+      await toucher(tester, find.text('Erreur'));
       await tester.pump();
       expect(retour.bips, isEmpty, reason: 'son coupé');
       expect(retour.vibrations, ['erreur']);
       await tester.enterText(find.byKey(const ValueKey('reglage-quantite-scan')), '6');
-      await tester.tap(find.byKey(const ValueKey('nv-enregistrer-scan')));
+      await toucher(tester, find.byKey(const ValueKey('nv-enregistrer-scan')));
       await tester.pumpAndSettle();
       expect((b.config.sonScan, b.config.vibrationScan, b.config.quantiteScanDefaut), (false, true, 6));
       await demonter(tester);

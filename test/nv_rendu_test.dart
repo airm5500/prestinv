@@ -1,8 +1,6 @@
 // Nouvelle interface : chaque écran s'affiche SANS DÉBORDEMENT sur Sunmi V2s (360 × 640 dp), téléphone
 // et Sunmi V3 / V3H (360 × 800 dp), tablette portrait (800 × 1280) et paysage (1280 × 800), en thème
 // clair et sombre ; maquette A / B sur téléphone, C (menu latéral, tableau) sur tablette ≥ 900 dp.
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/collecte/collecte_store.dart';
@@ -64,9 +62,7 @@ Future<void> _saisies(Banc b) async {
 
 void main() {
   // Police réelle (Roboto) si le SDK la fournit ; PRESTINV_POLICE_ESSAI=1 : police d'essai (lettres carrées, plus larges).
-  setUpAll(() async {
-    if (Platform.environment['PRESTINV_POLICE_ESSAI'] != '1') await chargerPolicesReelles();
-  });
+  setUpAll(chargerPolicesReelles);
   setUp(() {
     reinitialiserDouchette();
     installerFauxRetour();

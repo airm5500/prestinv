@@ -62,7 +62,9 @@ const tabletteMoyenne = Size(800, 1280);
 
 /// Polices réelles (Roboto, icônes Material) du SDK Flutter, chargées sans réseau. Sans elles, les
 /// tests utilisent une police où chaque lettre est un carré (plus large que Roboto).
+/// PRESTINV_POLICE_ESSAI=1 : garde la police d'essai (vérifie que rien ne déborde même avec elle).
 Future<bool> chargerPolicesReelles() async {
+  if (Platform.environment['PRESTINV_POLICE_ESSAI'] == '1') return false;
   final racine = Platform.environment['FLUTTER_ROOT'] ?? '';
   final dossier = Directory('$racine/bin/cache/artifacts/material_fonts');
   if (racine.isEmpty || !dossier.existsSync()) return false;
@@ -77,16 +79,32 @@ Future<bool> chargerPolicesReelles() async {
   return true;
 }
 
+/// Fait défiler jusqu'à [f] (s'il est dans une liste) puis le touche. Le champ qui avait le focus le
+/// rend d'abord (sinon il ramènerait la liste vers lui).
+Future<void> toucher(WidgetTester tester, Finder f) async {
+  FocusManager.instance.primaryFocus?.unfocus();
+  await tester.pumpAndSettle();
+  // Liste paresseuse : l'élément n'est construit qu'une fois approché.
+  if (f.evaluate().isEmpty) await tester.dragUntilVisible(f, find.byType(Scrollable).first, const Offset(0, -250));
+  await tester.ensureVisible(f);
+  await tester.pumpAndSettle();
+  await tester.tap(f);
+}
+
 /// Touche le pavé de la nouvelle interface ([chiffres] puis la validation si [ok]).
 Future<void> taperNv(WidgetTester tester, String chiffres, {bool ok = true}) async {
+  Future<void> touche(String k) async {
+    final f = find.byKey(ValueKey('touche-$k')).last;
+    await tester.ensureVisible(f);
+    await tester.pump();
+    await tester.tap(f);
+    await tester.pump();
+  }
+
   for (final c in chiffres.split('')) {
-    await tester.tap(find.byKey(ValueKey('touche-$c')).last);
-    await tester.pump();
+    await touche(c);
   }
-  if (ok) {
-    await tester.tap(find.byKey(const ValueKey('touche-OK')).last);
-    await tester.pump();
-  }
+  if (ok) await touche('OK');
 }
 
 /// Nouvelle interface active pendant le test (remise à l'état d'origine ensuite).

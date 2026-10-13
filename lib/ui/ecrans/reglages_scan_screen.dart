@@ -65,7 +65,9 @@ class _NvReglagesScanScreenState extends State<NvReglagesScanScreen> {
       subtitle: 'Douchette, bips et vibrations',
       body: Form(
         key: _formKey,
-        child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), children: [
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           SoftCard(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -114,6 +116,7 @@ class _NvReglagesScanScreenState extends State<NvReglagesScanScreen> {
           const SizedBox(height: 16),
           FilledButton(key: const ValueKey('nv-enregistrer-scan'), onPressed: _enregistrer, child: const Text('Enregistrer')),
         ]),
+        ),
       ),
     );
   }

@@ -196,9 +196,13 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
     return NvScaffold(
       title: 'Réglages',
       subtitle: 'Configuration de l\'application',
+      // Formulaire entièrement construit (SingleChildScrollView, pas de liste paresseuse) : chaque champ
+      // est contrôlé à l'enregistrement, même hors de l'écran.
       body: Form(
         key: _formKey,
-        child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), children: [
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           _rubrique('Connexion au serveur', Icons.dns_outlined, [
             if (!_deverrouille)
               OutlinedButton.icon(
@@ -309,6 +313,7 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
           ]),
           FilledButton(key: const ValueKey('nv-valider-config'), onPressed: _enregistrer, child: const Text('Valider la configuration')),
         ]),
+        ),
       ),
     );
   }
