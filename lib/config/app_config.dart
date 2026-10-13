@@ -24,7 +24,8 @@ class AppConfig with ChangeNotifier {
   int _largeValueThreshold = 1000;
   int _autoLogoutMinutes = 0; // 0 = désactivé
   String _networkExportPath = '';
-  SendMode _sendMode = SendMode.collect;
+  // Nouvelle installation : Direct (envoi immédiat, la file persistante sert de secours).
+  SendMode _sendMode = SendMode.direct;
   int _sendReminderMinutes = 15; // 0 = désactivé
 
   // CORRECTION : Variable d'instance privée (pas de static)
@@ -98,11 +99,41 @@ class AppConfig with ChangeNotifier {
     // CORRECTION : Chargement correct de la variable
     _isCumulEnabled = _prefs.getBool('isCumulEnabled') ?? false;
 
-    // On charge les énumérations à partir de leur index stocké
-    _apiMode = ApiMode.values[_prefs.getInt('apiMode') ?? ApiMode.local.index];
-    _sendMode = SendMode.values[_prefs.getInt('sendMode') ?? SendMode.collect.index];
+    // On charge les énumérations à partir de leur index stocké (valeur abîmée : valeur par défaut)
+    final apiModeIndex = _prefs.getInt('apiMode') ?? ApiMode.local.index;
+    _apiMode = ApiMode.values[(apiModeIndex >= 0 && apiModeIndex < ApiMode.values.length) ? apiModeIndex : 0];
+    _sendMode = await _chargerModeEnvoi(_prefs);
 
     notifyListeners();
+  }
+
+  /// Clés qui prouvent que l'application a déjà été utilisée sur cet appareil (versions précédentes).
+  static const _clesInstallationExistante = [
+    'localApiAddress', 'localApiPort', 'distantApiAddress', 'distantApiPort', 'appName', 'apiMode',
+    'maxResult', 'showTheoreticalStock', 'largeValueThreshold', 'autoLogoutMinutes', 'networkExportPath',
+    'sendReminderMinutes', 'isCumulEnabled', 'rememberMe', 'savedLogin', 'savedPassword', 'cached_license',
+    'collection_data',
+  ];
+
+  static bool installationExistante(SharedPreferences prefs) {
+    final cles = prefs.getKeys();
+    return _clesInstallationExistante.any(cles.contains) ||
+        cles.any((k) => k.startsWith('inv_') || k.startsWith('cumul_logs_'));
+  }
+
+  /// Mode d'envoi :
+  /// - choix déjà enregistré : conservé tel quel ;
+  /// - application déjà utilisée SANS choix enregistré (elle tournait donc en Collecte, l'ancien défaut) :
+  ///   Collecte est gardé et enregistré — rien ne change pour l'utilisateur existant ;
+  /// - nouvelle installation : Direct (nouveau défaut), enregistré.
+  static Future<SendMode> _chargerModeEnvoi(SharedPreferences prefs) async {
+    final stocke = prefs.getInt('sendMode');
+    if (stocke != null && stocke >= 0 && stocke < SendMode.values.length) return SendMode.values[stocke];
+    final mode = installationExistante(prefs) ? SendMode.collect : SendMode.direct;
+    try {
+      await prefs.setInt('sendMode', mode.index);
+    } catch (_) {}
+    return mode;
   }
 
   /// Sauvegarde les paramètres de connexion API.
