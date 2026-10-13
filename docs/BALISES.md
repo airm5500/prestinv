@@ -9,11 +9,12 @@ sur le terrain, on peut reconstruire l'APK d'avant l'étape sans rien chercher d
 | `prestinv-avant-etape-1` | dernier commit de l'étape 0 | Socle : CI, test réparé, mot de passe retiré des tests, version unique 4.9.0+5, interrupteur `InterfaceVersion` (éteint). Aucun écran changé. |
 | `prestinv-avant-etape-2` | dernier commit de l'étape 1 | Fiabilité de la saisie (file locale persistante des saisies, envoi rejouable, « À envoyer », mode Direct par défaut pour les nouvelles installations). |
 | `prestinv-avant-etape-3` | dernier commit de l'étape 2 | Robustesse et sécurité (erreurs ≠ liste vide, session expirée, serveur injoignable ≠ licence, mot de passe chiffré, code administrateur, contrôles de saisie). |
+| `prestinv-avant-scan-collecte` | `b10e069` (branche `claude/fiabilite-saisie`, version 4.9.0+5) | Avant l'étape 3 « scan » (douchette toujours prête, bips, journal, quantité rapide) et le versement de la collecte / la création d'inventaire (version 4.10.0+6, `docs/NOTE_VERSION_SCAN_COLLECTE.md`). |
 
 Les balises sont créées **localement** ; les publier avec :
 
 ```bash
-git push origin prestinv-avant-etape-0 prestinv-avant-etape-1 prestinv-avant-etape-2 prestinv-avant-etape-3
+git push origin prestinv-avant-etape-0 prestinv-avant-etape-1 prestinv-avant-etape-2 prestinv-avant-etape-3 prestinv-avant-scan-collecte
 ```
 
 ## Revenir à une version précédente
@@ -28,6 +29,10 @@ flutter build apk --release
 Avant de réinstaller une version antérieure à l'étape 1, **envoyer toutes les saisies**
 (Accueil → « À envoyer » doit être vide), sinon l'ancienne version ne les verra pas.
 
+**Après la 4.10.0** : la collecte garde la même clé (`collection_data`) ; les versements (rapports et
+reprises) sont dans `versements_v1`. Une version antérieure ignore simplement les lignes « versées »
+(elle les réafficherait comme non versées) : ne pas reverser avec une ancienne version.
+
 ## Interrupteur « Nouvelle interface »
 
 `lib/interface_version.dart` (même principe que `prestige_vente_app`). Éteint par défaut ; tant que
@@ -35,7 +40,15 @@ la nouvelle interface (étape 4) n'existe pas, les deux positions ouvrent les é
 réglage n'est pas affiché. À l'étape 4 il sera ajouté à la Configuration (`InterfaceVersionTile`) pour
 revenir aux écrans d'origine sans réinstaller.
 
-## Essai réel contre un serveur de test
+## Essais réels contre un serveur de test
+
+`test_reel/essai_versement_reel.sh` (hors CI) : création d'un inventaire « ESSAI PRESTINV hh:mm » (à
+défaut, inventaire de test par l'import CSV existant), versement de 3 codes dont 1 inconnu, quantités et
+auteur relus, suppression de l'inventaire de test et comparaison de la base avant / après.
+
+Aperçus PNG des écrans : `flutter test test_apercus/apercus_test.dart --update-goldens` (hors CI).
+
+### Fiabilité de la saisie
 
 `test_reel/essai_serveur_reel_test.dart` (hors CI) : connexion, lecture des inventaires, « déjà
 compté », file persistante (correction pendant l'envoi, redémarrage), 401, licence. La ligne de test
