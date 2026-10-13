@@ -98,7 +98,7 @@ class RapportVersementScreen extends StatelessWidget {
           );
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Rapport de versement'),
+        title: const Text('Rapport'),
         actions: [
           IconButton(key: const ValueKey('export-pdf'), tooltip: 'PDF', icon: const Icon(Icons.picture_as_pdf), onPressed: () => _exporter(context, pdf: true, csv: false)),
           IconButton(key: const ValueKey('export-csv'), tooltip: 'CSV', icon: const Icon(Icons.table_view), onPressed: () => _exporter(context, pdf: false, csv: true)),

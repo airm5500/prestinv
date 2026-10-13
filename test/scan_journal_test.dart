@@ -35,7 +35,7 @@ void main() {
     expect(e.where((x) => x.saisie != null).every((x) => x.etat == EtatJournal.enAttente), isTrue);
   });
 
-  testWidgets('journal : produits, quantités et états (en attente → envoyé ✓, refus → erreur)', (tester) async {
+  testWidgets('journal : produits, quantités et états (en attente → envoyé, refus → erreur)', (tester) async {
     ecranTerminal(tester);
     final b = await preparerBanc(mode: SendMode.collect);
     await tester.pumpWidget(monter(b, const InventoryEntryScreen(inventoryId: 'INV1', isQuickMode: true)));
@@ -60,12 +60,12 @@ void main() {
     expect(find.text('13'), findsOneWidget); // quantité de la dernière saisie
     expect(find.textContaining('12 en attente'), findsOneWidget);
 
-    // Envoi : états « envoyé ✓ ».
+    // Envoi : états « envoyé ».
     await tester.tap(find.byIcon(Icons.send));
     await tester.pump();
     await tester.pump(const Duration(seconds: 3));
     await tester.pumpAndSettle();
-    expect(find.text('envoyé ✓'), findsNWidgets(10));
+    expect(find.text('envoyé'), findsNWidgets(10));
 
     // Une saisie refusée par le serveur : « erreur » avec le motif.
     b.serveur.codes['details'] = 400;

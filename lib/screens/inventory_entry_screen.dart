@@ -1843,7 +1843,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
                                 focusNode: _searchFocusNode,
                                 autofocus: true,
                                 label: 'Rechercher / Scanner',
-                                hint: widget.isQuickMode ? 'Scannez le produit suivant' : 'Scan, ou ⌨ pour chercher',
+                                hint: widget.isQuickMode ? 'Scannez le produit suivant' : 'Scan ou recherche',
                                 onCode: (texte) {
                                   // Clavier à l'écran : texte tapé → recherche (un code tapé suit le chemin du scan).
                                   if (_clavierTexte && !CodeScan.ressembleACode(texte)) {

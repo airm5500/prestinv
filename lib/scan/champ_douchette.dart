@@ -48,7 +48,7 @@ class ChampDouchette extends StatefulWidget {
     this.onClavier,
     this.autofocus = true,
     this.label = 'Rechercher / Scanner',
-    this.hint = 'Scannez ou touchez ⌨ pour chercher',
+    this.hint = 'Scannez (clavier : icône à droite)',
   });
 
   @override

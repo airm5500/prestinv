@@ -258,7 +258,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('confirmer-versement')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Rapport de versement'), findsOneWidget);
+    expect(find.byType(RapportVersementScreen), findsOneWidget);
     expect(find.byKey(const ValueKey('section-non-reconnus')), findsOneWidget);
     expect(find.textContaining('code 9999999999999 · collecté 7 · introuvable dans cet inventaire'), findsOneWidget);
     expect(b.serveur.produit(2003).saisi, 10);

@@ -15,7 +15,7 @@
 // 3. Versement des codes PRESTINV_REEL_CODES (code:quantité), dont un inconnu, mode « Remplacer » :
 //    rapport (versés / non reconnus), quantités relues sur le serveur, reprise sans doublon.
 // La ligne « ESSAI-INVENTAIRE <id> » de la sortie permet au script de supprimer l'inventaire de test.
-// ignore_for_file: avoid_print
+// ignore_for_file: avoid_print, invalid_use_of_visible_for_testing_member
 import 'dart:convert';
 import 'dart:io';
 

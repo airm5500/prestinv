@@ -119,6 +119,7 @@ class _CreationInventaireScreenState extends State<CreationInventaireScreen> {
                     decoration: const InputDecoration(
                       labelText: 'Libellé de l\'inventaire',
                       hintText: 'ex. Inventaire réserve octobre',
+                      errorMaxLines: 3,
                       border: OutlineInputBorder(),
                     ),
                   ),

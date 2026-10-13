@@ -61,7 +61,7 @@ List<EntreeJournal> entreesJournal(SaisieQueue queue, String inventaireId, List<
 String libelleEtat(EtatJournal e) => switch (e) {
       EtatJournal.enAttente => 'en attente',
       EtatJournal.envoi => 'envoi…',
-      EtatJournal.envoye => 'envoyé ✓',
+      EtatJournal.envoye => 'envoyé',
       EtatJournal.erreur => 'erreur',
       EtatJournal.aVerifier => 'à vérifier',
     };
@@ -170,10 +170,15 @@ class JournalScans extends StatelessWidget {
                             constraints: const BoxConstraints(maxWidth: 96),
                             child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                               if (s != null) Text('${s.quantite}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
-                              Text(libelleEtat(e.etat),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: couleurEtat(e.etat))),
+                              Row(mainAxisSize: MainAxisSize.min, children: [
+                                if (e.etat == EtatJournal.envoye) Icon(Icons.check, size: 14, color: couleurEtat(e.etat)),
+                                Flexible(
+                                  child: Text(libelleEtat(e.etat),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: couleurEtat(e.etat))),
+                                ),
+                              ]),
                             ]),
                           ),
                         ]),
