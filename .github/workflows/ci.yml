@@ -39,7 +39,19 @@ jobs:
         run: flutter test
 
       - name: Build APK
-        run: flutter build apk --release
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee build_apk.log
+
+      # En cas d'échec : l'erreur Gradle est remontée en annotation (lisible sans télécharger le journal).
+      - name: Résumé de l'erreur de build
+        if: failure()
+        shell: bash
+        run: |
+          [ -f build_apk.log ] || exit 0
+          resume=$(grep -iE -A12 "What went wrong|error:|FAILURE|Exception" build_apk.log | head -80 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Build APK::${resume}"
 
       - uses: actions/upload-artifact@v4
         with:
