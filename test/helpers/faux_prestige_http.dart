@@ -48,6 +48,9 @@ class FauxPrestige {
   /// Délai de réponse de chaque requête (réseau lent).
   Duration delai = Duration.zero;
 
+  /// Délai par fin de chemin (ex. {'detailsAllTouched': 12 s}).
+  final Map<String, Duration> delais = {};
+
   /// Si posé, les PUT attendent ce Completer (pour contrôler l'ordre exact).
   Completer<void>? verrouPut;
 
@@ -69,6 +72,8 @@ class FauxPrestige {
     final fin = chemin.split('/').last;
     appels.add('${req.method} $fin');
     if (delai > Duration.zero) await Future<void>.delayed(delai);
+    final d = delais[fin];
+    if (d != null) await Future<void>.delayed(d);
     if (injoignable || routesInjoignables.contains(fin)) throw const SocketException('Connection refused');
     final code = codes[fin];
     if (code != null) return http.Response('', code);

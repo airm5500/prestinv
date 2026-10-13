@@ -172,15 +172,6 @@ class ApiService implements SaisieServeur {
     return null;
   }
 
-  /// Ancien comportement (conservé provisoirement, remplacé à l'étape 1c) : toute erreur = « jamais compté ».
-  Future<int?> checkExistingProductQuantity(String inventoryId, String query, {String? rayonId}) async {
-    try {
-      return await verifierDejaCompte(inventoryId, query);
-    } catch (_) {
-      return null;
-    }
-  }
-
   // --- RAYONS & PRODUITS ---
 
   Future<List<Rayon>> fetchRayons(String idInventaire) async {

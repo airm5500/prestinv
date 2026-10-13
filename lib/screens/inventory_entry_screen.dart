@@ -385,13 +385,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       int? existingQty;
 
       if (widget.isQuickMode) {
-        showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (c) => const Center(child: CircularProgressIndicator()));
-        existingQty = await _apiService.checkExistingProductQuantity(
-            widget.inventoryId, currentProductAtClick.produitCip);
-        if (mounted) Navigator.pop(context);
+        final verif = await _verifierDejaCompte(context, currentProductAtClick);
+        if (!verif.ok) return; // vérification impossible : rien n'est enregistré
+        existingQty = verif.quantite;
       } else {
         existingQty = await provider
             .checkExistingQuantityLocal(currentProductAtClick.produitCip);
@@ -753,17 +749,14 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                         int finalQty = inputQty;
 
                         if (appConfig.isCumulEnabled) {
-                          showDialog(
-                              context: ctx,
-                              barrierDismissible: false,
-                              builder: (c) => const Center(
-                                  child: CircularProgressIndicator()));
-                          try {
-                            int? existingQty = await _apiService
-                                .checkExistingProductQuantity(
-                                widget.inventoryId, product.produitCip);
-                            Navigator.pop(ctx);
-
+                          // P2 : un échec de la vérification ne veut JAMAIS dire « jamais compté ».
+                          final verif = await _verifierDejaCompte(ctx, product);
+                          if (!verif.ok) {
+                            okEnCours = false;
+                            return; // rien n'est enregistré, la fenêtre reste ouverte
+                          }
+                          final int? existingQty = verif.quantite;
+                          {
                             if (existingQty != null) {
                               bool? shouldCumulate = await showDialog<bool>(
                                 context: ctx,
@@ -800,8 +793,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                     product, existingQty, inputQty);
                               }
                             }
-                          } catch (e) {
-                            Navigator.pop(ctx);
                           }
                         }
 
@@ -842,6 +833,48 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         );
       },
     );
+  }
+
+  /// Le produit est-il déjà compté (cumul) ?
+  ///
+  /// 1. Une saisie de cette ligne encore en attente sur l'appareil fait foi (plus récente que le serveur).
+  /// 2. Sinon on demande au serveur. En cas d'échec (réseau lent, serveur injoignable, session expirée),
+  ///    on NE CONCLUT PAS « jamais compté » : l'utilisateur peut réessayer ou annuler — la quantité
+  ///    n'est alors pas enregistrée (sinon on écraserait le comptage d'un collègue).
+  /// Renvoie `ok: false` si l'utilisateur a annulé.
+  Future<({bool ok, int? quantite})> _verifierDejaCompte(BuildContext ctx, Product product) async {
+    final locale = _queue?.ligne(widget.inventoryId, product.id);
+    if (locale != null && locale.enAttente) return (ok: true, quantite: locale.quantite);
+    while (true) {
+      if (!ctx.mounted) return (ok: false, quantite: null);
+      showDialog(
+          context: ctx,
+          barrierDismissible: false,
+          builder: (c) => const Center(child: CircularProgressIndicator()));
+      try {
+        final q = await _apiService.verifierDejaCompte(widget.inventoryId, product.produitCip, ligneId: product.id);
+        if (ctx.mounted) Navigator.of(ctx).pop();
+        return (ok: true, quantite: q);
+      } on ApiLoadException catch (e) {
+        if (ctx.mounted) Navigator.of(ctx).pop();
+        if (!ctx.mounted) return (ok: false, quantite: null);
+        final reessayer = await showDialog<bool>(
+          context: ctx,
+          barrierDismissible: false,
+          builder: (d) => AlertDialog(
+            title: const Text('Vérification impossible'),
+            content: Text('${e.message}\n\n'
+                'On ne peut pas savoir si ce produit a déjà été compté : la quantité n\'est PAS enregistrée. '
+                'Réessayez (ou annulez et rescannez plus tard).'),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(d).pop(false), child: const Text('Annuler')),
+              ElevatedButton(onPressed: () => Navigator.of(d).pop(true), child: const Text('Réessayer')),
+            ],
+          ),
+        );
+        if (reessayer != true) return (ok: false, quantite: null);
+      }
+    }
   }
 
   Widget _buildCumulContent(String productName, int oldQty, int newQty) {
