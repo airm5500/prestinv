@@ -13,6 +13,7 @@ import 'package:prestinv/widgets/numeric_keyboard.dart';
 import 'package:prestinv/saisie/saisie.dart';
 import 'package:prestinv/saisie/saisie_correction.dart';
 import 'package:prestinv/utils/saisie_input.dart';
+import 'package:prestinv/widgets/chargement_erreur.dart';
 
 class GlobalVarianceScreen extends StatefulWidget {
   final String inventoryId;
@@ -42,6 +43,7 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
 
   bool _isLoading = true;
   String? _errorMessage;
+  Object? _erreur;
 
   // --- NOUVEAU : Mémoire des écarts réellement validés ---
   final Set<int> _correctedProductIds = {};
@@ -67,7 +69,7 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
   }
 
   Future<void> _loadInitialData() async {
-    setState(() { _isLoading = true; _errorMessage = null; });
+    setState(() { _isLoading = true; _errorMessage = null; _erreur = null; });
     try {
       final futures = await Future.wait([
         _apiService.fetchGlobalVariances(widget.inventoryId),
@@ -86,7 +88,8 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = messageErreur(e);
+          _erreur = e;
           _isLoading = false;
         });
       }
@@ -94,7 +97,7 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
   }
 
   Future<void> _loadAllVariances() async {
-    setState(() { _isLoading = true; _errorMessage = null; });
+    setState(() { _isLoading = true; _errorMessage = null; _erreur = null; });
     try {
       final products = await _apiService.fetchGlobalVariances(widget.inventoryId);
       if (mounted) {
@@ -107,7 +110,8 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = messageErreur(e);
+          _erreur = e;
           _isLoading = false;
         });
       }
@@ -158,6 +162,8 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
     setState(() {
       _selectedRayonFilter = rayon;
       _isLoading = true; // On affiche le sablier pendant qu'on interroge le serveur
+      _errorMessage = null;
+      _erreur = null;
     });
 
     try {
@@ -185,7 +191,8 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = messageErreur(e);
+          _erreur = e;
           _isLoading = false;
         });
       }
@@ -224,7 +231,10 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
         setState(() { _displayedVariances = results; });
       }
     } catch (e) {
-      print("Erreur recherche API: $e");
+      // Recherche en échec : on le dit (avant : erreur avalée, rien ne se passait).
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(messageErreur(e)), backgroundColor: Colors.red));
+      }
     }
   }
 
@@ -529,7 +539,7 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : _errorMessage != null
-                  ? Center(child: Text("Erreur : $_errorMessage", style: const TextStyle(color: Colors.red)))
+                  ? LoadErrorView.depuis(_erreur ?? _errorMessage!, onRetry: () => _rayons.isEmpty ? _loadInitialData() : _onRayonFilterChanged(_selectedRayonFilter))
                   : _displayedVariances.isEmpty
                   ? Center(
                 child: Column(

@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:prestinv/saisie/saisie.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
 import 'package:provider/provider.dart';
+import 'package:prestinv/widgets/reconnexion.dart';
 
 class AEnvoyerScreen extends StatefulWidget {
   const AEnvoyerScreen({super.key});
@@ -82,8 +83,13 @@ class _AEnvoyerScreenState extends State<AEnvoyerScreen> {
               if (q.sessionExpiree)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Text('Session expirée : reconnectez-vous, les saisies repartiront ensuite.',
-                      style: TextStyle(color: Colors.red.shade800, fontSize: 13)),
+                  child: Row(children: [
+                    Expanded(
+                      child: Text('Session expirée : reconnectez-vous, les saisies repartiront ensuite.',
+                          style: TextStyle(color: Colors.red.shade800, fontSize: 13)),
+                    ),
+                    TextButton(onPressed: () => demanderReconnexion(context), child: const Text('Se reconnecter')),
+                  ]),
                 ),
               const SizedBox(height: 8),
               SizedBox(

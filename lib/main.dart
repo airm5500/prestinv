@@ -83,6 +83,10 @@ class PrestinvApp extends StatefulWidget {
   State<PrestinvApp> createState() => _PrestinvAppState();
 }
 
+/// Navigateur de l'application : la déconnexion automatique (minuterie) s'en sert pour afficher ses
+/// fenêtres (le contexte de PrestinvApp est AU-DESSUS du navigateur : avant, plantage).
+final GlobalKey<NavigatorState> navigateurApp = GlobalKey<NavigatorState>();
+
 class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
   Timer? _inactivityTimer;
   SaisieQueue? _saisies;
@@ -166,8 +170,9 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
 
     _inactivityTimer?.cancel();
     _inactivityTimer = Timer(Duration(minutes: delay), () {
-      if (authProvider.isLoggedIn && mounted) {
-        performLogout(context);
+      final ctx = navigateurApp.currentContext;
+      if (authProvider.isLoggedIn && mounted && ctx != null) {
+        performLogout(ctx);
       }
     });
   }
@@ -229,6 +234,7 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
           }
 
           return MaterialApp(
+            navigatorKey: navigateurApp,
             title: 'Prestige Inventaire',
             debugShowCheckedModeBanner: false,
             theme: ThemeData(

@@ -9,6 +9,7 @@ import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/models/license.dart';
 import 'package:prestinv/saisie/saisie_serveur.dart';
+import 'package:prestinv/utils/journal.dart';
 
 /// Nature d'un échec de chargement (jamais confondu avec « liste vide »).
 enum TypeErreurChargement { reseau, session, refus, donnees }
@@ -97,26 +98,58 @@ class ApiService implements SaisieServeur {
     }
   }
 
-  // --- INVENTAIRES ---
+  // --- CHARGEMENT COMMUN : un échec n'est JAMAIS une liste vide ---
 
-  Future<List<Inventory>> fetchInventories({int maxResult = 3}) async {
-    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires?maxResult=$maxResult');
+  /// GET d'une liste JSON. Lève [ApiLoadException] (réseau, session expirée, refus, données
+  /// illisibles) au lieu de renvoyer une liste vide.
+  Future<List<T>> _loadList<T>(String quoi, Uri url, T Function(Map<String, dynamic>) parse,
+      {Duration delai = const Duration(seconds: 20)}) async {
+    final http.Response response;
     try {
-      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        return data.map((json) => Inventory.fromJson(json)).toList();
-      } else {
-        throw Exception('Échec du chargement des inventaires (Statut: ${response.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
+      response = await _httpGet(url).timeout(delai);
     } on TimeoutException {
-      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
+      throw ApiLoadException('Le serveur met trop de temps à répondre ($quoi non chargés). Vérifiez le réseau puis réessayez.',
+          TypeErreurChargement.reseau);
     } catch (e) {
-      rethrow;
+      if (_estErreurReseau(e)) {
+        throw ApiLoadException('Serveur injoignable ($quoi non chargés). Vérifiez le Wi-Fi et l\'adresse du serveur puis réessayez.',
+            TypeErreurChargement.reseau);
+      }
+      throw ApiLoadException('Impossible de charger les $quoi : $e', TypeErreurChargement.reseau);
+    }
+    final code = response.statusCode;
+    if (code == 401 || code == 403) {
+      throw ApiLoadException('Session expirée ($quoi non chargés) : reconnectez-vous.', TypeErreurChargement.session);
+    }
+    if (code != 200) throw ApiLoadException('Le serveur a refusé le chargement des $quoi (code $code).');
+    final dynamic data;
+    try {
+      data = json.decode(utf8.decode(response.bodyBytes));
+    } catch (_) {
+      throw ApiLoadException('Réponse illisible du serveur pour les $quoi.', TypeErreurChargement.donnees);
+    }
+    if (data is! List) throw ApiLoadException('Réponse inattendue du serveur pour les $quoi.', TypeErreurChargement.donnees);
+    try {
+      return [for (final item in data) parse(Map<String, dynamic>.from(item as Map))];
+    } catch (e) {
+      throw ApiLoadException('Données des $quoi illisibles.', TypeErreurChargement.donnees);
     }
   }
+
+  static List<Product> _parTri(List<Product> ps) => ps..sort((a, b) => a.produitName.compareTo(b.produitName));
+
+  Uri _uri(String route, Map<String, String?> params) {
+    final q = <String, String>{
+      for (final e in params.entries)
+        if (e.value != null && e.value!.isNotEmpty) e.key: e.value!,
+    };
+    return Uri.parse('$baseUrl/api/v1/ws/inventaires$route').replace(queryParameters: q.isEmpty ? null : q);
+  }
+
+  // --- INVENTAIRES ---
+
+  Future<List<Inventory>> fetchInventories({int maxResult = 3}) =>
+      _loadList('inventaires', _uri('', {'maxResult': '$maxResult'}), Inventory.fromJson);
 
   // --- CUMUL / VERIFICATION ---
 
@@ -174,313 +207,104 @@ class ApiService implements SaisieServeur {
 
   // --- RAYONS & PRODUITS ---
 
-  Future<List<Rayon>> fetchRayons(String idInventaire) async {
-    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/rayons?idInventaire=$idInventaire');
-    try {
-      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        return data.map((json) => Rayon.fromJson(json)).toList();
-      } else {
-        throw Exception('Échec du chargement des emplacements (Statut: ${response.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
-    } on TimeoutException {
-      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
-    } catch (e) {
-      rethrow;
-    }
-  }
+  Future<List<Rayon>> fetchRayons(String idInventaire) =>
+      _loadList('emplacements', _uri('/rayons', {'idInventaire': idInventaire}), Rayon.fromJson);
 
   /// Récupère les produits.
-  /// LOGIQUE DE BASCULE :
-  /// - Si [idRayon] est NULL ou VIDE => Utilise 'detailsAll' (Mode Global / Saisie Rapide)
-  /// - Si [idRayon] est RENSEIGNÉ => Utilise 'details' (Mode par Emplacement)
+  /// - [idRayon] vide : 'detailsAll' (Mode Global / Saisie Rapide)
+  /// - [idRayon] renseigné : 'details' (Mode par Emplacement)
   Future<List<Product>> fetchProducts(String idInventaire, String? idRayon, {String? query}) async {
-
-    // 1. Choix de l'endpoint
-    String endpoint;
-    if (idRayon != null && idRayon.isNotEmpty) {
-      endpoint = 'details';
-    } else {
-      endpoint = 'detailsAll';
-    }
-
-    // 2. Construction de l'URL de base
-    String urlStr = '$baseUrl/api/v1/ws/inventaires/$endpoint?idInventaire=$idInventaire';
-
-    // 3. Ajout du rayon (seulement si endpoint 'details')
-    if (idRayon != null && idRayon.isNotEmpty) {
-      urlStr += '&idRayon=$idRayon';
-    }
-
-    // 4. Ajout du query (Recherche CIP, EAN, Nom...)
-    if (query != null && query.isNotEmpty) {
-      urlStr += '&query=${Uri.encodeQueryComponent(query)}';
-    }
-
-    final url = Uri.parse(urlStr);
-
-    try {
-      // Debug: afficher l'URL appelée dans la console
-      print("Calling API: $urlStr");
-
-      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        List<Product> products = data.map((json) => Product.fromJson(json)).toList();
-
-        // Tri alphabétique optionnel
-        products.sort((a, b) => a.produitName.compareTo(b.produitName));
-
-        return products;
-      } else {
-        throw Exception('Échec du chargement des produits (Statut: ${response.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
-    } on TimeoutException {
-      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
-    } catch (e) {
-      rethrow;
-    }
+    final parRayon = idRayon != null && idRayon.isNotEmpty;
+    final url = _uri(parRayon ? '/details' : '/detailsAll', {
+      'idInventaire': idInventaire,
+      if (parRayon) 'idRayon': idRayon,
+      'query': query,
+    });
+    journal('Chargement des produits${parRayon ? ' (emplacement)' : ''}');
+    return _parTri(await _loadList('produits', url, Product.fromJson));
   }
 
-  Future<void> updateProductQuantity(int productId, int newQuantity) async {
-    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/details');
-    // On envoie un objet JSON avec id et quantite
-    final requestBody = jsonEncode({'id': productId, 'quantite': newQuantity});
-    try {
-      final response = await _httpPut(url, requestBody).timeout(const Duration(seconds: 15));
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception('Le serveur a répondu avec le statut ${response.statusCode}');
-      }
-    } on SocketException {
-      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
-    } on TimeoutException {
-      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
-    } catch (e) {
-      rethrow;
-    }
-  }
+  // --- ÉCARTS ---
 
-  Future<bool> requestCsvGeneration(String rayonId, {String? destinationPath}) async {
-    String queryString = 'rayonId=$rayonId';
-    if (destinationPath != null && destinationPath.isNotEmpty) {
-      queryString += '&path=${Uri.encodeQueryComponent(destinationPath)}';
-    }
-
-    final url = Uri.parse('$baseUrl/api/v1/export/csv?$queryString');
-
-    try {
-      final response = await http.post(url, headers: _getHeaders()).timeout(const Duration(seconds: 30));
-      // Debug simple
-      if (response.statusCode != 200 && response.statusCode != 201) {
-        print('ERREUR EXPORT: Code ${response.statusCode}');
-      }
-      return response.statusCode == 200 || response.statusCode == 201;
-    } catch (e) {
-      print('EXCEPTION EXPORT: $e');
-      return false;
-    }
-  }
-
-  // --- ANALYSE & ÉCARTS ---
-
-  Future<List<Product>> fetchAllProductsForInventory(String inventoryId) async {
-    final url = Uri.parse('$baseUrl/api/v1/inventaires/analyse_complete?idInventaire=$inventoryId');
-    try {
-      final response = await _httpGet(url).timeout(const Duration(seconds: 60));
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        return data.map((json) => Product.fromJson(json)).toList();
-      } else {
-        throw Exception('Échec du chargement des produits pour l\'analyse (Statut: ${response.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
-    } on TimeoutException {
-      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
-    } catch (e) {
-      rethrow;
-    }
-  }
-
-  Future<List<Product>> fetchGlobalVariances(String idInventaire, {String? query}) async {
-    String urlStr = '$baseUrl/api/v1/ws/inventaires/detailsAllEcarts?idInventaire=$idInventaire';
-
-    if (query != null && query.isNotEmpty) {
-      urlStr += '&query=${Uri.encodeQueryComponent(query)}';
-    }
-
-    final url = Uri.parse(urlStr);
-
-    try {
-      print("Calling API Variances: $urlStr");
-      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
-
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        List<Product> products = data.map((json) => Product.fromJson(json)).toList();
-
-        // On peut trier par nom pour faciliter la lecture
-        products.sort((a, b) => a.produitName.compareTo(b.produitName));
-        return products;
-      } else {
-        throw Exception('Échec du chargement des écarts (Statut: ${response.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
-    } on TimeoutException {
-      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
-    } catch (e) {
-      rethrow;
-    }
-  }
+  Future<List<Product>> fetchGlobalVariances(String idInventaire, {String? query}) async =>
+      _parTri(await _loadList('écarts', _uri('/detailsAllEcarts', {'idInventaire': idInventaire, 'query': query}), Product.fromJson));
 
   // --- NON INVENTORIÉS ---
 
-  Future<List<Product>> fetchUntouchedProducts(String idInventaire, {String? query}) async {
-    String urlStr = '$baseUrl/api/v1/ws/inventaires/detailsAllUntouched?idInventaire=$idInventaire';
-    if (query != null && query.isNotEmpty) {
-      urlStr += '&query=${Uri.encodeQueryComponent(query)}';
-    }
-    final url = Uri.parse(urlStr);
+  Future<List<Product>> fetchUntouchedProducts(String idInventaire, {String? query}) async =>
+      _parTri(await _loadList('restants', _uri('/detailsAllUntouched', {'idInventaire': idInventaire, 'query': query}), Product.fromJson));
+
+  Future<List<Product>> fetchUntouchedProductsByRayon(String idInventaire, String idRayon, {String? query}) async => _parTri(await _loadList(
+      'restants de l\'emplacement',
+      _uri('/detailsUntouchedRayon', {'idInventaire': idInventaire, 'idRayon': idRayon, 'query': query}),
+      Product.fromJson));
+
+  Future<List<Product>> fetchTouchedProductsByRayon(String inventoryId, String rayonId, {String? query}) => _loadList(
+      'produits comptés de l\'emplacement',
+      _uri('/detailsTouchedRayon', {'idInventaire': inventoryId, 'idRayon': rayonId, 'query': query}),
+      Product.fromJson);
+
+  /// Le rayon a-t-il été entamé ? `null` si on ne peut pas le savoir (erreur : état inconnu, et non
+  /// plus « pas commencé »).
+  Future<bool?> hasTouchedProductsInRayon(String inventoryId, String rayonId) async {
     try {
-      print("Calling API Untouched: $urlStr");
-      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        List<Product> products = data.map((json) => Product.fromJson(json)).toList();
-        products.sort((a, b) => a.produitName.compareTo(b.produitName));
-        return products;
-      } else {
-        throw Exception('Échec du chargement des restants (Statut: ${response.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
-    } on TimeoutException {
-      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
-    } catch (e) {
-      rethrow;
+      return (await _loadList('produits comptés', _uri('/detailsTouchedRayon', {'idInventaire': inventoryId, 'idRayon': rayonId}), (m) => m,
+              delai: const Duration(seconds: 8)))
+          .isNotEmpty;
+    } on ApiLoadException {
+      return null;
     }
   }
 
-  Future<List<Product>> fetchUntouchedProductsByRayon(String idInventaire, String idRayon, {String? query}) async {
-    String urlStr = '$baseUrl/api/v1/ws/inventaires/detailsUntouchedRayon?idInventaire=$idInventaire&idRayon=$idRayon';
-
-    if (query != null && query.isNotEmpty) {
-      urlStr += '&query=${Uri.encodeQueryComponent(query)}';
-    }
-
-    final url = Uri.parse(urlStr);
-
+  /// Reste-t-il des produits à compter ? `null` si on ne peut pas le savoir.
+  Future<bool?> hasUntouchedProductsInRayon(String inventoryId, String rayonId) async {
     try {
-      print("Calling API Untouched Rayon: $urlStr");
-      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
-
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        List<Product> products = data.map((json) => Product.fromJson(json)).toList();
-        products.sort((a, b) => a.produitName.compareTo(b.produitName));
-        return products;
-      } else {
-        throw Exception('Échec du chargement des restants par rayon (Statut: ${response.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('Erreur réseau: Impossible de joindre le serveur.');
-    } on TimeoutException {
-      throw Exception('Erreur réseau: Le délai de connexion a été dépassé.');
-    } catch (e) {
-      rethrow;
+      return (await _loadList('restants', _uri('/detailsUntouchedRayon', {'idInventaire': inventoryId, 'idRayon': rayonId}), (m) => m,
+              delai: const Duration(seconds: 8)))
+          .isNotEmpty;
+    } on ApiLoadException {
+      return null;
     }
   }
 
   // --- GESTION LICENCE ---
 
-  /// Enregistre une nouvelle licence
+  /// Enregistre une nouvelle licence.
+  ///
+  /// ÉCART CONNU AVEC LE SERVEUR (non corrigé ici, voir docs/NOTE_VERSION_FIABILITE.md) : le serveur
+  /// expose `GET /licence/save/{clé}` (LicenceRessource) et l'app envoie un POST (→ 405) ; de plus la
+  /// route exige une session alors que l'écran d'activation s'affiche avant la connexion (→ 401).
+  /// L'activation depuis l'application ne peut donc pas aboutir sans changement côté serveur.
   Future<bool> saveLicense(String key) async {
-    final url = Uri.parse('$baseUrl/api/v1/licence/save/$key');
+    final url = Uri.parse('$baseUrl/api/v1/licence/save/${Uri.encodeComponent(key)}');
     try {
-      final response = await http.post(url, headers: _getHeaders()).timeout(const Duration(seconds: 15));
-      // On considère que 200 = succès
+      final response = await (_client != null ? _client!.post(url, headers: _getHeaders()) : http.post(url, headers: _getHeaders()))
+          .timeout(const Duration(seconds: 15));
       return response.statusCode == 200;
     } catch (e) {
-      throw Exception("Erreur lors de l'enregistrement de la licence : $e");
+      throw Exception(_estErreurReseau(e) ? 'Serveur injoignable.' : 'Enregistrement de la licence impossible.');
     }
   }
 
-  /// Récupère la licence active
+  /// Récupère la licence active.
+  /// - serveur injoignable / délai dépassé : [ApiLoadException] de type réseau ;
+  /// - réponse sans licence ou illisible : [ApiLoadException] de type refus / données.
   Future<License> findLicense() async {
     final url = Uri.parse('$baseUrl/api/v1/licence/find');
+    final http.Response response;
     try {
-      final response = await _httpGet(url).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        // Le serveur retourne un JSON unique, pas une liste
-        final dynamic data = json.decode(utf8.decode(response.bodyBytes));
-        return License.fromJson(data);
-      } else {
-        throw Exception('Aucune licence valide trouvée (Code ${response.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('Impossible de joindre le serveur de licence (Hors-ligne ?)');
+      response = await _httpGet(url).timeout(const Duration(seconds: 10));
     } catch (e) {
-      rethrow;
+      throw const ApiLoadException('Serveur injoignable : impossible de vérifier la licence.', TypeErreurChargement.reseau);
     }
-  }
-
-  /// Vérifie si un rayon a été entamé (Liste des produits touchés non vide)
-  Future<bool> hasTouchedProductsInRayon(String inventoryId, String rayonId) async {
-    // On laisse query vide pour avoir tout le rayon
-    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/detailsTouchedRayon?idInventaire=$inventoryId&idRayon=$rayonId&query=');
+    if (response.statusCode != 200) {
+      throw ApiLoadException('Aucune licence valide trouvée (code ${response.statusCode}).');
+    }
     try {
-      final response = await _httpGet(url).timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        return data.isNotEmpty;
-      }
-      return false;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  Future<List<Product>> fetchTouchedProductsByRayon(String inventoryId, String rayonId, {String? query}) async {
-    // On construit l'URL avec les paramètres obligatoires
-    String url = '$baseUrl/api/v1/ws/inventaires/detailsTouchedRayon?idInventaire=$inventoryId&idRayon=$rayonId';
-
-    // Si on fait une recherche/scan, on ajoute le query à l'URL
-    if (query != null && query.isNotEmpty) {
-      url += '&query=$query';
-    }
-
-    final response = await http.get(
-      Uri.parse(url),
-      headers: {'Cookie': sessionCookie ?? ''},
-    );
-
-    if (response.statusCode == 200) {
-      final List<dynamic> data = json.decode(response.body);
-      return data.map((json) => Product.fromJson(json)).toList();
-    } else {
-      throw Exception('Erreur lors du chargement des écarts de cet emplacement');
-    }
-  }
-
-  /// Vérifie s'il reste des produits à faire (Liste des produits intouchés non vide)
-  Future<bool> hasUntouchedProductsInRayon(String inventoryId, String rayonId) async {
-    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/detailsUntouchedRayon?idInventaire=$inventoryId&idRayon=$rayonId&query=');
-    try {
-      final response = await _httpGet(url).timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        return data.isNotEmpty; // Si vide = tout est fini
-      }
-      return true; // En cas d'erreur, on suppose qu'il en reste (sécurité)
-    } catch (e) {
-      return true;
+      final dynamic data = json.decode(utf8.decode(response.bodyBytes));
+      return License.fromJson(Map<String, dynamic>.from(data as Map));
+    } catch (_) {
+      throw const ApiLoadException('Aucune licence enregistrée sur le serveur.', TypeErreurChargement.donnees);
     }
   }
 }

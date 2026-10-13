@@ -9,9 +9,9 @@ class Rayon {
 
   factory Rayon.fromJson(Map<String, dynamic> json) {
     return Rayon(
-      id: json['id'],
-      code: json['code'],
-      libelle: json['libelle'],
+      id: '${json['id'] ?? ''}',
+      code: '${json['code'] ?? ''}',
+      libelle: '${json['libelle'] ?? ''}',
     );
   }
 }

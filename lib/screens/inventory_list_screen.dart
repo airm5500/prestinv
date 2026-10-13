@@ -10,6 +10,7 @@ import 'package:prestinv/screens/inventory_entry_screen.dart';
 import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/screens/global_variance_screen.dart';
 import 'package:prestinv/screens/uncounted_screen.dart'; // NOUVEAU IMPORT
+import 'package:prestinv/widgets/chargement_erreur.dart';
 
 class InventoryListScreen extends StatefulWidget {
   final bool isQuickMode;
@@ -44,7 +45,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final apiService = ApiService(
       baseUrl: appConfig.currentApiUrl,
-      sessionCookie: authProvider.sessionCookie,
+      cookie: () => authProvider.sessionCookie,
     );
     await Provider.of<InventoryProvider>(context, listen: false)
         .fetchInventories(apiService, maxResult: appConfig.maxResult);
@@ -69,7 +70,8 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
               return const Center(child: CircularProgressIndicator());
             }
             if (provider.error != null) {
-              return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text('Erreur: ${provider.error}', style: const TextStyle(color: Colors.red))));
+              // Échec ≠ « aucun inventaire » : message clair et Réessayer (ou Se reconnecter).
+              return LoadErrorView.depuis(provider.errorObject ?? provider.error!, onRetry: _refreshInventories);
             }
             if (provider.inventories.isEmpty) {
               return const Center(child: Text('Aucun inventaire trouvé.'));

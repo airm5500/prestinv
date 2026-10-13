@@ -20,6 +20,8 @@ import 'package:prestinv/screens/cumul_history_screen.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
 import 'package:prestinv/saisie/saisie_serveur.dart';
 import 'package:prestinv/utils/saisie_input.dart';
+import 'package:prestinv/widgets/chargement_erreur.dart';
+import 'package:prestinv/widgets/reconnexion.dart';
 
 import 'dart:io';
 import 'package:intl/intl.dart';
@@ -701,9 +703,15 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         }
       }
     } catch (e) {
+      // Erreur réseau / session ≠ « produit introuvable ».
       if (mounted && !fromTyping) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Erreur : $e'), backgroundColor: Colors.red));
+            content: Text(messageErreur(e)),
+            backgroundColor: Colors.red,
+            action: estSessionExpiree(e)
+                ? SnackBarAction(label: 'Se reconnecter', textColor: Colors.white, onPressed: () => demanderReconnexion(context))
+                : null));
       }
     }
   }
@@ -1396,9 +1404,16 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
             bool showSearchAndBody =
                 widget.isQuickMode || provider.selectedRayon != null;
             if (provider.error != null) {
-              return Center(
-                  child: Text(provider.error!,
-                      style: const TextStyle(color: Colors.red)));
+              // Échec de chargement : message clair + Réessayer / Se reconnecter (avant : texte rouge
+              // seul à la place de l'écran, sans moyen de relancer).
+              return LoadErrorView.depuis(provider.errorObject ?? provider.error!, onRetry: () {
+                final rayon = provider.selectedRayon;
+                if (rayon != null) {
+                  provider.fetchProducts(_apiService, widget.inventoryId, rayon.id);
+                } else {
+                  provider.fetchRayons(_apiService, widget.inventoryId);
+                }
+              });
             }
             if (provider.isLoading &&
                 provider.rayons.isEmpty &&

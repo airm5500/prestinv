@@ -8,16 +8,21 @@ class InventoryProvider with ChangeNotifier {
   List<Inventory> _inventories = [];
   bool _isLoading = false;
   String? _error;
+  Object? _errorObj;
 
   List<Inventory> get inventories => _inventories;
   bool get isLoading => _isLoading;
   String? get error => _error;
+
+  /// Erreur levée (pour distinguer session expirée / serveur injoignable).
+  Object? get errorObject => _errorObj;
 
   // --- MODIFICATION DE LA SIGNATURE DE LA METHODE ---
   // On ajoute le paramètre optionnel {int maxResult = 3}
   Future<void> fetchInventories(ApiService api, {int maxResult = 3}) async {
     _isLoading = true;
     _error = null;
+    _errorObj = null;
     notifyListeners();
     try {
       // --- MODIFICATION DE L'APPEL A L'API ---
@@ -25,6 +30,8 @@ class InventoryProvider with ChangeNotifier {
       _inventories = await api.fetchInventories(maxResult: maxResult);
     } catch (e) {
       _error = e.toString();
+      _errorObj = e;
+      _inventories = [];
     }
     _isLoading = false;
     notifyListeners();

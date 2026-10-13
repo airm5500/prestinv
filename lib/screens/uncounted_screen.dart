@@ -15,6 +15,7 @@ import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/saisie/saisie.dart';
 import 'package:prestinv/saisie/saisie_correction.dart';
 import 'package:prestinv/utils/saisie_input.dart';
+import 'package:prestinv/widgets/chargement_erreur.dart';
 
 enum StockFilterType { none, less, more, lessEq, moreEq, diff, equal }
 
@@ -45,6 +46,10 @@ class _UncountedScreenState extends State<UncountedScreen> {
   List<Product> _displayedProducts = [];
   bool _isLoading = true;
   String? _errorMessage;
+  Object? _erreur;
+
+  /// Emplacements non chargés (le filtre par emplacement est indisponible) : bandeau + Réessayer.
+  Object? _erreurRayons;
 
   List<Rayon> _rayons = [];
   Rayon? _selectedRayon;
@@ -89,6 +94,7 @@ class _UncountedScreenState extends State<UncountedScreen> {
       if (mounted) {
         setState(() {
           _rayons = rayons;
+          _erreurRayons = null;
         });
 
         final provider = Provider.of<EntryProvider>(context, listen: false);
@@ -97,7 +103,7 @@ class _UncountedScreenState extends State<UncountedScreen> {
         _loadUntouchedProducts();
       }
     } catch (e) {
-      print("Erreur chargement rayons: $e");
+      if (mounted) setState(() => _erreurRayons = e);
       _loadUntouchedProducts();
     }
   }
@@ -106,6 +112,7 @@ class _UncountedScreenState extends State<UncountedScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _erreur = null;
     });
     try {
       List<Product> products;
@@ -126,7 +133,8 @@ class _UncountedScreenState extends State<UncountedScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = messageErreur(e);
+          _erreur = e;
           _isLoading = false;
         });
       }
@@ -327,7 +335,8 @@ class _UncountedScreenState extends State<UncountedScreen> {
         });
       }
     } catch (e) {
-      print("Erreur recherche API: $e");
+      // Recherche en échec : on le dit (avant : erreur avalée).
+      if (mounted) _showNotification(messageErreur(e), Colors.red);
     }
   }
 
@@ -626,6 +635,11 @@ class _UncountedScreenState extends State<UncountedScreen> {
             ),
           ),
           const Divider(height: 1),
+          if (_erreurRayons != null)
+            LoadErrorBanner(
+                message: messageErreur(_erreurRayons!),
+                sessionExpiree: estSessionExpiree(_erreurRayons),
+                onRetry: _loadRayons),
           Padding(
             padding: const EdgeInsets.all(12.0),
             child: Row(
@@ -716,9 +730,7 @@ class _UncountedScreenState extends State<UncountedScreen> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _errorMessage != null
-                ? Center(
-                child: Text("Erreur : $_errorMessage",
-                    style: const TextStyle(color: Colors.red)))
+                ? LoadErrorView.depuis(_erreur ?? _errorMessage!, onRetry: _loadUntouchedProducts)
                 : _displayedProducts.isEmpty
                 ? Center(
               child: Column(

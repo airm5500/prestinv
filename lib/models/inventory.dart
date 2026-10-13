@@ -6,8 +6,8 @@ class Inventory {
 
   factory Inventory.fromJson(Map<String, dynamic> json) {
     return Inventory(
-      id: json['id'],
-      libelle: json['libelle'],
+      id: '${json['id'] ?? ''}',
+      libelle: '${json['libelle'] ?? ''}',
     );
   }
 }

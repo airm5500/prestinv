@@ -1,8 +1,10 @@
 // lib/providers/auth_provider.dart
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/user.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -50,11 +52,11 @@ class AuthProvider with ChangeNotifier {
     final url = Uri.parse('${appConfig.currentApiUrl}/api/v1/user/auth');
 
     try {
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'login': login, 'password': password}),
-      );
+      final client = ApiService.clientParDefaut;
+      final headers = {'Content-Type': 'application/json'};
+      final body = json.encode({'login': login, 'password': password});
+      final response = await (client != null ? client.post(url, headers: headers, body: body) : http.post(url, headers: headers, body: body))
+          .timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
@@ -81,6 +83,8 @@ class AuthProvider with ChangeNotifier {
       } else {
         _errorMessage = "Erreur serveur (${response.statusCode})";
       }
+    } on TimeoutException {
+      _errorMessage = "Le serveur ne répond pas (délai dépassé). Vérifiez le réseau et l'adresse du serveur.";
     } catch (e) {
       _errorMessage = "Erreur de connexion. Vérifiez le réseau et l'adresse du serveur.";
     }
@@ -93,7 +97,10 @@ class AuthProvider with ChangeNotifier {
   void _parseAndSetCookie(http.Response response) {
     final rawCookie = response.headers['set-cookie'];
     if (rawCookie != null) {
-      _sessionCookie = rawCookie.split(';').firstWhere((c) => c.trim().startsWith('JSESSIONID'));
+      // Plusieurs cookies possibles (séparés par « ; » ou « , ») : on garde JSESSIONID s'il est là.
+      final morceaux = rawCookie.split(RegExp(r'[;,]')).map((c) => c.trim());
+      final session = morceaux.where((c) => c.startsWith('JSESSIONID=')).firstOrNull;
+      if (session != null) _sessionCookie = session;
     }
   }
 
@@ -112,7 +119,12 @@ class AuthProvider with ChangeNotifier {
     // CORRECTION : On retire "/laborex" qui est maintenant dans currentApiUrl
     final url = Uri.parse('${appConfig.currentApiUrl}/api/v1/user/logout');
     if (_sessionCookie != null) {
-      await http.post(url, headers: {'Cookie': _sessionCookie!});
+      // Réseau coupé : on se déconnecte quand même sur l'appareil (avant : impossible de se déconnecter).
+      try {
+        final client = ApiService.clientParDefaut;
+        final headers = {'Cookie': _sessionCookie!};
+        await (client != null ? client.post(url, headers: headers) : http.post(url, headers: headers)).timeout(const Duration(seconds: 5));
+      } catch (_) {}
     }
 
     _user = null;

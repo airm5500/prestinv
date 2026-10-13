@@ -27,16 +27,16 @@ class Product {
 
   factory Product.fromJson(Map<String, dynamic> json) {
     return Product(
-      id: json['id'],
-      produitCip: json['produitCip'] ?? '',
-      produitName: json['produitName'] ?? '',
+      id: (json['id'] as num).toInt(),
+      produitCip: '${json['produitCip'] ?? ''}',
+      produitName: '${json['produitName'] ?? ''}',
       produitPrixAchat: (json['produitPrixAchat'] as num?)?.toDouble() ?? 0.0,
       produitPrixUni: (json['produitPrixUni'] as num?)?.toDouble() ?? 0.0,
-      quantiteInitiale: json['quantiteInitiale'] ?? 0,
-      quantiteSaisie: json['quantiteSaisie'] ?? 0,
-      isSynced: json['isSynced'] ?? true,
-      dtUpdated: json['dtUpdated'], // Récupération de la date
-      locationLabel: json['locationLabel'],
+      quantiteInitiale: (json['quantiteInitiale'] as num?)?.toInt() ?? 0,
+      quantiteSaisie: (json['quantiteSaisie'] as num?)?.toInt() ?? 0,
+      isSynced: json['isSynced'] is bool ? json['isSynced'] as bool : true,
+      dtUpdated: json['dtUpdated']?.toString(), // Récupération de la date
+      locationLabel: json['locationLabel']?.toString(),
     );
   }
 

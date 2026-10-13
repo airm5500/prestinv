@@ -34,6 +34,10 @@ class EntryProvider with ChangeNotifier {
   Rayon? _selectedRayon;
   bool _isLoading = false;
   String? _error;
+  Object? _errorObj;
+
+  /// Erreur levée au dernier chargement (pour « Se reconnecter » si la session a expiré).
+  Object? get errorObject => _errorObj;
 
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
@@ -287,14 +291,14 @@ class EntryProvider with ChangeNotifier {
 
   Future<void> fetchRayons(ApiService api, String inventoryId) async {
     _inventoryId = inventoryId;
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true; _error = null; _errorObj = null; notifyListeners();
     try {
       _rayons = await api.fetchRayons(inventoryId);
       loadRayonStatuses(api, inventoryId);
       if (_rayons.length == 1) {
         await fetchProducts(api, inventoryId, _rayons.first.id);
       }
-    } catch (e) { _error = e.toString(); }
+    } catch (e) { _error = e.toString(); _errorObj = e; }
     _isLoading = false; notifyListeners();
   }
 
@@ -302,10 +306,14 @@ class EntryProvider with ChangeNotifier {
     if (_isLoadingStatuses || _rayons.isEmpty) return;
     _isLoadingStatuses = true;
     for (var rayon in _rayons) {
-      bool hasTouched = await api.hasTouchedProductsInRayon(inventoryId, rayon.id);
+      // Erreur réseau : état INCONNU (on garde l'état précédent) — avant, une erreur affichait
+      // « pas commencé » ou « reste à faire » à tort.
+      final hasTouched = await api.hasTouchedProductsInRayon(inventoryId, rayon.id);
+      if (hasTouched == null) continue;
       int status = 0;
       if (hasTouched) {
-        bool hasUntouched = await api.hasUntouchedProductsInRayon(inventoryId, rayon.id);
+        final hasUntouched = await api.hasUntouchedProductsInRayon(inventoryId, rayon.id);
+        if (hasUntouched == null) continue;
         status = !hasUntouched ? 2 : 1;
       }
       _rayonStatuses[rayon.id] = status;
@@ -316,7 +324,7 @@ class EntryProvider with ChangeNotifier {
 
   Future<void> fetchProducts(ApiService api, String inventoryId, String rayonId) async {
     _inventoryId = inventoryId;
-    _isLoading = true; _error = null; _isGlobalMode = false;
+    _isLoading = true; _error = null; _errorObj = null; _isGlobalMode = false;
     _locallyTouchedProductIds.clear();
 
     _selectedRayon = _rayons.firstWhere((r) => r.id == rayonId, orElse: () => Rayon(id: rayonId, code: '', libelle: 'Inconnu'));
@@ -332,7 +340,7 @@ class EntryProvider with ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final lastIndex = prefs.getInt(_getPrefKey(inventoryId, 'index', rayonId: rayonId)) ?? 0;
       _currentProductIndex = (lastIndex >= 0 && lastIndex < _filteredProducts.length) ? lastIndex : 0;
-    } catch (e) { _error = e.toString(); }
+    } catch (e) { _error = e.toString(); _errorObj = e; }
     _isLoading = false; notifyListeners();
   }
 
@@ -374,7 +382,7 @@ class EntryProvider with ChangeNotifier {
 
   Future<List<Product>> searchProductOnline(ApiService api, String inventoryId, String query) async {
     _inventoryId = inventoryId;
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true; notifyListeners();
     List<Product> results = [];
     try {
       // La liste en mémoire ne sert qu'à l'affichage : chaque quantité saisie est déjà dans la file
@@ -386,8 +394,11 @@ class EntryProvider with ChangeNotifier {
         _isGlobalMode = true;
         _currentProductIndex = 0;
       }
-    } catch (e) { _error = "Erreur recherche: $e"; }
-    _isLoading = false; notifyListeners();
+    } finally {
+      // Une recherche en échec ne remplace plus tout l'écran par l'erreur : elle est relancée
+      // à l'appelant, qui affiche le message (≠ « produit introuvable »).
+      _isLoading = false; notifyListeners();
+    }
     return results;
   }
 
@@ -404,7 +415,7 @@ class EntryProvider with ChangeNotifier {
         _allProducts.addAll(await _loadAndMergeUnsyncedData(inventoryId, r.id, ps));
       }
       _filteredProducts = List.from(_allProducts);
-    } catch (e) { _error = "Err global: $e"; }
+    } catch (e) { _error = "Err global: $e"; _errorObj = e; }
     _isLoading = false; notifyListeners();
   }
 

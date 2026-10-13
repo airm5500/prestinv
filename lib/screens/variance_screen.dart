@@ -13,6 +13,7 @@ import 'package:prestinv/saisie/saisie.dart';
 import 'package:prestinv/saisie/saisie_correction.dart';
 import 'package:prestinv/saisie/saisie_serveur.dart';
 import 'package:prestinv/utils/saisie_input.dart';
+import 'package:prestinv/widgets/chargement_erreur.dart';
 import 'package:provider/provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -46,6 +47,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
   int _currentProductIndex = 0;
 
   bool _isLoading = true;
+  Object? _erreurChargement;
   bool _showSearchResults = false;
 
   // Cette variable sert à savoir si on doit remplacer le texte au lieu de l'ajouter
@@ -94,7 +96,10 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 
   Future<void> _fetchAndSetupProducts() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _erreurChargement = null;
+    });
     try {
       List<Product> allProductsFromServer =
       await _apiService.fetchProducts(widget.inventoryId, widget.rayonId);
@@ -112,11 +117,13 @@ class _VarianceScreenState extends State<VarianceScreen> {
         });
       }
     } catch (e) {
+      // Échec ≠ « aucun écart » : écran d'erreur avec Réessayer (avant : message 2 s puis « Aucun
+      // produit avec un écart de stock n'a été trouvé »).
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur de chargement des produits: $e')),
-        );
-        setState(() => _isLoading = false);
+        setState(() {
+          _erreurChargement = e;
+          _isLoading = false;
+        });
       }
     }
   }
@@ -573,6 +580,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
+          : _erreurChargement != null
+          ? LoadErrorView.depuis(_erreurChargement!, onRetry: _fetchAndSetupProducts)
           : (_productsWithVariance.isEmpty && !_isLoading)
           ? const Center(
           child: Padding(
