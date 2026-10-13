@@ -28,10 +28,9 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        //versionCode = flutter.versionCode
-        versionCode = 4
-        //versionName = flutter.versionName
-        versionName = "4.8.5"
+        // Version unique : celle de pubspec.yaml (« version: 4.9.0+5 » → versionName 4.9.0, versionCode 5).
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
     }
 
     // Ajouter ce bloc pour renommer les fichiers de sortie
