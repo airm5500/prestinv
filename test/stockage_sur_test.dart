@@ -1,5 +1,4 @@
 // Mot de passe mémorisé : stockage sécurisé + migration de l'ancienne clé en clair ; journaux sans secret.
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
@@ -8,34 +7,8 @@ import 'package:prestinv/services/identifiants_securises.dart';
 import 'package:prestinv/utils/journal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'helpers/coffre_memoire.dart';
 import 'helpers/faux_prestige_http.dart';
-
-class CoffreMemoire implements CoffreIdentifiants {
-  final Map<String, String> valeurs = {};
-  bool enPanne = false;
-
-  void _verifier() {
-    if (enPanne) throw PlatformException(code: 'KeystoreIndisponible');
-  }
-
-  @override
-  Future<String?> lire(String cle) async {
-    _verifier();
-    return valeurs[cle];
-  }
-
-  @override
-  Future<void> ecrire(String cle, String valeur) async {
-    _verifier();
-    valeurs[cle] = valeur;
-  }
-
-  @override
-  Future<void> effacer(String cle) async {
-    _verifier();
-    valeurs.remove(cle);
-  }
-}
 
 void main() {
   late CoffreMemoire coffre;

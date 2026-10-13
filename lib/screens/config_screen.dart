@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/interface_version.dart';
 import 'package:http/http.dart' as http;
+import 'package:prestinv/widgets/pin_admin.dart';
 
 class ConfigScreen extends StatefulWidget {
   const ConfigScreen({super.key});
@@ -32,6 +33,19 @@ class _ConfigScreenState extends State<ConfigScreen> {
   late bool _isCumulEnabled; // Doit être initialisée dans initState
   bool _isAppNameEditable = false;
   bool _isTestingConnection = false;
+
+  /// Connexion au serveur (adresses, ports, contexte) modifiable seulement après le code
+  /// administrateur : un réglage modifié par n'importe qui pouvait renvoyer les mots de passe vers
+  /// un faux serveur.
+  bool _serveurDeverrouille = false;
+
+  Future<void> _deverrouillerServeur() async {
+    final ok = await demanderPinAdmin(context);
+    if (!mounted) return;
+    if (ok) {
+      setState(() => _serveurDeverrouille = true);
+    }
+  }
 
   @override
   void initState() {
@@ -168,15 +182,29 @@ class _ConfigScreenState extends State<ConfigScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Connexion API', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            if (!_serveurDeverrouille)
+              OutlinedButton.icon(
+                onPressed: _deverrouillerServeur,
+                icon: const Icon(Icons.lock_outline),
+                label: const Text('Modifier la connexion (code administrateur)'),
+              )
+            else
+              Row(children: [
+                const Icon(Icons.lock_open, color: Colors.green),
+                const SizedBox(width: 6),
+                const Expanded(child: Text('Connexion modifiable')),
+                TextButton(onPressed: () => changerPinAdmin(context), child: const Text('Changer le code')),
+              ]),
             const SizedBox(height: 16),
             const Text('Adresse Locale', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: TextFormField(controller: _localAddressController, decoration: const InputDecoration(labelText: 'Adresse IP ou domaine', border: OutlineInputBorder()))),
+                Expanded(child: TextFormField(controller: _localAddressController, enabled: _serveurDeverrouille, decoration: const InputDecoration(labelText: 'Adresse IP ou domaine', border: OutlineInputBorder()))),
                 const SizedBox(width: 8),
-                SizedBox(width: 90, child: TextFormField(controller: _localPortController, decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly])),
+                SizedBox(width: 90, child: TextFormField(controller: _localPortController, enabled: _serveurDeverrouille, decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly])),
                 IconButton(icon: Icon(Icons.network_ping, color: _isTestingConnection ? Colors.grey : Theme.of(context).primaryColor), tooltip: 'Tester la connexion', onPressed: _isTestingConnection ? null : () => _testConnectivity(_localAddressController.text, _localPortController.text)),
               ],
             ),
@@ -186,9 +214,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: TextFormField(controller: _distantAddressController, decoration: const InputDecoration(labelText: 'Adresse IP ou domaine', border: OutlineInputBorder()))),
+                Expanded(child: TextFormField(controller: _distantAddressController, enabled: _serveurDeverrouille, decoration: const InputDecoration(labelText: 'Adresse IP ou domaine', border: OutlineInputBorder()))),
                 const SizedBox(width: 8),
-                SizedBox(width: 90, child: TextFormField(controller: _distantPortController, decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly])),
+                SizedBox(width: 90, child: TextFormField(controller: _distantPortController, enabled: _serveurDeverrouille, decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly])),
                 IconButton(icon: Icon(Icons.network_ping, color: _isTestingConnection ? Colors.grey : Theme.of(context).primaryColor), tooltip: 'Tester la connexion', onPressed: _isTestingConnection ? null : () => _testConnectivity(_distantAddressController.text, _distantPortController.text)),
               ],
             ),
@@ -211,7 +239,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                 IconButton(
                   icon: Icon(_isAppNameEditable ? Icons.save_alt_outlined : Icons.edit_outlined),
                   tooltip: _isAppNameEditable ? 'Enregistrer' : 'Modifier',
-                  onPressed: () => setState(() => _isAppNameEditable = !_isAppNameEditable),
+                  onPressed: _serveurDeverrouille ? () => setState(() => _isAppNameEditable = !_isAppNameEditable) : null,
                 )
               ],
             ),
