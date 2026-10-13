@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquettes Prestige Inventaire</title>
+<style>
+:root{--navy:#003366;--navy2:#0B4A80;--amber:#F59E0B;--onAmber:#1F1300;--page:#F2F4F8;--ink:#14213D;--muted:#5B6B82;--line:#E3E8EF;--hm:#C9D6E8;--green:#16A34A;--blue:#2563EB;--red:#DC2626;--bg:#E9EDF3;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink)}
+header.top{padding:24px 16px 8px;max-width:1240px;margin:auto}
+h1{font-size:24px;margin:0 0 6px}
+.lead{color:var(--muted);margin:0 0 6px;max-width:980px;font-size:14.5px;line-height:1.45}
+section{padding:6px 0 18px}
+h2{max-width:1240px;margin:22px auto 4px;padding:0 16px;font-size:19px}
+.sub{max-width:1240px;margin:0 auto 12px;padding:0 16px;color:var(--muted);font-size:14px}
+.row{display:flex;flex-wrap:wrap;gap:22px;max-width:1240px;margin:auto;padding:0 16px 8px}
+figure{margin:0;display:flex;flex-direction:column;gap:8px;width:330px;max-width:100%}
+figure.wide{width:900px}
+figcaption{font-size:13px;color:var(--muted);line-height:1.4}
+figcaption b{color:var(--ink)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--navy);color:#fff;margin-right:4px}
+.phone{width:330px;max-width:100%;height:660px;border-radius:30px;border:8px solid #1b2433;background:var(--page);overflow:hidden;display:flex;flex-direction:column;position:relative;box-shadow:0 10px 24px rgba(20,33,61,.18)}
+.tablet{width:900px;max-width:100%;height:560px;border-radius:24px;border:10px solid #1b2433;background:var(--page);overflow:hidden;display:flex;box-shadow:0 10px 24px rgba(20,33,61,.18)}
+.phone.white{background:#fff}
+.sb{display:flex;justify-content:space-between;font-size:11px;font-weight:600;padding:6px 14px 2px;background:inherit}
+.navy{background:var(--navy);color:#fff;padding:10px 14px 14px;display:flex;flex-direction:column;gap:10px}
+.navy .sb{padding:0 0 4px;color:#fff}
+.navy.round{border-radius:0 0 22px 22px}
+.bar{display:flex;align-items:center;gap:8px}
+.bar .t{flex:1;min-width:0}
+.bar .t b{display:block;font-size:17px}
+.bar .t span{font-size:12px;color:var(--hm)}
+.ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;background:rgba(255,255,255,.14)}
+.wbar{background:#fff;border-bottom:1px solid var(--line);padding:10px 14px;display:flex;align-items:center;gap:8px;color:var(--navy)}
+.wbar .t{flex:1;min-width:0}.wbar .t b{display:block;font-size:17px}.wbar .t span{font-size:12px;color:var(--muted)}
+.search{background:#fff;border-radius:12px;padding:10px 12px;color:var(--muted);font-size:13.5px;display:flex;gap:8px;align-items:center}
+.search.out{border:1px solid #C5D0DE}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:20px;background:rgba(255,255,255,.14);color:#fff;white-space:nowrap}
+.pill.amb{background:var(--amber);color:var(--onAmber)}
+.dot{width:8px;height:8px;border-radius:50%;background:#22C55E;display:inline-block}
+.dot.r{background:#EF4444}.dot.a{background:var(--amber)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{background:rgba(255,255,255,.12);border-radius:12px;padding:8px 10px;min-width:0}
+.kpi b{display:block;font-size:16px;white-space:nowrap}.kpi span{font-size:11px;color:var(--hm)}
+.kpi small{font-size:10.5px;color:#86EFAC;font-weight:700}
+.kpi.hl{background:var(--amber);color:var(--onAmber)}.kpi.hl span{color:var(--onAmber)}
+.body{flex:1;overflow:hidden;padding:12px;display:flex;flex-direction:column;gap:9px}
+.body>*{flex-shrink:0}
+.body.flat{padding:0;gap:0;background:#fff}
+.card{background:#fff;border-radius:14px;padding:11px 12px;box-shadow:0 1px 2px rgba(20,33,61,.06);position:relative;overflow:hidden}
+.card.band{padding-left:16px}
+.card.band::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--bandc,var(--navy))}
+.pn{font-weight:600;font-size:14px}
+.pm{font-size:12px;color:var(--muted)}
+.lr{display:flex;align-items:center;gap:8px}
+.lr .g{flex:1;min-width:0}
+.amt{font-weight:700;font-size:14.5px;white-space:nowrap}
+.sec{font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin-top:2px}
+.flatsec{font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;padding:10px 14px 4px;background:var(--page)}
+.flatrow{background:#fff;border-bottom:1px solid #EEF1F5;padding:9px 14px;display:flex;align-items:center;gap:10px}
+.flatrow .g{flex:1;min-width:0}
+.mi{width:30px;height:30px;border-radius:9px;background:#E3ECF7;display:flex;align-items:center;justify-content:center;font-size:14px;flex:none}
+.chev{color:#9AA8BA;font-size:16px}
+.foot{background:#fff;border-top:1px solid var(--line);padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
+.btn{border-radius:12px;padding:12px;text-align:center;font-weight:700;font-size:14px}
+.btn.nv{background:var(--navy);color:#fff}
+.btn.amber{background:var(--amber);color:var(--onAmber)}
+.btn.out{border:1.5px solid var(--navy);color:var(--navy);background:#fff}
+.btn.sm{padding:8px 10px;font-size:12.5px}
+.two{display:flex;gap:8px}.two>*{flex:1}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tiles.t3{grid-template-columns:1fr 1fr 1fr}
+.tile{background:#fff;border-radius:14px;padding:10px 6px;text-align:center;font-size:12px;font-weight:600;box-shadow:0 1px 2px rgba(20,33,61,.06);position:relative}
+.tile .e{font-size:19px;display:block;margin-bottom:3px}
+.tile .n{position:absolute;top:5px;right:6px;font-size:10px;background:var(--red);color:#fff;border-radius:10px;padding:1px 6px;font-weight:700}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid #C5D0DE;border-radius:20px;padding:5px 10px;font-size:11.5px;font-weight:600;color:var(--navy);background:#fff;white-space:nowrap}
+.chip.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.navy .chip{background:rgba(255,255,255,.95)}
+.navy .chip.on{background:var(--amber);color:var(--onAmber);border-color:var(--amber)}
+.badge{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:20px;white-space:nowrap}
+.b-green{background:#E6F4EA;color:#166534}.b-amber{background:#FFF4E0;color:#9A3412}.b-blue{background:#E3ECF7;color:var(--navy)}.b-red{background:#FDECEC;color:#991B1B}.b-gray{background:#EEF1F5;color:#475569}
+.warn{background:#FFF4E0;border:1px solid #F5D08A;color:#7C2D12;border-radius:12px;padding:9px 11px;font-size:12.5px;display:flex;gap:8px;align-items:flex-start;line-height:1.35}
+.err{background:#FDECEC;border:1px solid #F5B5B5;color:#7F1D1D;border-radius:12px;padding:10px 11px;font-size:12.5px;line-height:1.4}
+.err b{display:block;font-size:13.5px;margin-bottom:2px}
+.lbl{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px}
+.inp{background:#fff;border:1.5px solid #D3DBE6;border-radius:12px;padding:11px 12px;font-size:14px;display:flex;gap:8px;align-items:center}
+.inp.focus{border-color:var(--navy);box-shadow:0 0 0 3px rgba(0,51,102,.12)}
+.inp.bad{border-color:var(--red);background:#FFF8F8}
+.hint{font-size:11.5px;color:var(--red);font-weight:600;margin-top:4px}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13px}
+.box{width:18px;height:18px;border-radius:5px;background:var(--navy);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;flex:none;margin-top:1px}
+.ver{font-size:11px;color:var(--muted);text-align:center;margin-top:auto;padding:8px}
+.nav{background:#fff;border-top:1px solid var(--line);display:flex;padding:6px 4px 8px}
+.nav div{flex:1;text-align:center;font-size:10.5px;color:var(--muted)}
+.nav div i{display:block;font-style:normal;font-size:17px}
+.nav div.on{color:var(--navy);font-weight:700}
+.chart{background:#fff;border-radius:14px;padding:10px 12px;box-shadow:0 1px 2px rgba(20,33,61,.06)}
+.chart .h{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;font-weight:700}
+.chart .h span{font-weight:500;color:var(--muted);font-size:11.5px}
+.stack{display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px;margin:8px 0 6px}
+.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+table.t{width:100%;border-collapse:collapse;font-size:11.5px}
+table.t th{text-align:left;color:var(--muted);font-weight:600;font-size:10.5px;padding:6px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.t td{padding:7px 4px;border-bottom:1px solid #EEF1F5;white-space:nowrap}
+table.t td.r,table.t th.r{text-align:right}
+.qr{width:120px;height:120px;background:
+ repeating-linear-gradient(90deg,#14213D 0 6px,#fff 6px 12px),repeating-linear-gradient(0deg,#14213D 0 6px,#fff 6px 12px);background-blend-mode:difference;border:8px solid #fff;outline:1px solid var(--line);border-radius:6px}
+.step{display:flex;gap:10px;align-items:center;background:#fff;border-radius:14px;padding:12px;box-shadow:0 1px 2px rgba(20,33,61,.06)}
+.step .num{width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex:none}
+.step.done .num{background:var(--green)}
+.step.cur{outline:2px solid var(--amber)}
+.big{background:#fff;border-radius:16px;padding:13px;display:flex;gap:12px;align-items:center;box-shadow:0 1px 2px rgba(20,33,61,.06)}
+.big .e{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:21px;flex:none}
+.big b{display:block;font-size:15px}
+.big span{font-size:12px;color:var(--muted)}
+.side{width:175px;background:var(--navy);color:#fff;padding:14px 10px;display:flex;flex-direction:column;gap:4px;flex:none}
+.side .it{padding:8px 10px;border-radius:10px;font-size:12.5px;color:var(--hm)}
+.side .it.on{background:rgba(255,255,255,.14);color:#fff;font-weight:700}
+.side .grp{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#8FA7C4;margin:10px 10px 2px}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.cols{display:flex;gap:12px;padding:12px;flex:1;min-height:0}
+.av{width:30px;height:30px;border-radius:50%;background:#E3ECF7;color:var(--navy);font-weight:700;font-size:11.5px;display:flex;align-items:center;justify-content:center;flex:none}
+.split{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted)}
+.split b{color:var(--ink)}
+.legacy{background:#fff;border:1px dashed #9AA8BA;border-radius:12px;padding:10px 12px;font-size:12px;color:var(--muted)}
+@media (max-width:700px){figure.wide{width:100%}.tablet{height:auto;flex-direction:column}.side{width:auto}}
+/* --- Ajouts propres à l'inventaire --- */
+.prog{height:8px;border-radius:5px;background:#E6EBF2;overflow:hidden;display:flex}
+.prog i{display:block;height:100%}
+.navy .prog{background:rgba(255,255,255,.18)}
+.sync{display:flex;align-items:center;gap:8px;border-radius:12px;padding:8px 10px;font-size:12px;font-weight:600}
+.sync.wait{background:#FFF4E0;color:#7C2D12;border:1px solid #F5D08A}
+.sync.ok{background:#E6F4EA;color:#166534;border:1px solid #B7E1C3}
+.sync.off{background:#FDECEC;color:#7F1D1D;border:1px solid #F5B5B5}
+.sync .g{flex:1;min-width:0}
+.sync .act{background:var(--navy);color:#fff;border-radius:8px;padding:5px 9px;font-size:11.5px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.scanbox{background:#fff;border:2px dashed #9DB3CF;border-radius:14px;padding:10px 12px;display:flex;gap:10px;align-items:center;font-size:13px;color:var(--muted)}
+.scanbox.ready{border-color:var(--green);border-style:solid;background:#F3FBF5;color:#166534;font-weight:600}
+.prod{background:#fff;border-radius:16px;padding:12px;box-shadow:0 1px 2px rgba(20,33,61,.06)}
+.prod .nm{font-size:16px;font-weight:700;line-height:1.25}
+.prod .cip{font-size:12px;color:var(--muted);margin-top:2px}
+.facts{display:flex;gap:6px;margin-top:9px}
+.fact{flex:1;background:var(--page);border-radius:10px;padding:6px 8px}
+.fact span{display:block;font-size:10.5px;color:var(--muted)}
+.fact b{font-size:14px}
+.qty{background:#fff;border:2px solid var(--navy);border-radius:14px;padding:6px 12px;display:flex;align-items:center;justify-content:space-between}
+.qty span{font-size:11px;color:var(--muted)}
+.qty b{font-size:30px;letter-spacing:.02em}
+.qty.bad{border-color:var(--red);background:#FFF8F8}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px 10px 10px;background:#E9EDF3}
+.keys div{background:#fff;border-radius:10px;text-align:center;padding:9px 0;font-size:19px;font-weight:700;box-shadow:0 1px 0 #C9D2DE}
+.keys .ok{background:var(--amber);color:var(--onAmber)}
+.keys .del{background:#DDE3EA;font-size:14px;padding-top:12px}
+.journal .lr{background:#fff;border-radius:12px;padding:8px 10px}
+.st{font-size:10.5px;font-weight:700;border-radius:20px;padding:3px 7px;white-space:nowrap}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -8px 24px rgba(20,33,61,.25);padding:12px 12px 0;display:flex;flex-direction:column;gap:9px}
+.dim{position:absolute;inset:0;background:rgba(20,33,61,.38)}
+.grab{width:40px;height:4px;border-radius:3px;background:#C9D2DE;margin:0 auto}
+.dup{background:#FFF4E0;border:1px solid #F5D08A;border-radius:12px;padding:9px 10px;font-size:12.5px;color:#7C2D12}
+.dup b{color:var(--ink)}
+.ec{font-weight:800;font-size:15px;white-space:nowrap}
+.ec.neg{color:#B91C1C}.ec.pos{color:#15803D}
+.vb{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.ray{background:#fff;border-radius:12px;padding:9px 11px;display:flex;align-items:center;gap:10px}
+.ray .g{flex:1;min-width:0}
+.ray .prog{margin-top:5px;height:6px}
+.note{font-size:11.5px;color:var(--muted);line-height:1.4}
+.k{display:inline-block;font-size:10px;font-weight:700;background:#E3ECF7;color:var(--navy);border-radius:5px;padding:1px 5px}
+.intro{max-width:1240px;margin:0 auto;padding:0 16px}
+.intro ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13.5px;line-height:1.5}
+</style>
+</head>
+<body>
+<header class="top">
+<h1>Prestige Inventaire : propositions d'écrans</h1>
+<p class="lead">Maquettes pour la refonte de <b>prestinv</b>, avec la même charte que l'application de vente : bleu nuit <b>#003366</b>, ambre <b>#F59E0B</b> pour l'action principale, cartes blanches arrondies. Les données sont fictives. Chaque écran montre <b>où en est l'envoi au serveur</b> : on doit toujours savoir si une quantité est enregistrée sur le téléphone, envoyée, ou en attente.</p>
+</header>
+
+<div class="intro">
+<ul>
+<li><b>A — Guidé</b> : on avance rayon par rayon, produit par produit (comme aujourd'hui), mais avec l'avancement visible et la file d'envoi.</li>
+<li><b>B — Scan continu</b> : on scanne, on tape la quantité, on scanne le suivant. Un journal montre les 10 dernières saisies et leur état.</li>
+<li><b>C — Tablette / contrôle</b> : tableaux denses pour le pharmacien qui vérifie les écarts.</li>
+</ul>
+</div>
+
+<!-- ============ 1. ACCUEIL ============ -->
+<section id="s1">
+<h2>1. Accueil et liste des inventaires</h2>
+<p class="sub">L'inventaire en cours en tête, avec son avancement et ce qui reste à envoyer. Une panne du serveur n'est jamais présentée comme « licence » ni comme « liste vide ».</p>
+<div class="row">
+
+<figure>
+<div class="phone">
+ <div class="navy round">
+  <div class="sb"><span>08:42</span><span>Wi-Fi ▮▮▮</span></div>
+  <div class="bar"><div class="t"><b>Inventaire</b><span>Pharmacie Exemple · Awa K.</span></div><div class="ic">⚙</div></div>
+  <div style="background:rgba(255,255,255,.1);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:7px">
+   <div class="lr"><div class="g"><div style="font-size:11px;color:var(--hm)">EN COURS</div><b style="font-size:15px">Inventaire annuel 2026</b></div><span class="badge" style="background:var(--amber);color:var(--onAmber)">62 %</span></div>
+   <div class="prog"><i style="width:48%;background:#4ADE80"></i><i style="width:14%;background:var(--amber)"></i></div>
+   <div style="font-size:11.5px;color:var(--hm)">2 418 / 3 902 produits comptés · 21 rayons sur 34 terminés</div>
+  </div>
+ </div>
+ <div class="body">
+  <div class="sync wait"><span class="dot" style="background:#F59E0B"></span><div class="g">14 saisies sur le téléphone, pas encore envoyées</div><span class="act">Envoyer</span></div>
+  <div class="btn amber">▶ Reprendre : rayon S1A0T2 – CANNES</div>
+  <div class="big"><div class="e" style="background:#E3ECF7">☰</div><div class="g"><b>Saisie guidée</b><span>Rayon par rayon, produit par produit</span></div></div>
+  <div class="big"><div class="e" style="background:#FFF1D6">⌁</div><div class="g"><b>Scan continu</b><span>Scanner puis quantité, sans rayon</span></div></div>
+  <div class="tiles t3">
+   <div class="tile"><span class="e">≠</span>Écarts<span class="n">37</span></div>
+   <div class="tile"><span class="e">⌛</span>Restants</div>
+   <div class="tile"><span class="e">⇩</span>Collecte</div>
+  </div>
+ </div>
+ <div class="nav"><div class="on"><i>⌂</i>Accueil</div><div><i>⌁</i>Scanner</div><div><i>≠</i>Écarts</div><div><i>⚙</i>Réglages</div></div>
+</div>
+<figcaption><span class="tag">A</span><b>Tableau de bord</b> : avancement, file d'envoi, bouton « Reprendre » au dernier rayon ouvert.</figcaption>
+</figure>
+
+<figure>
+<div class="phone">
+ <div class="wbar"><span>←</span><div class="t"><b>Choisir un rayon</b><span>Inventaire annuel 2026</span></div><span>⌕</span></div>
+ <div class="body">
+  <div class="chips"><span class="chip on">Tous 34</span><span class="chip">À faire 9</span><span class="chip">En cours 4</span><span class="chip">Terminés 21</span></div>
+  <div class="ray"><div class="mi" style="background:#FFF1D6">◐</div><div class="g"><div class="pn">S1A0T2 – CANNES</div><div class="pm">38 / 52 comptés · <b style="color:#9A3412">3 en attente d'envoi</b></div><div class="prog"><i style="width:73%;background:var(--amber)"></i></div></div></div>
+  <div class="ray"><div class="mi" style="background:#FFF1D6">◐</div><div class="g"><div class="pn">S1A0T3 – ORTHOPÉDIE</div><div class="pm">12 / 64 comptés</div><div class="prog"><i style="width:19%;background:var(--amber)"></i></div></div></div>
+  <div class="ray"><div class="mi" style="background:#E6EBF2">○</div><div class="g"><div class="pn">S2B1 – ANTALGIQUES</div><div class="pm">0 / 146 · pas commencé</div><div class="prog"><i style="width:0"></i></div></div></div>
+  <div class="ray"><div class="mi" style="background:#DCF5E7">✓</div><div class="g"><div class="pn">S2B2 – ANTIBIOTIQUES</div><div class="pm">121 / 121 · terminé, tout envoyé</div><div class="prog"><i style="width:100%;background:var(--green)"></i></div></div></div>
+  <div class="ray"><div class="mi" style="background:#DCF5E7">✓</div><div class="g"><div class="pn">S2B3 – DERMATOLOGIE</div><div class="pm">88 / 88 · terminé</div><div class="prog"><i style="width:100%;background:var(--green)"></i></div></div></div>
+  <div class="ray"><div class="mi" style="background:#E6EBF2">○</div><div class="g"><div class="pn">S3 – RÉSERVE</div><div class="pm">0 / 402 · pas commencé</div><div class="prog"><i style="width:0"></i></div></div></div>
+ </div>
+</div>
+<figcaption><span class="tag">A/B</span><b>Rayons</b> : état calculé en <b>une seule</b> requête par le serveur, au lieu de deux requêtes par rayon aujourd'hui. Les saisies en attente apparaissent sur le rayon concerné.</figcaption>
+</figure>
+
+<figure>
+<div class="phone">
+ <div class="navy round">
+  <div class="sb"><span>08:42</span><span>Wi-Fi ✕</span></div>
+  <div class="bar"><div class="t"><b>Inventaire</b><span>Pharmacie Exemple · Awa K.</span></div><div class="ic">⚙</div></div>
+ </div>
+ <div class="body">
+  <div class="err"><b>Serveur injoignable</b>Le téléphone ne joint pas 192.168.1.50:8080. Votre licence n'est pas en cause. Vos saisies restent enregistrées sur ce téléphone.</div>
+  <div class="two"><div class="btn nv sm">Réessayer</div><div class="btn out sm">Passer en Distant</div></div>
+  <div class="sync off"><span class="dot" style="background:#DC2626"></span><div class="g">14 saisies en attente · envoi automatique au retour du réseau</div></div>
+  <div class="sec">Ce qui marche sans réseau</div>
+  <div class="big"><div class="e" style="background:#E0F2F1">⇩</div><div class="g"><b>Continuer sans réseau</b><span>Rayon déjà chargé ou collecte hors ligne</span></div></div>
+  <div class="legacy">Autres messages distincts : <b>session expirée</b> (se reconnecter sans perdre la saisie), <b>licence expirée</b>, <b>inventaire clôturé</b> (envoi refusé, saisies gardées pour export).</div>
+ </div>
+ <div class="nav"><div class="on"><i>⌂</i>Accueil</div><div><i>⌁</i>Scanner</div><div><i>≠</i>Écarts</div><div><i>⚙</i>Réglages</div></div>
+</div>
+<figcaption><span class="tag">Tous</span><b>Panne réseau</b> : message clair, saisies conservées, aucune bascule vers l'écran « Application non activée ».</figcaption>
+</figure>
+
+</div>
+</section>
+
+<!-- ============ 2. SAISIE ============ -->
+<section id="s2">
+<h2>2. Saisie des quantités et scan</h2>
+<p class="sub">La douchette Sunmi est toujours prête : un scan ouvre le produit, quel que soit le champ actif. Chaque quantité validée est d'abord écrite sur le téléphone, puis envoyée. Un produit déjà compté demande « Remplacer ou Ajouter ».</p>
+<div class="row">
+
+<figure>
+<div class="phone">
+ <div class="navy">
+  <div class="sb"><span>09:15</span><span>▮▮▮</span></div>
+  <div class="bar"><span>←</span><div class="t"><b>S1A0T2 – CANNES</b><span>Produit 39 / 52 · filtre A → F</span></div><div class="ic">⇅</div></div>
+  <div class="prog"><i style="width:73%;background:var(--amber)"></i></div>
+ </div>
+ <div class="body" style="gap:8px">
+  <div class="scanbox ready">⌁ Scanner prêt · ou tapez la quantité</div>
+  <div class="prod">
+   <div class="nm">BILAN BIOLOGIQUE TOTAL</div>
+   <div class="cip">CIP 98090010 · EAN 3400998090010</div>
+   <div class="facts"><div class="fact"><span>Stock théorique</span><b>12</b></div><div class="fact"><span>Déjà compté</span><b>—</b></div><div class="fact"><span>Prix achat</span><b>1 250 F</b></div></div>
+  </div>
+  <div class="qty"><div><span>Quantité comptée</span><br><b>8</b></div><div class="vb"><span class="dot" style="background:var(--green)"></span>précédent envoyé</div></div>
+ </div>
+ <div class="keys"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div class="del">⌫</div><div>0</div><div class="ok">OK ›</div></div>
+</div>
+<figcaption><span class="tag">A</span><b>Guidée</b> : grand chiffre, clavier ambre, état d'envoi du produit précédent. Champ vide + OK refusé partout (aujourd'hui Écarts et Restants enregistrent alors 0).</figcaption>
+</figure>
+
+<figure>
+<div class="phone">
+ <div class="navy">
+  <div class="sb"><span>09:31</span><span>▮▮▮</span></div>
+  <div class="bar"><span>←</span><div class="t"><b>Scan continu</b><span>Inventaire annuel 2026 · 146 saisies</span></div><div class="ic">⇩</div></div>
+ </div>
+ <div class="body journal" style="gap:7px">
+  <div class="scanbox ready">⌁ Scannez le produit suivant</div>
+  <div class="sync wait"><span class="dot" style="background:#F59E0B"></span><div class="g">2 en attente · 144 envoyées</div><span class="act">Envoyer</span></div>
+  <div class="sec">Dernières saisies</div>
+  <div class="lr"><div class="g"><div class="pn">DOLIPRANE 1000 MG CPR B/8</div><div class="pm">09:31 · Réserve S3</div></div><b>24</b><span class="st b-amber">en attente</span></div>
+  <div class="lr"><div class="g"><div class="pn">AMOXICILLINE 500 GÉL B/12</div><div class="pm">09:30 · 6 + 4 = 10 (ajout)</div></div><b>10</b><span class="st b-amber">en attente</span></div>
+  <div class="lr"><div class="g"><div class="pn">EFFERALGAN 500 CPR EFF</div><div class="pm">09:30</div></div><b>7</b><span class="st b-green">envoyé ✓</span></div>
+  <div class="lr"><div class="g"><div class="pn">SPASFON LYOC 80 MG</div><div class="pm">09:29</div></div><b>0</b><span class="st b-green">envoyé ✓</span></div>
+  <div class="lr"><div class="g"><div class="pn">BÉTADINE DERMIQUE 10 %</div><div class="pm">09:28 · corrigé de 3 à 30</div></div><b>30</b><span class="st b-green">envoyé ✓</span></div>
+  <div class="lr" style="outline:1.5px solid #F5B5B5"><div class="g"><div class="pn">Code 3401597413 inconnu</div><div class="pm">09:27 · pas dans cet inventaire</div></div><span class="st b-red">à vérifier</span></div>
+ </div>
+</div>
+<figcaption><span class="tag">B</span><b>Scan continu</b> : le journal garde <b>toutes</b> les saisies (aujourd'hui seule la dernière survit en mode Scan + Collecte). Toucher une ligne pour corriger.</figcaption>
+</figure>
+
+<figure>
+<div class="phone">
+ <div class="navy">
+  <div class="sb"><span>09:32</span><span>▮▮▮</span></div>
+  <div class="bar"><span>←</span><div class="t"><b>Scan continu</b><span>Inventaire annuel 2026</span></div><div class="ic">⇩</div></div>
+ </div>
+ <div class="body"><div class="scanbox">⌁ …</div></div>
+ <div class="dim"></div>
+ <div class="sheet">
+  <div class="grab"></div>
+  <div><div class="pn" style="font-size:16px">AMOXICILLINE 500 GÉL B/12</div><div class="pm">CIP 3400935959 · rayon S2B2 – ANTIBIOTIQUES</div></div>
+  <div class="dup">Déjà compté : <b>6</b> (par Koffi, 08:55). Vous saisissez <b>4</b>.</div>
+  <div class="two"><div class="btn out sm">Remplacer → 4</div><div class="btn nv sm">Ajouter → 10</div></div>
+  <div class="qty"><div><span>Quantité</span><br><b>4</b></div><div class="two" style="flex:none;gap:6px"><div class="btn out sm" style="padding:6px 12px">−1</div><div class="btn out sm" style="padding:6px 12px">+1</div></div></div>
+  <div class="note">Contrôles : 0 à 99 999 ; au-delà du seuil (1 000) confirmation ; vérification « déjà compté » impossible (réseau) → <b>le choix est demandé quand même</b>, jamais d'écrasement silencieux.</div>
+  <div class="keys" style="margin:0 -12px"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div class="del">⌫</div><div>0</div><div class="ok">OK</div></div>
+ </div>
+</div>
+<figcaption><span class="tag">B</span><b>Quantité après scan</b> : doublon explicite (« qui » demande un petit ajout serveur, question 7), Remplacer / Ajouter en deux boutons, garde-fous de saisie.</figcaption>
+</figure>
+
+</div>
+</section>
+
+<!-- ============ 3. ÉCARTS ============ -->
+<section id="s3">
+<h2>3. Écarts : contrôler et corriger</h2>
+<p class="sub" id="s3sub">Les écarts sont triés par <b>valeur</b> (quantité × prix d'achat) : on contrôle d'abord ce qui coûte cher. Une correction n'est marquée « vérifiée » qu'une fois enregistrée par le serveur.</p>
+<div class="row">
+<div id="s3p" style="display:flex;flex-wrap:wrap;gap:22px">
+<figure>
+<div class="phone">
+ <div class="navy round">
+  <div class="sb"><span>16:05</span><span>▮▮▮</span></div>
+  <div class="bar"><span>←</span><div class="t"><b>Écarts</b><span>Inventaire annuel 2026</span></div><div class="ic">⎙</div></div>
+  <div class="kpis" style="display:flex;gap:6px">
+   <div style="flex:1;background:rgba(255,255,255,.1);border-radius:10px;padding:6px 8px"><div style="font-size:10.5px;color:var(--hm)">Manquants (F)</div><b style="white-space:nowrap">−412 500</b></div>
+   <div style="flex:1;background:rgba(255,255,255,.1);border-radius:10px;padding:6px 8px"><div style="font-size:10.5px;color:var(--hm)">Surplus (F)</div><b style="white-space:nowrap">+96 300</b></div>
+   <div style="flex:1;background:var(--amber);color:var(--onAmber);border-radius:10px;padding:6px 8px"><div style="font-size:10.5px">À vérifier</div><b>29 / 37</b></div>
+  </div>
+ </div>
+ <div class="body" style="gap:7px">
+  <div class="chips"><span class="chip on">Par valeur</span><span class="chip">Manquants</span><span class="chip">Surplus</span><span class="chip">Rayon ▾</span></div>
+  <div class="card band" style="--bandc:#DC2626"><div class="lr"><div class="g"><div class="pn">INSULINE LANTUS SOLOSTAR</div><div class="pm">Théo 9 · compté 4 · S3 Réserve froid</div></div><div style="text-align:right"><div class="ec neg">−5</div><div class="pm">−142 000 F</div></div></div></div>
+  <div class="card band" style="--bandc:#DC2626"><div class="lr"><div class="g"><div class="pn">AUGMENTIN 1 G SACHETS</div><div class="pm">Théo 22 · compté 14 · S2B2</div></div><div style="text-align:right"><div class="ec neg">−8</div><div class="pm">−61 600 F</div></div></div></div>
+  <div class="card band" style="--bandc:#16A34A"><div class="lr"><div class="g"><div class="pn">VOLTARENE EMULGEL 1 %</div><div class="pm">Théo 3 · compté 11 · S1A0T3</div></div><div style="text-align:right"><div class="ec pos">+8</div><div class="pm">+28 800 F</div></div></div></div>
+  <div class="card band" style="--bandc:#16A34A;opacity:.75"><div class="lr"><div class="g"><div class="pn">BILAN BIOLOGIQUE TOTAL</div><div class="pm">Théo −97 · compté 5 · <b style="color:#166534">vérifié ✓</b></div></div><div style="text-align:right"><div class="ec pos">+102</div><div class="pm">+102 F</div></div></div></div>
+  <div class="card band" style="--bandc:#DC2626"><div class="lr"><div class="g"><div class="pn">DAFALGAN CODEINE CPR</div><div class="pm">Théo 30 · compté 26 · S2B1</div></div><div style="text-align:right"><div class="ec neg">−4</div><div class="pm">−9 840 F</div></div></div></div>
+ </div>
+</div>
+<figcaption><span class="tag">A</span><b>Liste des écarts</b> : montants en F CFA, bande rouge/verte + signe (pas la couleur seule), compteur « à vérifier ».</figcaption>
+</figure>
+
+<figure>
+<div class="phone">
+ <div class="navy round">
+  <div class="sb"><span>16:06</span><span>▮▮▮</span></div>
+  <div class="bar"><span>←</span><div class="t"><b>Écarts</b><span>Inventaire annuel 2026</span></div><div class="ic">⎙</div></div>
+ </div>
+ <div class="body"></div>
+ <div class="dim"></div>
+ <div class="sheet">
+  <div class="grab"></div>
+  <div class="lr"><div class="g"><div class="pn" style="font-size:16px">AUGMENTIN 1 G SACHETS</div><div class="pm">CIP 3400936311 · S2B2 · 3 / 29 à vérifier</div></div><span class="badge b-red">−8</span></div>
+  <div class="facts" style="margin:0"><div class="fact"><span>Théorique</span><b>22</b></div><div class="fact"><span>Compté</span><b>14</b></div><div class="fact"><span>Nouveau</span><b style="color:var(--navy)">20</b></div><div class="fact"><span>Écart</span><b style="color:#B91C1C">−2</b></div></div>
+  <div class="qty"><div><span>Quantité recomptée</span><br><b>20</b></div><div class="vb">pré-rempli, remplacé à la 1re touche</div></div>
+  <div class="two"><div class="btn out sm">‹ Précédent</div><div class="btn out sm">Garder 14</div><div class="btn out sm">Suivant ›</div></div>
+  <div class="keys" style="margin:0 -12px"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div class="del">⌫</div><div>0</div><div class="ok" style="font-size:15px;padding-top:12px">Corriger</div></div>
+ </div>
+</div>
+<figcaption><span class="tag">A</span><b>Correction</b> : avant / après / écart en direct ; « Garder 14 » valide sans modifier. Si l'envoi échoue, la ligne reste « à vérifier » et part dans la file d'envoi.</figcaption>
+</figure>
+
+</div>
+<figure class="wide" id="s4">
+<div class="tablet">
+ <div class="side" style="width:158px">
+  <div style="font-weight:800;font-size:15px;padding:2px 10px 8px">Prestige Inventaire</div>
+  <div class="grp">Inventaire annuel 2026</div>
+  <div class="it">⌂ Tableau de bord</div><div class="it">☰ Saisie guidée</div><div class="it">⌁ Scan continu</div><div class="it on">≠ Écarts (29)</div><div class="it">⌛ Restants (1 484)</div><div class="it">⇩ Collecte hors ligne</div>
+  <div class="grp">Envoi</div>
+  <div class="it" style="color:#FCD34D">● 14 en attente</div>
+  <div class="it">⚙ Réglages</div>
+ </div>
+ <div class="main">
+  <div class="wbar"><div class="t"><b>Écarts à contrôler</b><span>37 produits · 29 à vérifier · trié par valeur</span></div><span class="chip">Rayon : tous ▾</span><span class="chip">⎙ PDF</span><span class="chip">⇩ CSV</span></div>
+  <div class="cols">
+   <div class="card" style="flex:2.1;padding:6px 8px;overflow:hidden">
+    <table class="t" style="font-size:11px">
+     <tr><th>Produit</th><th class="r">Théo</th><th class="r">Compté</th><th class="r">Écart</th><th class="r">Valeur</th><th>État</th></tr>
+     <tr style="background:#FFF8E6"><td><b>INSULINE LANTUS SOLOSTAR</b></td><td class="r">9</td><td class="r">4</td><td class="r" style="color:#B91C1C;font-weight:700">−5</td><td class="r">−142 000</td><td><span class="badge b-amber">à vérifier</span></td></tr>
+     <tr><td><b>AUGMENTIN 1 G SACHETS</b></td><td class="r">22</td><td class="r">14</td><td class="r" style="color:#B91C1C;font-weight:700">−8</td><td class="r">−61 600</td><td><span class="badge b-amber">à vérifier</span></td></tr>
+     <tr><td><b>VOLTARENE EMULGEL 1 %</b></td><td class="r">3</td><td class="r">11</td><td class="r" style="color:#15803D;font-weight:700">+8</td><td class="r">+28 800</td><td><span class="badge b-amber">à vérifier</span></td></tr>
+     <tr><td><b>DAFALGAN CODEINE CPR</b></td><td class="r">30</td><td class="r">26</td><td class="r" style="color:#B91C1C;font-weight:700">−4</td><td class="r">−9 840</td><td><span class="badge b-green">vérifié ✓</span></td></tr>
+     <tr><td><b>SMECTA SACHETS B/30</b></td><td class="r">15</td><td class="r">12</td><td class="r" style="color:#B91C1C;font-weight:700">−3</td><td class="r">−7 350</td><td><span class="badge b-amber">attente</span></td></tr>
+     <tr><td><b>BILAN BIOLOGIQUE TOTAL</b></td><td class="r">−97</td><td class="r">5</td><td class="r" style="color:#15803D;font-weight:700">+102</td><td class="r">+102</td><td><span class="badge b-green">vérifié ✓</span></td></tr>
+     <tr><td><b>EFFERALGAN 500 CPR EFF</b></td><td class="r">40</td><td class="r">38</td><td class="r" style="color:#B91C1C;font-weight:700">−2</td><td class="r">−1 900</td><td><span class="badge b-amber">à vérifier</span></td></tr>
+    </table>
+   </div>
+   <div style="flex:1;display:flex;flex-direction:column;gap:9px;min-width:0">
+    <div class="chart"><div class="h">Bilan de l'inventaire <span>valeur au prix d'achat</span></div>
+     <div class="stack"><i style="flex:81;background:#DC2626"></i><i style="flex:19;background:#16A34A"></i></div>
+     <div class="legend"><span><i style="background:#DC2626"></i>Manquants −412 500 F</span><span><i style="background:#16A34A"></i>Surplus +96 300 F</span></div>
+     <div class="split" style="margin-top:8px"><span>Écart net</span><b style="color:#B91C1C">−316 200 F</b></div>
+    </div>
+    <div class="card"><div class="pn">INSULINE LANTUS SOLOSTAR</div><div class="pm">Théo 9 · compté 4 par Koffi à 10:12</div>
+     <div class="qty" style="margin-top:8px"><div><span>Recompté</span><br><b>9</b></div><div class="vb">écart après : 0</div></div>
+     <div class="two" style="margin-top:8px"><div class="btn out sm">Garder 4</div><div class="btn amber sm">Corriger → 9</div></div></div>
+   </div>
+  </div>
+ </div>
+</div>
+<figcaption><span class="tag">C</span><b>Tablette</b> : menu latéral, tableau complet, bilan en valeur, correction à droite. Même logique sur téléphone large (Sunmi V2 Pro / L2s).</figcaption>
+</figure>
+
+</div>
+</section>
+</body>
+</html>
