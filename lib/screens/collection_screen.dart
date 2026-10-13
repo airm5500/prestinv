@@ -208,6 +208,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
       barrierDismissible: false,
       builder: (ctx) {
         return AlertDialog(
+          scrollable: true,
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -231,8 +232,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
                   showCursor: true,
                 ),
                 const SizedBox(height: 16),
-                SizedBox(
-                  height: 280,
+                // Au moins 280 dp (aspect d'origine), davantage si le texte est agrandi.
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 280),
                   child: NumericKeyboard(
                     onKeyPressed: (key) {
                       if (key == 'OK') {

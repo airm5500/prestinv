@@ -546,13 +546,6 @@ class _NvSaisieGuideeScreenState extends State<NvSaisieGuideeScreen> with Douche
         const SizedBox(height: 12),
         _carteProduit(context, provider, p, appConfig),
         const SizedBox(height: 12),
-        AfficheQuantite(
-          label: 'Quantité comptée',
-          valeur: _quantite,
-          erreur: _erreur,
-          droite: _etatPrecedent(context, q),
-        ),
-        const SizedBox(height: 10),
         Row(children: [
           Expanded(
             child: OutlinedButton.icon(
@@ -587,12 +580,34 @@ class _NvSaisieGuideeScreenState extends State<NvSaisieGuideeScreen> with Douche
         if (afficherResultats)
           Positioned.fill(top: 84, child: ListeResultats(produits: resultats, stockVisible: appConfig.showTheoreticalStock, onTap: choisirResultat)),
       ]);
+      // Quantité tapée (et rappel compact du produit) ÉPINGLÉE juste au-dessus du pavé, hors de la
+      // liste qui défile : toujours visible sans défilement, quel que soit l'écran (640 dp de haut,
+      // texte agrandi) et même pendant la recherche par nom (clavier système ouvert, pavé masqué).
+      final quantite = Container(
+        key: const ValueKey('nv-zone-quantite'),
+        color: context.nv.page,
+        padding: EdgeInsets.fromLTRB(large ? 8 : 16, 6, large ? 8 : 16, 2),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Text(p.produitName,
+              key: const ValueKey('nv-produit-compact'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: context.nv.encre)),
+          const SizedBox(height: 4),
+          AfficheQuantite(
+            label: 'Quantité comptée',
+            valeur: _quantite,
+            erreur: _erreur,
+            droite: _etatPrecedent(context, q),
+          ),
+        ]),
+      );
       corps = large
           ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Expanded(child: liste),
-              SizedBox(width: 380, child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [pave, const SizedBox(height: 16)])),
+              SizedBox(width: 380, child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [quantite, pave, const SizedBox(height: 16)])),
             ])
-          : Column(children: [Expanded(child: liste), pave]);
+          : Column(children: [Expanded(child: liste), quantite, pave]);
     }
 
     return PopScope(

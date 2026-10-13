@@ -57,12 +57,12 @@ class SituationSaisie {
 Map<String, String> anomaliesSur(List<String> cas, List<(String, double)> configs, String raison) =>
     {for (final c in cas) for (final (a, e) in configs) '$c|$a|$e': raison};
 
-const _v2s = 'Sunmi V2s', _v3 = 'Sunmi V3 / V3H / V3mix', _tel = 'Téléphone 360×640 dp', _tab = 'Tablette';
+const _v2s = 'Sunmi V2s', _v3 = 'Sunmi V3 / V3H / V3mix', _tel = 'Téléphone 360×640 dp';
 
-const _a5 = 'Anomalie connue A5 : en saisie guidée, sur écran de 640 dp de haut (Sunmi V3, téléphone) ou en texte agrandi, le '
+const _a5 = 'Anomalie connue A5 (interface d\'origine) : en saisie guidée, sur écran de 640 dp de haut (Sunmi V3, téléphone) ou en texte agrandi, le '
     'champ de quantité est poussé sous le bas de la liste défilante, derrière le pavé (voir test/README.md)';
-const _a6 = 'Anomalie connue A6 : fenêtre de quantité d\'origine (pavé de hauteur fixe 280 dp) qui déborde en texte agrandi ×1,3 '
-    '(voir test/README.md)';
+const _a4 = 'Anomalie connue A4 (interface d\'origine) : pendant la recherche par nom (clavier système ouvert), le champ de '
+    'quantité sort de la zone visible ; il revient à la fermeture du clavier (voir test/README.md)';
 
 Future<void> rien(WidgetTester tester) async {}
 
@@ -85,11 +85,7 @@ final situations = <SituationSaisie>[
       nouvelle: true,
       ecran: () => NvSaisieGuideeScreen(inventaire: inventaireEssai, rayonId: 'S2B2'),
       amener: rien,
-      champ: quantiteNv,
-      anomalies: {
-        ...anomaliesSur(['A'], [(_v2s, 1.3), (_v3, 1.0), (_v3, 1.3), (_tel, 1.0), (_tel, 1.3)], _a5),
-        ...anomaliesSur(['C'], [(_v3, 1.3), (_tel, 1.3)], _a5),
-      }),
+      champ: quantiteNv),
   SituationSaisie('Scan continu, feuille de quantité (nouvelle)',
       nouvelle: true, ecran: () => NvScanContinuScreen(inventaire: inventaireEssai), amener: scannerDouchette, champ: quantiteNv, fenetre: true),
   SituationSaisie('Collecte, feuille de quantité (nouvelle)',
@@ -99,23 +95,23 @@ final situations = <SituationSaisie>[
       ecran: () => InventoryEntryScreen(inventoryId: 'INV1', inventoryName: inventaireEssai.libelle),
       amener: ouvrirEmplacementOrigine,
       champ: quantiteOrigine,
-      anomalies: anomaliesSur(['A'], [(_v2s, 1.3), (_v3, 1.0), (_v3, 1.3), (_tel, 1.0), (_tel, 1.3)], _a5)),
+      anomalies: {
+        ...anomaliesSur(['A'], [(_v2s, 1.3), (_v3, 1.0), (_v3, 1.3), (_tel, 1.0), (_tel, 1.3)], _a5),
+        for (final a in appareils)
+          for (final e in echellesTexte) 'Cbis|${a.nom}|$e': _a4,
+      }),
   SituationSaisie('Saisie rapide, fenêtre de quantité (origine)',
       nouvelle: false,
       ecran: () => InventoryEntryScreen(inventoryId: 'INV1', inventoryName: inventaireEssai.libelle, isQuickMode: true),
       amener: scannerDouchette,
       champ: quantiteScanOrigine,
-      fenetre: true,
-      anomalies: anomaliesSur(['A', 'B'], [(_v2s, 1.3), (_tab, 1.3)], _a6)),
+      fenetre: true),
   SituationSaisie('Collecte, fenêtre de quantité (origine)',
       nouvelle: false,
       ecran: () => const CollectionScreen(),
       amener: scannerChampTexte,
       champ: () => quantiteOrigine().last,
-      fenetre: true,
-      anomalies: anomaliesSur(['A'], [(_v2s, 1.3), (_v3, 1.3), (_tel, 1.3), (_tab, 1.3)], _a6),
-      anomalieB: 'Anomalie connue A3 : fenêtre « Ajout Collecte » d\'origine (pavé de hauteur fixe) qui déborde quand le clavier '
-          'système est ouvert (voir test/README.md)'),
+      fenetre: true),
 ];
 
 /// Haut du pavé numérique affiché (nouvelle ou ancienne interface), ou null.
@@ -209,10 +205,7 @@ void main() {
               await fin(tester);
             }));
 
-            group('',
-                skip: 'Anomalie connue A4 : pendant la recherche par nom (clavier système ouvert), le champ de quantité sort de la '
-                    'zone visible ; il revient à la fermeture du clavier (voir test/README.md)',
-                () => testWidgets('$cas — C bis : quantité visible PENDANT la recherche par nom', (tester) async {
+            group('', skip: s.anomalie('Cbis', appareil, echelle), () => testWidgets('$cas — C bis : quantité visible PENDANT la recherche par nom', (tester) async {
               configurer(tester, appareil, echelle);
               await monterSituation(tester, s);
               await s.amener(tester);

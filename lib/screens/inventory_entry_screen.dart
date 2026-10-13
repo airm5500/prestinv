@@ -1128,8 +1128,9 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
                     ),
                   ]),
                   const SizedBox(height: 12),
-                  SizedBox(
-                    height: 280,
+                  // Au moins 280 dp (aspect d'origine), davantage si le texte est agrandi.
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 280),
                     child: NumericKeyboard(onKeyPressed: appui),
                   ),
                 ],
