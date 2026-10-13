@@ -1,6 +1,8 @@
 // lib/screens/license_register_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:prestinv/utils/saisie_input.dart';
 import 'package:provider/provider.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
@@ -20,7 +22,8 @@ class _LicenseRegisterScreenState extends State<LicenseRegisterScreen> {
   bool _isSubmitting = false;
 
   void _submitKey() async {
-    if (_keyController.text.trim().isEmpty) return;
+    final cle = SaisieInput.nettoyerCleLicence(_keyController.text);
+    if (cle.isEmpty) return;
 
     setState(() => _isSubmitting = true);
 
@@ -30,10 +33,10 @@ class _LicenseRegisterScreenState extends State<LicenseRegisterScreen> {
 
     final api = ApiService(
       baseUrl: appConfig.currentApiUrl,
-      sessionCookie: authProvider.sessionCookie,
+      cookie: () => authProvider.sessionCookie,
     );
 
-    final success = await licenseProvider.registerLicense(api, _keyController.text.trim());
+    final success = await licenseProvider.registerLicense(api, cle);
 
     if (mounted) {
       setState(() => _isSubmitting = false);
@@ -81,7 +84,7 @@ class _LicenseRegisterScreenState extends State<LicenseRegisterScreen> {
                 // On recrée le service API avec la NOUVELLE adresse IP
                 final api = ApiService(
                   baseUrl: appConfig.currentApiUrl,
-                  sessionCookie: authProvider.sessionCookie,
+                  cookie: () => authProvider.sessionCookie,
                 );
 
                 // On lance la vérification.
@@ -125,6 +128,7 @@ class _LicenseRegisterScreenState extends State<LicenseRegisterScreen> {
             const SizedBox(height: 32),
             TextField(
               controller: _keyController,
+              inputFormatters: [LengthLimitingTextInputFormatter(200)],
               decoration: const InputDecoration(
                 labelText: "Clé de licence",
                 border: OutlineInputBorder(),

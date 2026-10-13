@@ -104,4 +104,25 @@ void main() {
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField, 'serveur-test')).enabled, isFalse);
     await demonter(tester);
   });
+
+  testWidgets('Configuration : port ou seuil absurde refusé, rien n\'est enregistré', (tester) async {
+    ecranTerminal(tester);
+    await CodeAdmin.instance.definir('7391');
+    final b = await preparerBanc();
+    await tester.pumpWidget(monter(b, const ConfigScreen()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Modifier la connexion (code administrateur)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Code'), '7391');
+    await tester.tap(find.text('Valider'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, '8080').first, '99999');
+    await tester.enterText(find.widgetWithText(TextFormField, 'serveur-test'), '10.0.0.9');
+    await tester.ensureVisible(find.text('VALIDER LA CONFIGURATION'));
+    await tester.tap(find.text('VALIDER LA CONFIGURATION'));
+    await tester.pumpAndSettle();
+    expect(find.text('Port : 1 à 65535.'), findsOneWidget);
+    expect(b.config.localApiAddress, 'serveur-test'); // rien d'enregistré
+    await demonter(tester);
+  });
 }

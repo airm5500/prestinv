@@ -310,6 +310,8 @@ class _UncountedScreenState extends State<UncountedScreen> {
   }
 
   Future<void> _performApiSearch(String query) async {
+    query = SaisieInput.nettoyerRecherche(query);
+    if (query.isEmpty) return;
     try {
       List<Product> results;
       if (_selectedRayon != null) {
@@ -647,6 +649,7 @@ class _UncountedScreenState extends State<UncountedScreen> {
                 Expanded(
                   child: TextField(
                     controller: _searchController,
+                    inputFormatters: SaisieInput.rechercheFormatters,
                     focusNode: _searchFocusNode,
                     textInputAction: TextInputAction.search,
                     onChanged: _onSearchChanged,

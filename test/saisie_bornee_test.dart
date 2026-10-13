@@ -1,7 +1,9 @@
 // Contrôles de saisie : quantités entières de 0 à 99 999, champ vide jamais lu comme 0,
 // clavier limité à 5 chiffres, recherches/codes bornés et nettoyés.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/utils/saisie_input.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   group('quantité', () {
@@ -43,6 +45,48 @@ void main() {
       expect(SaisieInput.nettoyerRecherche('\u0002 3400930000000\r\n'), '3400930000000');
       expect(SaisieInput.nettoyerRecherche('x' * 200).length, SaisieInput.maxRecherche);
       expect(SaisieInput.nettoyerRecherche(null), '');
+    });
+  });
+
+  group('configuration', () {
+    test('adresse : IP, domaine, http:// et https:// acceptés ; le reste refusé', () {
+      expect(SaisieInput.erreurAdresse('192.168.1.50'), isNull);
+      expect(SaisieInput.erreurAdresse('pharmacie.example.ci'), isNull);
+      expect(SaisieInput.erreurAdresse('http://192.168.1.50'), isNull);
+      expect(SaisieInput.erreurAdresse('https://prestige.example.ci/'), isNull);
+      expect(SaisieInput.erreurAdresse(''), isNotNull);
+      expect(SaisieInput.erreurAdresse('', obligatoire: false), isNull);
+      expect(SaisieInput.erreurAdresse('192.168.1.300'), isNotNull);
+      expect(SaisieInput.erreurAdresse('192.168.1'), isNotNull);
+      expect(SaisieInput.erreurAdresse('serveur:8080'), contains('Port'));
+      expect(SaisieInput.erreurAdresse('serveur/prestige'), isNotNull);
+      expect(SaisieInput.erreurAdresse('mon serveur'), isNotNull);
+    });
+
+    test('port 1 à 65535 (vide = défaut), contexte, entiers bornés', () {
+      expect(SaisieInput.erreurPort(''), isNull);
+      expect(SaisieInput.erreurPort('8080'), isNull);
+      expect(SaisieInput.erreurPort('0'), isNotNull);
+      expect(SaisieInput.erreurPort('70000'), isNotNull);
+      expect(SaisieInput.erreurContexte('prestige'), isNull);
+      expect(SaisieInput.erreurContexte('pres tige'), isNotNull);
+      expect(SaisieInput.erreurEntier('0', 1, 100, 'Nombre'), isNotNull);
+      expect(SaisieInput.erreurEntier('5', 1, 100, 'Nombre'), isNull);
+      expect(SaisieInput.erreurEntier('', 0, 600, 'Délai'), isNotNull);
+    });
+
+    test('clé de licence nettoyée et bornée', () {
+      expect(SaisieInput.nettoyerCleLicence(' AB-12\n'), 'AB-12');
+      expect(SaisieInput.nettoyerCleLicence('x' * 500).length, 200);
+    });
+
+    test('URL du serveur : http par défaut, https accepté (non imposé), barre finale retirée', () async {
+      SharedPreferences.setMockInitialValues({'localApiAddress': 'https://prestige.example.ci/', 'localApiPort': '8443'});
+      final c = AppConfig();
+      await c.load();
+      expect(c.currentApiUrl, 'https://prestige.example.ci:8443/prestige');
+      await c.setApiConfig(localAddress: '192.168.1.50', localPort: '8080');
+      expect(c.currentApiUrl, 'http://192.168.1.50:8080/prestige');
     });
   });
 }

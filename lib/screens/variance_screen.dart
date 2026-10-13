@@ -146,6 +146,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 
   void _handleScanOrSearch(String query) {
+    query = SaisieInput.nettoyerRecherche(query);
     if (query.isEmpty) return;
 
     final matches = _productsWithVariance.where((p) {
@@ -598,6 +599,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                 Expanded(
                   child: TextField(
                     controller: _searchController,
+                    inputFormatters: SaisieInput.rechercheFormatters,
                     focusNode: _searchFocusNode,
                     onSubmitted: (value) => _handleScanOrSearch(value),
                     textInputAction: TextInputAction.search,

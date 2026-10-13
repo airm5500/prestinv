@@ -7,6 +7,7 @@ import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/interface_version.dart';
 import 'package:http/http.dart' as http;
 import 'package:prestinv/widgets/pin_admin.dart';
+import 'package:prestinv/utils/saisie_input.dart';
 
 class ConfigScreen extends StatefulWidget {
   const ConfigScreen({super.key});
@@ -38,6 +39,13 @@ class _ConfigScreenState extends State<ConfigScreen> {
   /// administrateur : un réglage modifié par n'importe qui pouvait renvoyer les mots de passe vers
   /// un faux serveur.
   bool _serveurDeverrouille = false;
+
+  final _formKey = GlobalKey<FormState>();
+
+  /// Contrôles des champs du serveur : seulement quand ils sont modifiables (une ancienne valeur
+  /// non conforme ne bloque pas l'enregistrement des autres réglages).
+  String? Function(String?) _siDeverrouille(String? Function(String?) controle) =>
+      (v) => _serveurDeverrouille ? controle(v) : null;
 
   Future<void> _deverrouillerServeur() async {
     final ok = await demanderPinAdmin(context);
@@ -90,10 +98,12 @@ class _ConfigScreenState extends State<ConfigScreen> {
     if (address.isEmpty || _isTestingConnection) return;
 
     String host = address.trim();
-    if (host.startsWith('http')) {
+    // HTTPS accepté (non imposé) : le test garde le schéma saisi.
+    final https = host.toLowerCase().startsWith('https://');
+    if (host.toLowerCase().startsWith('http')) {
       host = Uri.parse(host).host;
     }
-    String urlString = 'http://$host';
+    String urlString = '${https ? 'https' : 'http'}://$host';
     if (port.isNotEmpty) {
       urlString += ':$port';
     }
@@ -133,10 +143,17 @@ class _ConfigScreenState extends State<ConfigScreen> {
     }
   }
 
-  void _saveConfiguration() {
+  Future<void> _saveConfiguration() async {
     final appConfig = Provider.of<AppConfig>(context, listen: false);
 
-    appConfig.setApiConfig(
+    // Valeurs contrôlées : rien d'absurde n'est enregistré (port, adresse, seuils…).
+    if (!(_formKey.currentState?.validate() ?? true)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Configuration non enregistrée : corrigez les champs en rouge.'), backgroundColor: Colors.red));
+      return;
+    }
+
+    await appConfig.setApiConfig(
       localAddress: _localAddressController.text.trim(),
       localPort: _localPortController.text.trim(),
       distantAddress: _distantAddressController.text.trim(),
@@ -150,7 +167,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
     final int sendReminder = int.tryParse(_sendReminderController.text) ?? 15;
     final String exportPath = _exportPathController.text.trim();
 
-    appConfig.setAppSettings(
+    await appConfig.setAppSettings(
       maxResult: maxResult,
       showStock: _showStockValue,
       largeValue: largeValue,
@@ -161,6 +178,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       isCumulEnabled: _isCumulEnabled,
     );
 
+    if (!mounted) return;
     if (Navigator.canPop(context)) {
       Navigator.of(context).pop();
     } else {
@@ -178,6 +196,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
       appBar: AppBar(title: const Text('Configuration')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
+        child: Form(
+        key: _formKey,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -202,9 +222,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: TextFormField(controller: _localAddressController, enabled: _serveurDeverrouille, decoration: const InputDecoration(labelText: 'Adresse IP ou domaine', border: OutlineInputBorder()))),
+                Expanded(child: TextFormField(controller: _localAddressController, enabled: _serveurDeverrouille, validator: _siDeverrouille(SaisieInput.erreurAdresse), decoration: const InputDecoration(labelText: 'Adresse IP ou domaine', border: OutlineInputBorder()))),
                 const SizedBox(width: 8),
-                SizedBox(width: 90, child: TextFormField(controller: _localPortController, enabled: _serveurDeverrouille, decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly])),
+                SizedBox(width: 90, child: TextFormField(controller: _localPortController, enabled: _serveurDeverrouille, validator: _siDeverrouille(SaisieInput.erreurPort), decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly])),
                 IconButton(icon: Icon(Icons.network_ping, color: _isTestingConnection ? Colors.grey : Theme.of(context).primaryColor), tooltip: 'Tester la connexion', onPressed: _isTestingConnection ? null : () => _testConnectivity(_localAddressController.text, _localPortController.text)),
               ],
             ),
@@ -214,9 +234,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: TextFormField(controller: _distantAddressController, enabled: _serveurDeverrouille, decoration: const InputDecoration(labelText: 'Adresse IP ou domaine', border: OutlineInputBorder()))),
+                Expanded(child: TextFormField(controller: _distantAddressController, enabled: _serveurDeverrouille, validator: _siDeverrouille((v) => SaisieInput.erreurAdresse(v, obligatoire: false)), decoration: const InputDecoration(labelText: 'Adresse IP ou domaine', border: OutlineInputBorder()))),
                 const SizedBox(width: 8),
-                SizedBox(width: 90, child: TextFormField(controller: _distantPortController, enabled: _serveurDeverrouille, decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly])),
+                SizedBox(width: 90, child: TextFormField(controller: _distantPortController, enabled: _serveurDeverrouille, validator: _siDeverrouille(SaisieInput.erreurPort), decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly])),
                 IconButton(icon: Icon(Icons.network_ping, color: _isTestingConnection ? Colors.grey : Theme.of(context).primaryColor), tooltip: 'Tester la connexion', onPressed: _isTestingConnection ? null : () => _testConnectivity(_distantAddressController.text, _distantPortController.text)),
               ],
             ),
@@ -229,6 +249,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                   child: TextFormField(
                     controller: _appNameController,
                     readOnly: !_isAppNameEditable,
+                    validator: _siDeverrouille(SaisieInput.erreurContexte),
                     decoration: InputDecoration(
                       border: const OutlineInputBorder(),
                       filled: !_isAppNameEditable,
@@ -246,15 +267,15 @@ class _ConfigScreenState extends State<ConfigScreen> {
             const Divider(height: 40),
             Text('Paramètres de l\'application', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
-            TextFormField(controller: _maxResultController, decoration: const InputDecoration(labelText: 'Nombre d\'inventaires à afficher', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+            TextFormField(controller: _maxResultController, validator: (v) => SaisieInput.erreurEntier(v, 1, 100, 'Nombre d\'inventaires'), decoration: const InputDecoration(labelText: 'Nombre d\'inventaires à afficher', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
             const SizedBox(height: 16),
-            TextFormField(controller: _largeValueController, decoration: const InputDecoration(labelText: 'Seuil d\'alerte pour grande quantité', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+            TextFormField(controller: _largeValueController, validator: (v) => SaisieInput.erreurEntier(v, 1, SaisieInput.maxQuantite, 'Seuil'), decoration: const InputDecoration(labelText: 'Seuil d\'alerte pour grande quantité', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
             const SizedBox(height: 16),
-            TextFormField(controller: _autoLogoutController, decoration: const InputDecoration(labelText: 'Délai de déconnexion (minutes, 0=désactivé)', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+            TextFormField(controller: _autoLogoutController, validator: (v) => SaisieInput.erreurEntier(v, 0, 600, 'Délai'), decoration: const InputDecoration(labelText: 'Délai de déconnexion (minutes, 0=désactivé)', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
             const SizedBox(height: 16),
-            TextFormField(controller: _sendReminderController, decoration: const InputDecoration(labelText: 'Rappel d\'envoi (minutes, 0=désactivé)', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+            TextFormField(controller: _sendReminderController, validator: (v) => SaisieInput.erreurEntier(v, 0, 600, 'Rappel'), decoration: const InputDecoration(labelText: 'Rappel d\'envoi (minutes, 0=désactivé)', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
             const SizedBox(height: 16),
-            TextFormField(controller: _exportPathController, decoration: const InputDecoration(labelText: 'Chemin réseau pour nom de fichier (Optionnel)', hintText: 'ex: \\\\SERVEUR\\partage', border: OutlineInputBorder())),
+            TextFormField(controller: _exportPathController, maxLength: 200, decoration: const InputDecoration(labelText: 'Chemin réseau pour nom de fichier (Optionnel)', hintText: 'ex: \\\\SERVEUR\\partage', border: OutlineInputBorder())),
             SwitchListTile(title: const Text('Afficher le stock théorique'), contentPadding: EdgeInsets.zero, value: _showStockValue, onChanged: (bool value) => setState(() => _showStockValue = value)),
 
             // Switch CUMUL
@@ -278,6 +299,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
               child: ElevatedButton(onPressed: _saveConfiguration, child: const Text('VALIDER LA CONFIGURATION')),
             ),
           ],
+        ),
         ),
       ),
     );

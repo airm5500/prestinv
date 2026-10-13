@@ -3,6 +3,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:prestinv/utils/saisie_input.dart';
 import 'package:prestinv/utils/journal.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
@@ -124,6 +125,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
   // --- LOGIQUE MÉTIER ---
 
   void _handleScan(String code) {
+    code = SaisieInput.nettoyerRecherche(code);
     if (code.isEmpty) return;
 
     _openQuantityDialog(code);
@@ -207,7 +209,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
                           qtyController.text = qtyController.text.substring(0, qtyController.text.length - 1);
                         }
                       } else {
-                        qtyController.text += key;
+                        qtyController.text = SaisieInput.ajouterChiffre(qtyController.text, key);
                       }
                     },
                   ),
@@ -424,6 +426,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
             padding: const EdgeInsets.all(16.0),
             child: TextField(
               controller: _scanController,
+              inputFormatters: SaisieInput.rechercheFormatters,
               focusNode: _scanFocusNode,
               onSubmitted: _handleScan,
               textInputAction: TextInputAction.done,

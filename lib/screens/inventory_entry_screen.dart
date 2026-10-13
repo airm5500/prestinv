@@ -665,6 +665,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
 
   Future<void> _handleScanOrSearch(String query,
       {bool fromTyping = false}) async {
+    // Code de douchette nettoyé (caractères de contrôle) et longueur bornée.
+    query = SaisieInput.nettoyerRecherche(query);
     if (query.isEmpty) return;
     _debounceTimer?.cancel();
     final provider = Provider.of<EntryProvider>(context, listen: false);
@@ -1153,7 +1155,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                     border: OutlineInputBorder()),
                                 keyboardType: TextInputType.number,
                                 inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly
+                                  FilteringTextInputFormatter.digitsOnly,
+                                  LengthLimitingTextInputFormatter(5)
                                 ],
                                 enabled: selectedType == FilterType.numeric)),
                         const SizedBox(width: 8),
@@ -1165,7 +1168,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                                     border: OutlineInputBorder()),
                                 keyboardType: TextInputType.number,
                                 inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly
+                                  FilteringTextInputFormatter.digitsOnly,
+                                  LengthLimitingTextInputFormatter(5)
                                 ],
                                 enabled: selectedType == FilterType.numeric))
                       ]),
@@ -1271,6 +1275,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 const SizedBox(height: 10),
                 TextField(
                     controller: jumpController,
+                    inputFormatters: SaisieInput.rechercheFormatters,
                     autofocus: true,
                     keyboardType: TextInputType.text,
                     decoration: const InputDecoration(
@@ -1495,6 +1500,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                         Expanded(
                             child: TextField(
                                 controller: _searchController,
+                                inputFormatters: SaisieInput.rechercheFormatters,
                                 focusNode: _searchFocusNode,
                                 onSubmitted: (value) => _handleScanOrSearch(
                                     value,

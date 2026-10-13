@@ -217,6 +217,8 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
   }
 
   Future<void> _performApiSearch(String query) async {
+    query = SaisieInput.nettoyerRecherche(query);
+    if (query.isEmpty) return;
     try {
       final results = await _apiService.fetchGlobalVariances(widget.inventoryId, query: query);
       if (!mounted) return;
@@ -472,6 +474,7 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
               padding: const EdgeInsets.fromLTRB(12.0, 12.0, 12.0, 4.0),
               child: TextField(
                 controller: _searchController,
+                inputFormatters: SaisieInput.rechercheFormatters,
                 focusNode: _searchFocusNode,
                 textInputAction: TextInputAction.search,
                 onChanged: _onSearchChanged,

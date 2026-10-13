@@ -62,10 +62,14 @@ class AppConfig with ChangeNotifier {
       port = _distantApiPort;
     }
 
+    address = address.trim();
     if (address.isEmpty) return '';
+    while (address.endsWith('/')) {
+      address = address.substring(0, address.length - 1);
+    }
 
-    // Assure que l'URL a bien le préfixe http://
-    String url = address.startsWith('http') ? address : 'http://$address';
+    // « http:// » par défaut ; « https:// » accepté s'il est saisi (non imposé).
+    String url = RegExp(r'^https?://', caseSensitive: false).hasMatch(address) ? address : 'http://$address';
 
     if (port.isNotEmpty) {
       url += ':$port';
