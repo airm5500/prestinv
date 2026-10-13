@@ -126,7 +126,7 @@ void nvMessage(BuildContext context, String texte, {TonEtat? ton, SnackBarAction
     key: key,
     duration: duree,
     backgroundColor: t.bg,
-    elevation: 2,
+    elevation: 0,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: t.fg.withValues(alpha: 0.35))),
     action: action,
     content: Text(texte, style: TextStyle(color: t.fg, fontWeight: FontWeight.w600)),
