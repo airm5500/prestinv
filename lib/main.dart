@@ -43,22 +43,24 @@ void main() async {
   // précédentes (anciennes clés par rayon), sans perte.
   final saisies = await ouvrirFileSaisies();
 
-  runApp(
-    MultiProvider(
+  runApp(racineApplication(config: appConfig, auth: authProvider, saisies: saisies));
+
+  FlutterNativeSplash.remove();
+}
+
+/// Racine de l'application : providers + [PrestinvApp]. Utilisée telle quelle par [main] ; les tests de
+/// bout en bout (test/e2e) montent exactement le même arbre, avec un faux serveur et une file en mémoire.
+Widget racineApplication({required AppConfig config, required AuthProvider auth, required SaisieQueue saisies}) => MultiProvider(
       providers: [
-        ChangeNotifierProvider.value(value: appConfig),
-        ChangeNotifierProvider.value(value: authProvider),
+        ChangeNotifierProvider.value(value: config),
+        ChangeNotifierProvider.value(value: auth),
         ChangeNotifierProvider.value(value: saisies),
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
         ChangeNotifierProvider(create: (_) => EntryProvider()),
         ChangeNotifierProvider(create: (_) => LicenseProvider()),
       ],
       child: const PrestinvApp(),
-    ),
-  );
-
-  FlutterNativeSplash.remove();
-}
+    );
 
 /// Ouvre la file des saisies dans le dossier privé de l'application (survit aux redémarrages).
 Future<SaisieQueue> ouvrirFileSaisies() async {

@@ -260,7 +260,7 @@ class FiltrePills extends StatelessWidget {
               customBorder: const StadiumBorder(),
               onTap: () => onSelected(i),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 44, minWidth: 48),
+                constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   child: Text(labels[i],

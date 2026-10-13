@@ -167,7 +167,9 @@ class FauxPrestige {
       case 'detailsAllEcarts':
         return liste(touches().where((p) => p.saisi != p.theorique && correspond(p)));
       case 'find':
-        return http.Response(json.encode({'id': 'L1', 'dateStart': '2026-01-01', 'dateEnd': '2027-12-31', 'typeLicence': 'ANNUELLE'}), 200);
+        // Fin de licence relative à aujourd'hui (une date fixe rendait les tests rouges à son échéance).
+        final fin = DateTime.now().add(const Duration(days: 400)).toIso8601String().substring(0, 10);
+        return http.Response(json.encode({'id': 'L1', 'dateStart': '2026-01-01', 'dateEnd': fin, 'typeLicence': 'ANNUELLE'}), 200);
       case 'auth':
         return http.Response(json.encode({'success': true, 'str_LOGIN': 'admin', 'str_FIRST_NAME': 'Test'}), 200, headers: {'set-cookie': 'JSESSIONID=abc; Path=/'});
     }

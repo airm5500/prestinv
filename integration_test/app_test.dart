@@ -1,215 +1,65 @@
 // Fichier : integration_test/app_test.dart
-// Cette version garantit que chaque test est indépendant et teste des scénarios réalistes,
-// y compris la synchronisation des données avec le serveur.
+// Test d'intégration SUR APPAREIL contre un VRAI serveur Prestige (terminal Sunmi ou émulateur).
+// Les parcours sont dans parcours_origine.dart ; ils sont aussi joués à chaque `flutter test` contre le
+// faux serveur (test/e2e/integration_test_coherence_test.dart), ce qui les garde à jour.
 
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:prestinv/config/app_config.dart';
-import 'package:prestinv/main.dart'; // Importe PrestinvApp
-import 'package:prestinv/providers/auth_provider.dart';
-import 'package:prestinv/providers/entry_provider.dart';
-import 'package:prestinv/providers/inventory_provider.dart';
-import 'package:prestinv/providers/license_provider.dart';
-import 'package:prestinv/screens/home_screen.dart';
-import 'package:prestinv/screens/inventory_entry_screen.dart';
-import 'package:prestinv/screens/inventory_list_screen.dart';
-import 'package:prestinv/screens/login_screen.dart';
-import 'package:prestinv/screens/variance_screen.dart';
-//import 'package:prestinv/screens/barcode_scanner_screen.dart';
-//import 'package:prestinv/widgets/numeric_keyboard.dart';
-import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
+import 'parcours_origine.dart';
 
 // Identifiants et serveur de test : JAMAIS dans le code. À fournir au lancement, par exemple :
-//   flutter test integration_test --dart-define=PRESTINV_TEST_LOGIN=admin \
-//     --dart-define=PRESTINV_TEST_PASSWORD=... --dart-define=PRESTINV_TEST_HOST=192.168.1.7
+//   flutter test integration_test --dart-define=PRESTINV_TEST_LOGIN=... \
+//     --dart-define=PRESTINV_TEST_PASSWORD=... --dart-define=PRESTINV_TEST_HOST=192.168.1.7 \
+//     --dart-define=PRESTINV_TEST_RECHERCHE=<produit avec écart>
 // (ou variables d'environnement du même nom sur la machine qui lance les tests).
 String _param(String nom, String defaut) {
-      const fromDefine = {
-            'PRESTINV_TEST_LOGIN': String.fromEnvironment('PRESTINV_TEST_LOGIN'),
-            'PRESTINV_TEST_PASSWORD': String.fromEnvironment('PRESTINV_TEST_PASSWORD'),
-            'PRESTINV_TEST_HOST': String.fromEnvironment('PRESTINV_TEST_HOST'),
-            'PRESTINV_TEST_PORT': String.fromEnvironment('PRESTINV_TEST_PORT'),
-      };
-      final v = fromDefine[nom] ?? '';
-      if (v.isNotEmpty) return v;
-      return Platform.environment[nom] ?? defaut;
+  const fromDefine = {
+    'PRESTINV_TEST_LOGIN': String.fromEnvironment('PRESTINV_TEST_LOGIN'),
+    'PRESTINV_TEST_PASSWORD': String.fromEnvironment('PRESTINV_TEST_PASSWORD'),
+    'PRESTINV_TEST_HOST': String.fromEnvironment('PRESTINV_TEST_HOST'),
+    'PRESTINV_TEST_PORT': String.fromEnvironment('PRESTINV_TEST_PORT'),
+    'PRESTINV_TEST_RECHERCHE': String.fromEnvironment('PRESTINV_TEST_RECHERCHE'),
+  };
+  final v = fromDefine[nom] ?? '';
+  if (v.isNotEmpty) return v;
+  return Platform.environment[nom] ?? defaut;
 }
 
-final String _testLogin = _param('PRESTINV_TEST_LOGIN', 'admin');
-final String _testPassword = _param('PRESTINV_TEST_PASSWORD', '');
-final String _testHost = _param('PRESTINV_TEST_HOST', '');
-final String _testPort = _param('PRESTINV_TEST_PORT', '8080');
-final bool _sansServeur = _testPassword.isEmpty || _testHost.isEmpty;
-
-// Helper function pour la connexion
-Future<void> login(WidgetTester tester) async {
-      print('--- DÉBUT: Procédure de Connexion ---');
-      await tester.pumpAndSettle();
-
-      expect(find.byType(LoginScreen), findsOneWidget);
-
-      await tester.enterText(find.widgetWithText(TextField, 'Identifiant'), _testLogin);
-      await tester.enterText(find.widgetWithText(TextField, 'Mot de passe'), _testPassword);
-
-      await tester.tap(find.text('CONNEXION'));
-
-      await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(HomeScreen), findsOneWidget, reason: "La connexion a échoué.");
-      print('--- FIN: Connexion Réussie ---');
-}
-
-// Helper pour lancer l'application
-Future<void> launchApp(WidgetTester tester) async {
-      SharedPreferences.setMockInitialValues({});
-      final appConfig = AppConfig();
-      await appConfig.load();
-      final authProvider = AuthProvider();
-
-      // Configuration de l'IP du serveur pour le test
-      appConfig.setApiConfig(
-            localAddress: _testHost,
-            localPort: _testPort,
-            distantAddress: _testHost,
-            distantPort: _testPort,
-      );
-
-      await tester.pumpWidget(
-            MultiProvider(
-                  providers: [
-                        ChangeNotifierProvider.value(value: appConfig),
-                        ChangeNotifierProvider.value(value: authProvider),
-                        ChangeNotifierProvider(create: (_) => InventoryProvider()),
-                        ChangeNotifierProvider(create: (_) => EntryProvider()),
-                        ChangeNotifierProvider(create: (_) => LicenseProvider()),
-                  ],
-                  child: const PrestinvApp(),
-            ),
-      );
-}
-
+final _parametres = ParametresEssai(
+  login: _param('PRESTINV_TEST_LOGIN', ''),
+  motDePasse: _param('PRESTINV_TEST_PASSWORD', ''),
+  hote: _param('PRESTINV_TEST_HOST', ''),
+  port: _param('PRESTINV_TEST_PORT', '8080'),
+  recherche: _param('PRESTINV_TEST_RECHERCHE', ''),
+  attente: const Duration(seconds: 4),
+);
+final bool _sansServeur = _parametres.login.isEmpty || _parametres.motDePasse.isEmpty || _parametres.hote.isEmpty;
 
 void main() {
-      IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-      group('Suite de Tests Complets de Prestinv', skip: _sansServeur ? 'PRESTINV_TEST_PASSWORD / PRESTINV_TEST_HOST non fournis' : null, () {
+  group('Suite de tests complets de Prestinv (serveur réel)',
+      skip: _sansServeur ? 'PRESTINV_TEST_LOGIN / PRESTINV_TEST_PASSWORD / PRESTINV_TEST_HOST non fournis' : null, () {
+    testWidgets('Flux principal : de la connexion à la saisie envoyée', (tester) async {
+      await lancerOrigine(tester, _parametres);
+      await connecterOrigine(tester, _parametres);
+      await parcoursSaisieOrigine(tester, _parametres);
+    });
 
-            // --- TEST N°1 : FLUX PRINCIPAL ---
-            testWidgets('Flux principal : de la connexion à la saisie', (tester) async {
-                  await launchApp(tester);
-                  await login(tester);
+    testWidgets('Déconnexion : l\'utilisateur peut se déconnecter', (tester) async {
+      await lancerOrigine(tester, _parametres);
+      await connecterOrigine(tester, _parametres);
+      await parcoursDeconnexionOrigine(tester, _parametres);
+    });
 
-                  await tester.tap(find.text('COMMENCER L\'INVENTAIRE'));
-                  await tester.pump(const Duration(seconds: 4));
-                  await tester.pumpAndSettle();
-                  expect(find.byType(InventoryListScreen), findsOneWidget);
-
-                  expect(find.byType(ListTile), findsWidgets, reason: "Aucun inventaire n'a été chargé.");
-                  await tester.tap(find.byType(ListTile).first);
-                  await tester.pump(const Duration(seconds: 4));
-                  await tester.pumpAndSettle();
-                  expect(find.byType(InventoryEntryScreen), findsOneWidget);
-            });
-
-
-            // --- TEST N°2 : DÉCONNEXION ---
-            testWidgets('Déconnexion : l\'utilisateur peut se déconnecter', (tester) async {
-                  await launchApp(tester);
-                  await login(tester);
-
-                  print('TEST: Phase de déconnexion...');
-                  await tester.tap(find.byIcon(Icons.logout));
-                  await tester.pumpAndSettle();
-
-                  expect(find.byType(LoginScreen), findsOneWidget);
-                  expect(find.byType(HomeScreen), findsNothing);
-                  print('TEST: Déconnexion réussie.');
-            });
-
-
-            // --- TEST N°3 : ÉCRAN DES ÉCARTS ET RECHERCHE (CORRIGÉ) ---
-            testWidgets('Écarts : la recherche filtre correctement les produits', (tester) async {
-                  await launchApp(tester);
-                  await login(tester);
-
-                  // 1. Navigation jusqu'à l'écran de saisie
-                  await tester.tap(find.text('COMMENCER L\'INVENTAIRE'));
-                  await tester.pump(const Duration(seconds: 4));
-                  await tester.pumpAndSettle();
-                  await tester.tap(find.byType(ListTile).first);
-                  await tester.pump(const Duration(seconds: 4));
-                  await tester.pumpAndSettle();
-                  expect(find.byType(InventoryEntryScreen), findsOneWidget);
-
-                  // 2. CORRECTION : On effectue une saisie pour créer un écart
-                  print('TEST: Création d\'un écart...');
-                  await tester.tap(find.widgetWithText(ElevatedButton, '9'));
-                  await tester.pump();
-                  await tester.tap(find.widgetWithText(ElevatedButton, '9'));
-                  await tester.pump();
-                  await tester.tap(find.widgetWithText(ElevatedButton, 'OK'));
-                  await tester.pumpAndSettle();
-
-                  // 3. CORRECTION : On envoie la donnée au serveur pour qu'elle soit prise en compte
-                  print('TEST: Envoi des données au serveur...');
-                  await tester.tap(find.byIcon(Icons.send));
-                  await tester.pump(const Duration(seconds: 5)); // Laisse le temps à l'envoi de se faire
-                  await tester.pumpAndSettle();
-                  print('TEST: Données envoyées.');
-
-                  // 4. Navigation vers l'écran des écarts
-                  await tester.tap(find.byIcon(Icons.edit_note_outlined));
-                  await tester.pump(const Duration(seconds: 4));
-                  await tester.pumpAndSettle();
-                  expect(find.byType(VarianceScreen), findsOneWidget);
-
-                  // 5. On effectue la recherche
-                  final searchField = find.widgetWithText(TextField, 'Rechercher un produit avec écart');
-                  expect(searchField, findsOneWidget);
-
-                  // Assurez-vous que ce texte correspond à un produit qui a un écart
-                  await tester.enterText(searchField, 'VITALAE');
-                  await tester.pumpAndSettle();
-
-                  // 6. On vérifie que la liste des résultats s'affiche bien
-                  expect(find.byType(ListView), findsOneWidget);
-                  expect(find.textContaining('VITALAE'), findsWidgets);
-                  print('TEST: Recherche sur écran des écarts réussie.');
-            });
-
-
-            // --- TEST N°4 : SCANNER DE CODE-BARRES ---
-            testWidgets('Scanner : le bouton ouvre bien l\'écran du scanner', (tester) async {
-                  await launchApp(tester);
-                  await login(tester);
-
-                  await tester.tap(find.text('COMMENCER L\'INVENTAIRE'));
-                  await tester.pump(const Duration(seconds: 4));
-                  await tester.pumpAndSettle();
-                  await tester.tap(find.byType(ListTile).first);
-                  await tester.pump(const Duration(seconds: 4));
-                  await tester.pumpAndSettle();
-
-                  await tester.tap(find.byIcon(Icons.edit_note_outlined));
-                  await tester.pump(const Duration(seconds: 4));
-                  await tester.pumpAndSettle();
-                  expect(find.byType(VarianceScreen), findsOneWidget);
-
-                  await tester.tap(find.byIcon(Icons.qr_code_scanner));
-                  await tester.pumpAndSettle();
-
-                  //expect(find.byType(BarcodeScannerScreen), findsOneWidget);
-                  print('TEST: Écran du scanner ouvert avec succès.');
-
-                  await tester.pageBack();
-                  await tester.pumpAndSettle();
-                  expect(find.byType(VarianceScreen), findsOneWidget);
-            });
-
-      });
+    testWidgets('Écarts : écran des écarts de l\'emplacement et recherche', (tester) async {
+      await lancerOrigine(tester, _parametres);
+      await connecterOrigine(tester, _parametres);
+      await parcoursSaisieOrigine(tester, _parametres);
+      await parcoursEcartsOrigine(tester, _parametres);
+    });
+  });
 }

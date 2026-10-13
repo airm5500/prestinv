@@ -34,9 +34,30 @@ jobs:
       - name: Analyse statique
         run: flutter analyze --no-fatal-infos
 
-      # Tous les tests du dossier test/ (le test d'intégration, qui exige un vrai serveur, n'est pas lancé ici).
-      - name: Tests
-        run: flutter test
+      # Socle de tests (voir test/README.md), par catégorie pour des journaux lisibles. Aucun émulateur :
+      # l'application entière tourne dans `flutter test`, contre un faux serveur Prestige.
+      # Garde-fou : tout fichier *_test.dart de test/ doit appartenir à une catégorie lancée ci-dessous.
+      - name: Contrôle des catégories de tests
+        shell: bash
+        run: |
+          hors=$(find test -name '*_test.dart' | grep -vE '^test/[^/]+_test\.dart$|^test/(unitaires|non_regression|integration|e2e|ergonomie)/' || true)
+          if [ -n "$hors" ]; then echo "::error title=Tests hors catégorie::$hors"; exit 1; fi
+
+      - name: Tests unitaires, widgets et non-régression
+        shell: bash
+        run: flutter test $(find test -maxdepth 1 -name '*_test.dart' | sort) test/unitaires test/non_regression
+
+      - name: Tests d'intégration (services contre le faux serveur HTTP local)
+        run: flutter test test/integration
+
+      - name: Tests de bout en bout (application entière, deux interfaces, pannes)
+        run: flutter test test/e2e
+
+      - name: Tests d'ergonomie et de cohérence d'affichage
+        run: flutter test test/ergonomie
+
+      # Le test sur appareil (integration_test/, vrai serveur) n'est pas lancé ici : ses parcours sont
+      # joués contre le faux serveur par test/e2e/integration_test_coherence_test.dart.
 
       - name: Build APK
         shell: bash
