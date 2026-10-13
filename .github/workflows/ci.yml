@@ -1,0 +1,49 @@
+name: CI Prestige Inventaire
+
+# Analyse + tests + APK de test à chaque envoi (toutes branches) et sur les demandes de fusion.
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Version alignée sur le projet (pubspec.lock : Dart >= 3.8, Flutter >= 3.27)
+          flutter-version: '3.32.8'
+          channel: stable
+          cache: true
+
+      - name: Dépendances
+        run: flutter pub get
+
+      # Les remarques (« info ») existantes ne bloquent pas ; toute erreur ou tout avertissement bloque.
+      - name: Analyse statique
+        run: flutter analyze --no-fatal-infos
+
+      # Tous les tests du dossier test/ (le test d'intégration, qui exige un vrai serveur, n'est pas lancé ici).
+      - name: Tests
+        run: flutter test
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prestinv-apk
+          # Le Gradle du projet renomme l'APK (prestigeinv-<variante>-<version>.apk) : on prend tous les APK produits.
+          path: build/app/outputs/**/*.apk
+          retention-days: 30

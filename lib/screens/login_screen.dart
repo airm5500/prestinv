@@ -136,7 +136,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Mode de connexion :'),
+                            // Flexible : évite le débordement de 42 px sur les écrans de 360 dp (Sunmi V2s).
+                            const Flexible(child: Text('Mode de connexion :', overflow: TextOverflow.ellipsis)),
                             Row(
                               children: [
                                 Text(

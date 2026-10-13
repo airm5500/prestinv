@@ -131,28 +131,8 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
   }
 
   void _attemptBackgroundSync() {
-    final entryProvider = context.read<EntryProvider>();
-
-    // CORRECTION : La synchronisation nécessite l'ID de l'inventaire en cours
-    // On ne tente la synchro que si un rayon est sélectionné (ce qui nous donne accès à l'ID)
-    if (entryProvider.hasUnsyncedData && entryProvider.selectedRayon != null) {
-      final authProvider = context.read<AuthProvider>();
-      final appConfig = context.read<AppConfig>();
-
-      final apiService = ApiService(
-          baseUrl: appConfig.currentApiUrl,
-          sessionCookie: authProvider.sessionCookie
-      );
-
-      // On passe l'ID de l'inventaire requis par la nouvelle signature de la méthode
-      // Note: On suppose que l'EntryProvider expose l'ID via une logique interne ou que l'ID est déductible.
-      // Si vous n'avez pas l'ID ici, la synchro auto en tâche de fond ne pourra pas se faire sans ID.
-      // Ici, on utilise un placeholder ou on s'appuie sur le fait que EntryProvider gère ses données.
-
-      // Si votre EntryProvider a été mis à jour comme précédemment discuté, il faut lui fournir l'ID.
-      // Pour le main.dart, si l'ID n'est pas stocké globalement, on peut omettre ce déclencheur
-      // ou s'assurer que EntryProvider stocke le dernier inventoryId utilisé.
-    }
+    // Rien n'était envoyé ici (méthode vide d'origine) : conservée vide à l'étape 0.
+    // L'étape 1 (file persistante des saisies) la remplace par un vrai envoi.
   }
 
   @override

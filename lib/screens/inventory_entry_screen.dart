@@ -52,8 +52,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   List<Product> _filteredProducts = [];
   bool _showSearchResults = false;
 
-  bool _isManualAccess = false;
-
   @override
   void initState() {
     super.initState();
@@ -402,9 +400,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         _showFinishDialog();
       } else {
         provider.nextProduct(widget.inventoryId);
-        setState(() {
-          _isManualAccess = false;
-        });
         _quantityController.clear();
         _quantityFocusNode.requestFocus();
       }
@@ -538,10 +533,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
         ],
       ),
     ) ?? false;
-  }
-
-  Future<bool> _onWillPop() async {
-    return await _handleExitSecurity();
   }
 
   void _showPendingDataDialog() {
@@ -1203,9 +1194,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           p.produitName.toLowerCase().contains(input.toLowerCase()));
     }
     if (targetIndex != -1) {
-      setState(() {
-        _isManualAccess = true;
-      });
       final targetProduct = products[targetIndex];
 
       provider.jumpToProduct(targetProduct, widget.inventoryId);

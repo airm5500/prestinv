@@ -17,6 +17,15 @@ class LicenseProvider with ChangeNotifier {
   LicenseStatus get status => _status;
   String? get error => _error;
 
+  /// Tests : pose une licence connue sans appel réseau.
+  @visibleForTesting
+  void setLicenseForTest(License license) {
+    _license = license;
+    _error = null;
+    _updateStatus();
+    notifyListeners();
+  }
+
   /// Retourne le nombre de jours restants avant expiration
   int get daysRemaining {
     if (_license == null) return 0;

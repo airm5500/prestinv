@@ -7,7 +7,6 @@ import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/models/product_filter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:prestinv/config/app_config.dart';
 
 class EntryProvider with ChangeNotifier {
   List<Rayon> _rayons = [];

@@ -29,7 +29,6 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
   Timer? _debounceTimer;
-  bool _isSearching = false;
 
   late ApiService _apiService;
 
@@ -52,12 +51,6 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
       baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
       sessionCookie: authProvider.sessionCookie,
     );
-
-    _searchFocusNode.addListener(() {
-      setState(() {
-        _isSearching = _searchFocusNode.hasFocus;
-      });
-    });
 
     _loadInitialData();
   }

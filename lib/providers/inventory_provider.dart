@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/models/inventory.dart';
-import '../models/collected_item.dart';
 
 class InventoryProvider with ChangeNotifier {
   List<Inventory> _inventories = [];
