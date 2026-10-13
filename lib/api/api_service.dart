@@ -8,20 +8,88 @@ import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/models/license.dart';
-// Note: J'ai retiré collected_item.dart car il n'était pas utilisé ici
+import 'package:prestinv/saisie/saisie_serveur.dart';
 
-class ApiService {
+/// Nature d'un échec de chargement (jamais confondu avec « liste vide »).
+enum TypeErreurChargement { reseau, session, refus, donnees }
+
+/// Échec de chargement : message lisible + nature (réseau, session expirée, refus, données illisibles).
+class ApiLoadException implements Exception {
+  final String message;
+  final TypeErreurChargement type;
+  const ApiLoadException(this.message, [this.type = TypeErreurChargement.refus]);
+
+  bool get sessionExpiree => type == TypeErreurChargement.session;
+  bool get reseau => type == TypeErreurChargement.reseau;
+
+  @override
+  String toString() => message;
+}
+
+class ApiService implements SaisieServeur {
   final String baseUrl;
   final String? sessionCookie;
 
-  ApiService({required this.baseUrl, this.sessionCookie});
+  /// Cookie de session lu au moment de chaque appel (après une reconnexion, le nouveau est utilisé).
+  final String? Function()? cookie;
+
+  /// Client HTTP (remplaçable dans les tests).
+  final http.Client? client;
+
+  ApiService({required this.baseUrl, this.sessionCookie, this.cookie, this.client});
+
+  String? get _cookieCourant => cookie != null ? cookie!() : sessionCookie;
 
   Map<String, String> _getHeaders() {
     final headers = {'Content-Type': 'application/json; charset=UTF-8'};
-    if (sessionCookie != null && sessionCookie!.isNotEmpty) {
-      headers['Cookie'] = sessionCookie!;
+    final c = _cookieCourant;
+    if (c != null && c.isNotEmpty) {
+      headers['Cookie'] = c;
     }
     return headers;
+  }
+
+  Future<http.Response> _httpGet(Uri url) => client != null ? client!.get(url, headers: _getHeaders()) : http.get(url, headers: _getHeaders());
+
+  Future<http.Response> _httpPut(Uri url, String body) =>
+      client != null ? client!.put(url, headers: _getHeaders(), body: body) : http.put(url, headers: _getHeaders(), body: body);
+
+  static bool _estErreurReseau(Object e) => e is SocketException || e is TimeoutException || e is http.ClientException || e is HandshakeException;
+
+  // --- FILE DES SAISIES (SaisieServeur) ---
+
+  /// Pose la quantité TOTALE sur une ligne (PUT /ws/inventaires/details). Ne lève jamais.
+  @override
+  Future<ReponseEnvoi> poserQuantite(int ligneId, int quantite) async {
+    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/details');
+    try {
+      final response = await _httpPut(url, jsonEncode({'id': ligneId, 'quantite': quantite})).timeout(const Duration(seconds: 15));
+      final code = response.statusCode;
+      if (code >= 200 && code < 300) return ReponseEnvoi.ok;
+      if (code == 401 || code == 403) return ReponseEnvoi(ResultatEnvoi.session, 'Session expirée ou accès refusé (code $code).');
+      if (code >= 400 && code < 500) return ReponseEnvoi(ResultatEnvoi.refus, 'Le serveur a refusé la quantité (code $code).');
+      return ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Erreur du serveur (code $code).');
+    } on TimeoutException {
+      return const ReponseEnvoi(ResultatEnvoi.reseau, 'Le serveur met trop de temps à répondre.');
+    } catch (e) {
+      if (_estErreurReseau(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, 'Serveur injoignable.');
+      return ReponseEnvoi(ResultatEnvoi.reseau, 'Envoi impossible : $e');
+    }
+  }
+
+  /// Tous les inventaires ouverts (GET /ws/inventaires sans limite). `null` si la liste n'a pas pu être lue.
+  @override
+  Future<InventairesOuverts?> inventairesOuverts() async {
+    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires');
+    try {
+      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) return null;
+      final data = json.decode(utf8.decode(response.bodyBytes));
+      if (data is! List) return null;
+      return InventairesOuverts({for (final i in data) if (i is Map && i['id'] != null) '${i['id']}'});
+    } catch (_) {
+      return null;
+    }
   }
 
   // --- INVENTAIRES ---
@@ -29,7 +97,7 @@ class ApiService {
   Future<List<Inventory>> fetchInventories({int maxResult = 3}) async {
     final url = Uri.parse('$baseUrl/api/v1/ws/inventaires?maxResult=$maxResult');
     try {
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         return data.map((json) => Inventory.fromJson(json)).toList();
@@ -47,58 +115,63 @@ class ApiService {
 
   // --- CUMUL / VERIFICATION ---
 
-  /// Vérifie si un produit a déjà été touché sur le serveur.
-  /// LOGIQUE CORRIGÉE : Utilise dtUpdated comme preuve absolue de comptage.
-  /// Renvoie NULL si non trouvé ou dtUpdated absent.
-  /// Renvoie la quantité si trouvé avec une date de mise à jour (popup cumul).
+  /// Quantité déjà comptée sur le serveur pour ce produit (`null` = jamais compté).
+  ///
+  /// IMPORTANT : un échec (réseau lent, serveur injoignable, session expirée, réponse illisible) LÈVE
+  /// [ApiLoadException] — il ne signifie JAMAIS « jamais compté » (sinon on écraserait le comptage d'un
+  /// collègue). Si [ligneId] est fourni, c'est cette ligne précise qui compte (un même produit peut
+  /// figurer dans deux emplacements) ; sinon la première ligne de ce CIP déjà comptée.
+  Future<int?> verifierDejaCompte(String inventoryId, String cip, {int? ligneId}) async {
+    if (cip.isEmpty) return null;
+    final uri = Uri.parse('$baseUrl/api/v1/ws/inventaires/detailsAllTouched').replace(queryParameters: {
+      'idInventaire': inventoryId,
+      'query': cip,
+    });
+    final http.Response response;
+    try {
+      response = await _httpGet(uri).timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      throw const ApiLoadException('Le serveur met trop de temps à répondre : impossible de savoir si ce produit est déjà compté.', TypeErreurChargement.reseau);
+    } catch (e) {
+      throw const ApiLoadException('Serveur injoignable : impossible de savoir si ce produit est déjà compté.', TypeErreurChargement.reseau);
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const ApiLoadException('Session expirée : reconnectez-vous pour vérifier si ce produit est déjà compté.', TypeErreurChargement.session);
+    }
+    if (response.statusCode != 200) {
+      throw ApiLoadException('Le serveur a refusé la vérification « déjà compté » (code ${response.statusCode}).');
+    }
+    final List<dynamic> data;
+    try {
+      data = json.decode(utf8.decode(response.bodyBytes)) as List<dynamic>;
+    } catch (_) {
+      throw const ApiLoadException('Réponse illisible du serveur pour la vérification « déjà compté ».', TypeErreurChargement.donnees);
+    }
+    int? qteDe(dynamic item) {
+      if (item is! Map || item['dtUpdated'] == null || item['quantiteSaisie'] is! num) return null;
+      return (item['quantiteSaisie'] as num).toInt();
+    }
+
+    if (ligneId != null) {
+      final memeLigne = data.where((i) => i is Map && i['id'] is num && (i['id'] as num).toInt() == ligneId).toList();
+      if (memeLigne.isNotEmpty) return qteDe(memeLigne.first);
+      // La réponse ne contient pas cette ligne : jamais comptée (les lignes comptées sont toutes renvoyées).
+      if (data.any((i) => i is Map && i['id'] is num)) return null;
+    }
+    for (final item in data) {
+      if (item is Map && item['produitCip']?.toString() == cip) {
+        final q = qteDe(item);
+        if (q != null) return q;
+      }
+    }
+    return null;
+  }
+
+  /// Ancien comportement (conservé provisoirement, remplacé à l'étape 1c) : toute erreur = « jamais compté ».
   Future<int?> checkExistingProductQuantity(String inventoryId, String query, {String? rayonId}) async {
     try {
-      if (query.isEmpty) return null;
-
-      String endpoint = rayonId != null && rayonId.isNotEmpty
-          ? '/api/v1/ws/inventaires/detailsTouchedRayon'
-          : '/api/v1/ws/inventaires/detailsAllTouched';
-
-      final uri = Uri.parse('$baseUrl$endpoint').replace(queryParameters: {
-        'idInventaire': inventoryId,
-        'query': query, // On envoie le CIP scanné ici (ex: 8055207)
-        if (rayonId != null && rayonId.isNotEmpty) 'idRayon': rayonId,
-      });
-
-      print("API CUMUL CHECK URL: $uri");
-
-      // Timeout court (5s) pour garantir la fluidité en mode scan
-      final response = await http.get(uri, headers: _getHeaders()).timeout(const Duration(seconds: 5));
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-
-        // 1. Si vide = Pas touché -> return null (Pas de popup)
-        if (data.isEmpty) {
-          return null;
-        }
-
-        // 2. Si contient des données, on cherche la correspondance exacte avec le CIP
-        for (var item in data) {
-          String itemCip = item['produitCip']?.toString() ?? '';
-
-          // Sécurité : on s'assure que c'est bien le produit demandé ET qu'il a été modifié (dtUpdated)
-          if (itemCip == query && item['dtUpdated'] != null) {
-            if (item['quantiteSaisie'] != null) {
-              int qte = (item['quantiteSaisie'] as num).toInt();
-              print("Produit déjà compté trouvé (dtUpdated présent). Quantité: $qte");
-              return qte;
-            }
-          }
-        }
-
-        return null; // Pas de correspondance avec dtUpdated trouvée
-      } else {
-        print('Erreur API Check: ${response.statusCode}');
-        return null;
-      }
-    } catch (e) {
-      print('Exception API Check: $e');
+      return await verifierDejaCompte(inventoryId, query);
+    } catch (_) {
       return null;
     }
   }
@@ -108,7 +181,7 @@ class ApiService {
   Future<List<Rayon>> fetchRayons(String idInventaire) async {
     final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/rayons?idInventaire=$idInventaire');
     try {
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         return data.map((json) => Rayon.fromJson(json)).toList();
@@ -157,7 +230,7 @@ class ApiService {
       // Debug: afficher l'URL appelée dans la console
       print("Calling API: $urlStr");
 
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         List<Product> products = data.map((json) => Product.fromJson(json)).toList();
@@ -183,7 +256,7 @@ class ApiService {
     // On envoie un objet JSON avec id et quantite
     final requestBody = jsonEncode({'id': productId, 'quantite': newQuantity});
     try {
-      final response = await http.put(url, headers: _getHeaders(), body: requestBody).timeout(const Duration(seconds: 15));
+      final response = await _httpPut(url, requestBody).timeout(const Duration(seconds: 15));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception('Le serveur a répondu avec le statut ${response.statusCode}');
       }
@@ -222,7 +295,7 @@ class ApiService {
   Future<List<Product>> fetchAllProductsForInventory(String inventoryId) async {
     final url = Uri.parse('$baseUrl/api/v1/inventaires/analyse_complete?idInventaire=$inventoryId');
     try {
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 60));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 60));
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         return data.map((json) => Product.fromJson(json)).toList();
@@ -249,7 +322,7 @@ class ApiService {
 
     try {
       print("Calling API Variances: $urlStr");
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
@@ -280,7 +353,7 @@ class ApiService {
     final url = Uri.parse(urlStr);
     try {
       print("Calling API Untouched: $urlStr");
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         List<Product> products = data.map((json) => Product.fromJson(json)).toList();
@@ -309,7 +382,7 @@ class ApiService {
 
     try {
       print("Calling API Untouched Rayon: $urlStr");
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 20));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
@@ -346,7 +419,7 @@ class ApiService {
   Future<License> findLicense() async {
     final url = Uri.parse('$baseUrl/api/v1/licence/find');
     try {
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 10));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         // Le serveur retourne un JSON unique, pas une liste
@@ -367,7 +440,7 @@ class ApiService {
     // On laisse query vide pour avoir tout le rayon
     final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/detailsTouchedRayon?idInventaire=$inventoryId&idRayon=$rayonId&query=');
     try {
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 5));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         return data.isNotEmpty;
@@ -404,7 +477,7 @@ class ApiService {
   Future<bool> hasUntouchedProductsInRayon(String inventoryId, String rayonId) async {
     final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/detailsUntouchedRayon?idInventaire=$inventoryId&idRayon=$rayonId&query=');
     try {
-      final response = await http.get(url, headers: _getHeaders()).timeout(const Duration(seconds: 5));
+      final response = await _httpGet(url).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         return data.isNotEmpty; // Si vide = tout est fini
