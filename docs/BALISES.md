@@ -7,12 +7,13 @@ sur le terrain, on peut reconstruire l'APK d'avant l'étape sans rien chercher d
 |---|---|---|
 | `prestinv-avant-etape-0` | `d09ef4e` (master d'origine, 26/02/2026) | Application telle que livrée avant toute modification (version affichée 4.8.5). |
 | `prestinv-avant-etape-1` | dernier commit de l'étape 0 | Socle : CI, test réparé, mot de passe retiré des tests, version unique 4.9.0+5, interrupteur `InterfaceVersion` (éteint). Aucun écran changé. |
-| `prestinv-avant-etape-2` | dernier commit de l'étape 1 | Fiabilité de la saisie (file locale persistante des saisies, envoi rejouable). |
+| `prestinv-avant-etape-2` | dernier commit de l'étape 1 | Fiabilité de la saisie (file locale persistante des saisies, envoi rejouable, « À envoyer », mode Direct par défaut pour les nouvelles installations). |
+| `prestinv-avant-etape-3` | dernier commit de l'étape 2 | Robustesse et sécurité (erreurs ≠ liste vide, session expirée, serveur injoignable ≠ licence, mot de passe chiffré, code administrateur, contrôles de saisie). |
 
 Les balises sont créées **localement** ; les publier avec :
 
 ```bash
-git push origin prestinv-avant-etape-0 prestinv-avant-etape-1 prestinv-avant-etape-2
+git push origin prestinv-avant-etape-0 prestinv-avant-etape-1 prestinv-avant-etape-2 prestinv-avant-etape-3
 ```
 
 ## Revenir à une version précédente
@@ -33,6 +34,13 @@ Avant de réinstaller une version antérieure à l'étape 1, **envoyer toutes le
 la nouvelle interface (étape 4) n'existe pas, les deux positions ouvrent les écrans d'origine et le
 réglage n'est pas affiché. À l'étape 4 il sera ajouté à la Configuration (`InterfaceVersionTile`) pour
 revenir aux écrans d'origine sans réinstaller.
+
+## Essai réel contre un serveur de test
+
+`test_reel/essai_serveur_reel_test.dart` (hors CI) : connexion, lecture des inventaires, « déjà
+compté », file persistante (correction pendant l'envoi, redémarrage), 401, licence. La ligne de test
+reçoit des quantités puis sa valeur d'origine ; la date de comptage (`dt_UPDATED`) est à remettre à
+la main (SQL) sur le serveur de test.
 
 ## Règle de version
 
