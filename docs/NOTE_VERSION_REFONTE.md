@@ -79,9 +79,14 @@ rafale sans perte ; touches latérales Sunmi).
    avec la bonne valeur.
 3. **Écarts de tout l'inventaire** : impression PDF et export CSV ajoutés (ils n'existaient que pour un
    rayon) ; la quantité recomptée est **pré-remplie** avec la quantité comptée (« Garder » la confirme).
-4. **Accueil** : l'avancement par rayon s'affiche quand l'état des rayons a déjà été lu (ouverture de
-   « Choisir un rayon ») ; il n'est pas recalculé à chaque retour à l'accueil, pour ne pas charger le
-   serveur (deux requêtes par rayon aujourd'hui).
+4. **Accueil — avancement** : sur la carte de l'inventaire en cours, le bouton **« Actualiser
+   l'avancement »** calcule l'état de tous les rayons **quand vous le demandez** (mêmes requêtes que
+   « Choisir un rayon ») : progression « Rayon 3/12 », bouton **Annuler**, un seul calcul à la fois
+   (un double appui ne relance rien), motif clair en cas d'échec (serveur injoignable, session expirée
+   avec « Se reconnecter ») sans effacer le dernier avancement connu. Le résultat est gardé sur le
+   terminal avec son heure (« Avancement à 10:42 »). Il n'est **jamais recalculé automatiquement**
+   (deux requêtes par rayon aujourd'hui : voir la demande au serveur `docs/DEMANDE_SERVEUR_COMPTAGE.md`).
+   Sans calcul demandé, l'avancement affiché reste celui lu à l'ouverture de « Choisir un rayon ».
 5. L'**inventaire en cours** choisi sur l'accueil est mémorisé sur le terminal.
 
 ## 6. Pour l'informaticien

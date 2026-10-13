@@ -111,6 +111,10 @@ void main() {
       await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.byKey(const ValueKey('nv-inv-INV2')), 200, scrollable: find.byType(Scrollable).first);
+      // scrollUntilVisible s'arrête dès que la ligne est construite (marge de la liste paresseuse) :
+      // on l'amène réellement à l'écran avant de la toucher.
+      await tester.ensureVisible(find.byKey(const ValueKey('nv-inv-INV2')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('nv-inv-INV2')));
       await tester.pumpAndSettle();
       expect((await SharedPreferences.getInstance()).getString(InventaireCourant.cle), 'INV2');

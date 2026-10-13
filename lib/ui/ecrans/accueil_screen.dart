@@ -2,7 +2,8 @@
 // Nouvelle interface — accueil = tableau de bord de l'inventaire en cours (maquette A ; tablette :
 // menu latéral, maquette C). Remplace l'accueil d'origine ET la liste « Choisir un inventaire » :
 // - inventaire en cours en tête (avancement connu sur l'appareil, rayons terminés s'ils ont été lus),
-//   « À envoyer » avec Envoyer, bouton « Reprendre » au dernier rayon ouvert ;
+//   bouton « Actualiser l'avancement » (calcul À LA DEMANDE, lib/ui/avancement.dart — jamais
+//   automatique), « À envoyer » avec Envoyer, bouton « Reprendre » au dernier rayon ouvert ;
 // - Saisie guidée, Scan continu, Écarts, Restants, Collecte hors ligne ;
 // - autres inventaires ouverts (choix de l'inventaire en cours) et « Nouvel inventaire » ;
 // - barre du bas Accueil · Scanner · Écarts · Réglages.
@@ -19,6 +20,7 @@ import 'package:prestinv/providers/inventory_provider.dart';
 import 'package:prestinv/providers/license_provider.dart';
 import 'package:prestinv/saisie/saisie.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/ui/avancement.dart';
 import 'package:prestinv/ui/ecrans/creation_inventaire_screen.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/navigation.dart';
@@ -26,6 +28,8 @@ import 'package:prestinv/ui/presentation_style.dart';
 import 'package:prestinv/ui/responsive.dart';
 import 'package:prestinv/ui/theme.dart';
 import 'package:prestinv/utils/app_utils.dart';
+import 'package:prestinv/widgets/chargement_erreur.dart';
+import 'package:prestinv/widgets/reconnexion.dart';
 import 'package:provider/provider.dart';
 
 class NvAccueilScreen extends StatefulWidget {
@@ -43,6 +47,10 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
   String? _nouveauId;
   bool _envoi = false;
 
+  /// Avancement calculé à la demande (résultat gardé avec son heure ; aucun calcul automatique).
+  final _avancement = AvancementCalcul();
+  String? _avancementLu;
+
   @override
   void initState() {
     super.initState();
@@ -54,6 +62,13 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
       _rafraichir();
       if (!_alerteMontree) _rappelLicence();
     });
+  }
+
+  @override
+  void dispose() {
+    _avancement.annuler();
+    _avancement.dispose();
+    super.dispose();
   }
 
   ApiService _api() {
@@ -107,6 +122,7 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
   }
 
   void _choisir(Inventory inv) {
+    if (_avancement.enCours && _avancement.inventaireId != inv.id) _avancement.annuler();
     setState(() => _courantId = inv.id);
     InventaireCourant.ecrire(inv.id);
   }
@@ -117,6 +133,19 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
     setState(() => _nouveauId = cree.id);
     if (cree.id.isNotEmpty) _choisir(cree);
     await _rafraichir();
+  }
+
+  /// « Actualiser l'avancement » : mêmes requêtes que « Choisir un rayon », sur demande seulement.
+  Future<void> _actualiserAvancement(Inventory inv) async {
+    if (_avancement.enCours) return; // anti double appui
+    await _avancement.actualiser(_api(), inv.id);
+  }
+
+  /// Annuler : arrêt immédiat (la réponse déjà demandée sera ignorée), l'avancement précédent reste.
+  void _annulerAvancement() {
+    if (!_avancement.enCours) return;
+    _avancement.annuler();
+    nvMessage(context, 'Actualisation de l\'avancement annulée.', ton: context.nv.neutre);
   }
 
   Future<void> _envoyerTout(SaisieQueue q) async {
@@ -152,6 +181,10 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
     } catch (_) {}
     final invs = provider.inventories;
     final courant = _courant(invs, q);
+    if (courant != null && courant.id != _avancementLu) {
+      _avancementLu = courant.id;
+      _avancement.charger(courant.id);
+    }
     final user = auth.user;
     final sousTitre = [
       if ((user?.officine ?? '').isNotEmpty) user!.officine,
@@ -177,7 +210,17 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
           semantique: 'Licence : $jours jours restants',
         ),
       ]),
-      if (courant != null) _CarteEnCours(inventaire: courant, queue: q),
+      if (courant != null)
+        ListenableBuilder(
+          listenable: _avancement,
+          builder: (context, _) => _CarteEnCours(
+            inventaire: courant,
+            queue: q,
+            avancement: _avancement,
+            onActualiser: () => _actualiserAvancement(courant),
+            onAnnuler: _annulerAvancement,
+          ),
+        ),
     ];
 
     final blocsPrincipaux = <Widget>[
@@ -385,28 +428,48 @@ class _PuceEntete extends StatelessWidget {
 }
 
 /// Carte « EN COURS » dans l'en-tête bleu : inventaire, saisies sur l'appareil, rayons terminés.
+/// Avancement : celui calculé sur demande (« Actualiser l'avancement », avec son heure) s'il existe,
+/// sinon celui lu par l'écran « Choisir un rayon » (comme avant).
 class _CarteEnCours extends StatelessWidget {
   final Inventory inventaire;
   final SaisieQueue? queue;
-  const _CarteEnCours({required this.inventaire, required this.queue});
+  final AvancementCalcul avancement;
+  final VoidCallback onActualiser;
+  final VoidCallback onAnnuler;
+  const _CarteEnCours({required this.inventaire, required this.queue, required this.avancement, required this.onActualiser, required this.onAnnuler});
 
   @override
   Widget build(BuildContext context) {
     final lignes = queue?.lignes(inventaireId: inventaire.id) ?? const <SaisieLigne>[];
     final envoyees = lignes.where((s) => s.envoyee).length;
     final entry = context.watch<EntryProvider>();
-    final statuts = entry.inventoryId == inventaire.id && entry.rayons.isNotEmpty ? entry.rayonStatuses : const <String, int>{};
-    final total = entry.inventoryId == inventaire.id ? entry.rayons.length : 0;
+    final calcule = avancement.resultat(inventaire.id);
+    final Map<String, int> statuts;
+    final int total;
+    if (calcule != null) {
+      statuts = calcule.statuts;
+      total = calcule.total;
+    } else {
+      statuts = entry.inventoryId == inventaire.id && entry.rayons.isNotEmpty ? entry.rayonStatuses : const <String, int>{};
+      total = entry.inventoryId == inventaire.id ? entry.rayons.length : 0;
+    }
     final termines = statuts.values.where((s) => s == 2).length;
     final enCours = statuts.values.where((s) => s == 1).length;
-    final pct = total > 0 ? ((termines + enCours * 0.5) / total * 100).round() : null;
+    final pct = total > 0 && (statuts.isNotEmpty || calcule != null) ? ((termines + enCours * 0.5) / total * 100).round() : null;
     final details = [
       '${lignes.length} saisie(s) sur ce téléphone · $envoyees envoyée(s)',
-      if (total > 0 && statuts.isNotEmpty) '$termines rayon(s) terminé(s) sur $total',
+      if (total > 0 && (statuts.isNotEmpty || calcule != null)) '$termines rayon(s) terminé(s) sur $total',
+      if (calcule != null && enCours > 0) '$enCours commencé(s)',
     ].join(' · ');
+    final calculIci = avancement.enCours && avancement.inventaireId == inventaire.id;
+    final calculAilleurs = avancement.enCours && !calculIci;
+    final erreur = avancement.erreurPour(inventaire.id);
+    final heure = calcule == null
+        ? null
+        : 'Avancement à ${calcule.heure()}${calcule.inconnus > 0 ? ' · ${calcule.inconnus} rayon(s) non lu(s)' : ''}';
     return Semantics(
       container: true,
-      label: 'Inventaire en cours : ${inventaire.libelle}. $details',
+      label: 'Inventaire en cours : ${inventaire.libelle}. $details${pct != null ? '. Avancement $pct pour cent' : ''}${heure != null ? '. $heure' : ''}',
       child: Container(
         key: const ValueKey('nv-en-cours'),
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
@@ -422,6 +485,7 @@ class _CarteEnCours extends StatelessWidget {
             ),
             if (pct != null)
               Container(
+                key: const ValueKey('nv-avancement-pct'),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(color: Pal.amber, borderRadius: BorderRadius.circular(999)),
                 child: Text('$pct %', style: const TextStyle(color: Pal.onAmber, fontWeight: FontWeight.bold)),
@@ -443,8 +507,113 @@ class _CarteEnCours extends StatelessWidget {
           ],
           const SizedBox(height: 8),
           Text(details, style: const TextStyle(color: Color(0xFFDCE6F2), fontSize: 13.5)),
+          const SizedBox(height: 8),
+          if (calculIci)
+            _ProgressionAvancement(avancement: avancement, onAnnuler: onAnnuler)
+          else
+            Wrap(spacing: 10, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              OutlinedButton.icon(
+                key: const ValueKey('nv-actualiser-avancement'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  disabledForegroundColor: Colors.white54,
+                  side: const BorderSide(color: Colors.white54),
+                  minimumSize: const Size(48, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5),
+                ),
+                onPressed: calculAilleurs ? null : onActualiser,
+                icon: const Icon(Icons.refresh, size: 20),
+                label: const Text('Actualiser l\'avancement'),
+              ),
+              if (heure != null)
+                Text(heure, key: const ValueKey('nv-avancement-heure'), style: const TextStyle(color: Pal.headerMuted, fontSize: 13)),
+            ]),
+          if (erreur != null && !calculIci) _ErreurAvancement(erreur: erreur, onReessayer: onActualiser),
         ]),
       ),
+    );
+  }
+}
+
+/// Calcul en cours : « Rayon 3/12 », barre de progression, Annuler (placé à droite, loin du bouton
+/// d'origine : un double appui sur « Actualiser » ne peut pas annuler).
+class _ProgressionAvancement extends StatelessWidget {
+  final AvancementCalcul avancement;
+  final VoidCallback onAnnuler;
+  const _ProgressionAvancement({required this.avancement, required this.onAnnuler});
+
+  @override
+  Widget build(BuildContext context) {
+    final n = avancement.rayons;
+    final texte = n == 0 ? 'Lecture des rayons…' : 'Rayon ${avancement.rayon}/$n';
+    return Semantics(
+      liveRegion: true,
+      label: 'Calcul de l\'avancement : $texte',
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(texte, key: const ValueKey('nv-avancement-progression'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14.5)),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: n == 0 ? null : (avancement.rayon - 1).clamp(0, n) / n,
+                minHeight: 6,
+                color: Pal.amber,
+                backgroundColor: Colors.white.withValues(alpha: 0.2),
+              ),
+            ),
+          ]),
+        ),
+        const SizedBox(width: 12),
+        TextButton(
+          key: const ValueKey('nv-annuler-avancement'),
+          style: TextButton.styleFrom(foregroundColor: Colors.white, minimumSize: const Size(48, 48), textStyle: const TextStyle(fontWeight: FontWeight.w600)),
+          onPressed: onAnnuler,
+          child: const Text('Annuler'),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Échec du calcul : motif exact (réseau, session…), le dernier avancement connu reste affiché.
+class _ErreurAvancement extends StatelessWidget {
+  final Object erreur;
+  final VoidCallback onReessayer;
+  const _ErreurAvancement({required this.erreur, required this.onReessayer});
+
+  @override
+  Widget build(BuildContext context) {
+    final session = estSessionExpiree(erreur);
+    return Container(
+      key: const ValueKey('nv-avancement-erreur'),
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+      decoration: BoxDecoration(color: const Color(0xFF7F1D1D).withValues(alpha: 0.55), borderRadius: BorderRadius.circular(12)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(session ? Icons.lock_clock : Icons.cloud_off, color: Colors.white, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Avancement non actualisé : ${AvancementCalcul.motif(erreur)}',
+                style: const TextStyle(color: Colors.white, fontSize: 13.5)),
+          ),
+        ]),
+        if (session)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              key: const ValueKey('nv-avancement-reconnecter'),
+              style: TextButton.styleFrom(foregroundColor: Colors.white, minimumSize: const Size(48, 48)),
+              onPressed: () async {
+                if (await demanderReconnexion(context)) onReessayer();
+              },
+              child: const Text('Se reconnecter'),
+            ),
+          ),
+      ]),
     );
   }
 }

@@ -344,24 +344,33 @@ class ApiService implements SaisieServeur {
   /// plus « pas commencé »).
   Future<bool?> hasTouchedProductsInRayon(String inventoryId, String rayonId) async {
     try {
-      return (await _loadList('produits comptés', _uri('/detailsTouchedRayon', {'idInventaire': inventoryId, 'idRayon': rayonId}), (m) => m,
-              delai: const Duration(seconds: 8)))
-          .isNotEmpty;
+      return await rayonAProduitsComptes(inventoryId, rayonId);
     } on ApiLoadException {
       return null;
     }
   }
 
+  /// Même requête que [hasTouchedProductsInRayon], mais l'échec est levé ([ApiLoadException] : réseau,
+  /// session expirée, refus…) pour que l'appelant puisse en donner le motif exact.
+  Future<bool> rayonAProduitsComptes(String inventoryId, String rayonId) async =>
+      (await _loadList('produits comptés', _uri('/detailsTouchedRayon', {'idInventaire': inventoryId, 'idRayon': rayonId}), (m) => m,
+              delai: const Duration(seconds: 8)))
+          .isNotEmpty;
+
   /// Reste-t-il des produits à compter ? `null` si on ne peut pas le savoir.
   Future<bool?> hasUntouchedProductsInRayon(String inventoryId, String rayonId) async {
     try {
-      return (await _loadList('restants', _uri('/detailsUntouchedRayon', {'idInventaire': inventoryId, 'idRayon': rayonId}), (m) => m,
-              delai: const Duration(seconds: 8)))
-          .isNotEmpty;
+      return await rayonAProduitsRestants(inventoryId, rayonId);
     } on ApiLoadException {
       return null;
     }
   }
+
+  /// Même requête que [hasUntouchedProductsInRayon], échec levé ([ApiLoadException]).
+  Future<bool> rayonAProduitsRestants(String inventoryId, String rayonId) async =>
+      (await _loadList('restants', _uri('/detailsUntouchedRayon', {'idInventaire': inventoryId, 'idRayon': rayonId}), (m) => m,
+              delai: const Duration(seconds: 8)))
+          .isNotEmpty;
 
   // --- GESTION LICENCE ---
 
