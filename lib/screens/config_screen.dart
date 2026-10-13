@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prestinv/config/app_config.dart';
-import 'package:prestinv/screens/home_screen.dart';
+import 'package:prestinv/interface_version.dart';
 import 'package:http/http.dart' as http;
 
 class ConfigScreen extends StatefulWidget {
@@ -151,7 +151,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       Navigator.of(context).pop();
     } else {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        MaterialPageRoute(builder: (_) => InterfaceVersion.home()),
       );
     }
   }

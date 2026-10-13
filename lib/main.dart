@@ -18,7 +18,7 @@ import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/providers/license_provider.dart';
 
 // --- IMPORTS ÉCRANS ---
-import 'package:prestinv/screens/home_screen.dart';
+import 'package:prestinv/interface_version.dart';
 import 'package:prestinv/screens/login_screen.dart';
 import 'package:prestinv/screens/license_register_screen.dart';
 
@@ -28,6 +28,7 @@ void main() async {
 
   final appConfig = AppConfig();
   await appConfig.load();
+  await InterfaceVersion.load();
 
   final authProvider = AuthProvider();
 
@@ -158,7 +159,7 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
             homeWidget = const LicenseRegisterScreen();
           }
           else if (auth.isLoggedIn) {
-            homeWidget = const HomeScreen();
+            homeWidget = InterfaceVersion.home();
           }
           else {
             homeWidget = const LoginScreen();

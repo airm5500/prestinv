@@ -5,7 +5,7 @@ import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/screens/config_screen.dart';
-import 'package:prestinv/screens/home_screen.dart';
+import 'package:prestinv/interface_version.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -60,7 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (success) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        MaterialPageRoute(builder: (_) => InterfaceVersion.home()),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
