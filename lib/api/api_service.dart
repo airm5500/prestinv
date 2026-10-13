@@ -38,6 +38,11 @@ class ApiService implements SaisieServeur {
 
   ApiService({required this.baseUrl, this.sessionCookie, this.cookie, this.client});
 
+  /// Tests : client HTTP utilisé par toutes les instances qui n'en reçoivent pas (faux serveur).
+  static http.Client? clientParDefaut;
+
+  http.Client? get _client => client ?? clientParDefaut;
+
   String? get _cookieCourant => cookie != null ? cookie!() : sessionCookie;
 
   Map<String, String> _getHeaders() {
@@ -49,10 +54,10 @@ class ApiService implements SaisieServeur {
     return headers;
   }
 
-  Future<http.Response> _httpGet(Uri url) => client != null ? client!.get(url, headers: _getHeaders()) : http.get(url, headers: _getHeaders());
+  Future<http.Response> _httpGet(Uri url) => _client != null ? _client!.get(url, headers: _getHeaders()) : http.get(url, headers: _getHeaders());
 
   Future<http.Response> _httpPut(Uri url, String body) =>
-      client != null ? client!.put(url, headers: _getHeaders(), body: body) : http.put(url, headers: _getHeaders(), body: body);
+      _client != null ? _client!.put(url, headers: _getHeaders(), body: body) : http.put(url, headers: _getHeaders(), body: body);
 
   static bool _estErreurReseau(Object e) => e is SocketException || e is TimeoutException || e is http.ClientException || e is HandshakeException;
 

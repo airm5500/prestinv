@@ -7,8 +7,29 @@ import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/models/product_filter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:prestinv/saisie/saisie.dart';
+import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/utils/saisie_input.dart';
 
 class EntryProvider with ChangeNotifier {
+  /// [queue] : file persistante des saisies (par défaut celle de l'application, [SaisieQueue.instance]).
+  /// Toute quantité saisie y est écrite AVANT d'être envoyée ; c'est elle qui sait ce qui reste à envoyer.
+  EntryProvider({SaisieQueue? queue}) : _queueOverride = queue {
+    _queueEcoutee = _queue;
+    _queueEcoutee?.addListener(_surChangementFile);
+  }
+
+  final SaisieQueue? _queueOverride;
+  SaisieQueue? _queueEcoutee;
+  SaisieQueue? get _queue => _queueOverride ?? SaisieQueue.instance;
+  SaisieQueue? get queue => _queue;
+
+  String? _inventoryId;
+  String _inventoryLibelle = '';
+
+  /// Identifiant de connexion de l'opérateur (noté sur chaque saisie locale).
+  String auteur = '';
+
   List<Rayon> _rayons = [];
   Rayon? _selectedRayon;
   bool _isLoading = false;
@@ -52,7 +73,82 @@ class EntryProvider with ChangeNotifier {
       ? _filteredProducts[_currentProductIndex]
       : null;
 
-  bool get hasUnsyncedData => _allProducts.any((p) => !p.isSynced);
+  String? get inventoryId => _inventoryId;
+
+  /// Saisies non confirmées par le serveur dans le périmètre affiché : le rayon ouvert (saisie guidée),
+  /// tout l'inventaire en saisie rapide (aucun rayon choisi).
+  bool get hasUnsyncedData {
+    final q = _queue;
+    final inv = _inventoryId;
+    if (q == null || inv == null) return _allProducts.any((p) => !p.isSynced);
+    if (_selectedRayon == null) return q.enAttente(inventaireId: inv) > 0;
+    return _allProducts.any((p) => q.estEnAttente(inv, p.id));
+  }
+
+  /// Saisies de l'inventaire (tous rayons) non confirmées par le serveur.
+  int get pendingCountInventory {
+    final q = _queue;
+    final inv = _inventoryId;
+    if (q == null || inv == null) return _allProducts.where((p) => !p.isSynced).length;
+    return q.enAttente(inventaireId: inv);
+  }
+
+  /// « Serveur à jour » : tout est réellement confirmé par le serveur (rien en attente, rien en cours).
+  bool get inventaireAJour {
+    final q = _queue;
+    final inv = _inventoryId;
+    if (q == null || inv == null) return !_allProducts.any((p) => !p.isSynced);
+    return q.estAJour(inv);
+  }
+
+  /// Ouverture d'un inventaire (avant tout chargement : la saisie rapide n'a pas de rayon).
+  void ouvrirInventaire(String inventoryId, {String libelle = ''}) {
+    _inventoryId = inventoryId;
+    if (libelle.isNotEmpty) _inventoryLibelle = libelle;
+  }
+
+  /// La file a changé (envoi confirmé…) : les produits affichés dont la DERNIÈRE valeur est confirmée
+  /// par le serveur passent « à jour ».
+  void _surChangementFile() {
+    final q = _queue;
+    final inv = _inventoryId;
+    if (q != null && inv != null) {
+      for (final p in _allProducts) {
+        if (p.isSynced) continue;
+        final s = q.ligne(inv, p.id);
+        if (s != null && s.envoyee && s.quantiteEnvoyee == p.quantiteSaisie) {
+          p.isSynced = true;
+          _locallyTouchedProductIds.add(p.id);
+        }
+      }
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _queueEcoutee?.removeListener(_surChangementFile);
+    super.dispose();
+  }
+
+  /// Écrit la saisie dans la file persistante (sur disque) — AVANT tout envoi.
+  Future<void> _enregistrer(Product p, int quantite, String inventoryId) async {
+    _inventoryId = inventoryId;
+    final q = _queue;
+    if (q == null) return;
+    await q.enregistrer(
+      inventaireId: inventoryId,
+      ligneId: p.id,
+      quantite: quantite,
+      inventaireLibelle: _inventoryLibelle,
+      cip: p.produitCip,
+      nom: p.produitName,
+      rayonId: _selectedRayon?.id,
+      rayonLibelle: _selectedRayon?.libelle ?? p.locationLabel,
+      origine: _selectedRayon == null ? OrigineSaisie.rapide : OrigineSaisie.guidee,
+      auteur: auteur,
+    );
+  }
 
   String _getPrefKey(String inventoryId, String suffix, {String? rayonId}) {
     return rayonId != null
@@ -116,41 +212,6 @@ class EntryProvider with ChangeNotifier {
     final rawJson = prefs.getString(_getPrefKey(inventoryId, 'filter', rayonId: rayonId)) ?? '';
     if (rawJson.isEmpty) return ProductFilter();
     return ProductFilter.fromRawJson(rawJson);
-  }
-
-  Future<void> _saveUnsyncedData(String inventoryId) async {
-    if (_selectedRayon == null) return;
-    final String key = _getPrefKey(inventoryId, 'unsynced', rayonId: _selectedRayon!.id);
-    final prefs = await SharedPreferences.getInstance();
-
-    final unsyncedProducts = _allProducts.where((p) => !p.isSynced).toList();
-
-    if (unsyncedProducts.isEmpty) {
-      await prefs.remove(key);
-    } else {
-      final dataToSave = unsyncedProducts.map((p) => p.toJson()).toList();
-      await prefs.setString(key, json.encode(dataToSave));
-    }
-  }
-
-  Future<void> markAsSynced(int productId, String inventoryId) async {
-    final index = _allProducts.indexWhere((p) => p.id == productId);
-    if (index != -1) {
-      _allProducts[index].isSynced = true;
-      _locallyTouchedProductIds.add(productId);
-      await _saveUnsyncedData(inventoryId);
-      notifyListeners();
-    }
-  }
-
-  void markAsConfirmedFromServer(int productId, String inventoryId) {
-    final index = _allProducts.indexWhere((p) => p.id == productId);
-    if (index != -1) {
-      _allProducts[index].isSynced = true;
-      // LA CORRECTION EST ICI : On met à jour le fichier de secours local pour effacer le fantôme
-      _saveUnsyncedData(inventoryId);
-      notifyListeners();
-    }
   }
 
   Future<void> addCumulLog(Product product, int oldQty, int addedQty) async {
@@ -225,6 +286,7 @@ class EntryProvider with ChangeNotifier {
   }
 
   Future<void> fetchRayons(ApiService api, String inventoryId) async {
+    _inventoryId = inventoryId;
     _isLoading = true; _error = null; notifyListeners();
     try {
       _rayons = await api.fetchRayons(inventoryId);
@@ -253,6 +315,7 @@ class EntryProvider with ChangeNotifier {
   }
 
   Future<void> fetchProducts(ApiService api, String inventoryId, String rayonId) async {
+    _inventoryId = inventoryId;
     _isLoading = true; _error = null; _isGlobalMode = false;
     _locallyTouchedProductIds.clear();
 
@@ -273,32 +336,50 @@ class EntryProvider with ChangeNotifier {
     _isLoading = false; notifyListeners();
   }
 
+  /// Applique aux produits chargés du serveur les saisies encore en attente dans la file (quel que soit
+  /// le rayon ou le mode où elles ont été faites : la ligne d'inventaire fait foi).
   Future<List<Product>> _loadAndMergeUnsyncedData(String inventoryId, String rayonId, List<Product> apiProducts) async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString(_getPrefKey(inventoryId, 'unsynced', rayonId: rayonId));
-    if (saved == null) { _hasPendingSession = false; return apiProducts; }
-    try {
-      final List decoded = json.decode(saved);
-      final savedP = decoded.map((d) => Product.fromJson(d)).toList();
-      if (savedP.isEmpty) { _hasPendingSession = false; return apiProducts; }
-      _hasPendingSession = true;
-      return apiProducts.map((a) {
-        try {
-          final s = savedP.firstWhere((p) => p.id == a.id);
-          a.quantiteSaisie = s.quantiteSaisie;
-          a.isSynced = s.isSynced;
-          _locallyTouchedProductIds.add(a.id);
-        } catch (e) {}
-        return a;
-      }).toList();
-    } catch (e) { return apiProducts; }
+    final q = _queue;
+    if (q == null) {
+      _hasPendingSession = false;
+      return apiProducts;
+    }
+    await q.load();
+    var trouve = false;
+    for (final a in apiProducts) {
+      final s = q.ligne(inventoryId, a.id);
+      if (s != null && s.enAttente) {
+        a.quantiteSaisie = s.quantite;
+        a.isSynced = false;
+        _locallyTouchedProductIds.add(a.id);
+        trouve = true;
+      }
+    }
+    _hasPendingSession = trouve;
+    return apiProducts;
+  }
+
+  List<Product> _appliquerAttentes(String inventoryId, List<Product> produits) {
+    final q = _queue;
+    if (q == null) return produits;
+    for (final a in produits) {
+      final s = q.ligne(inventoryId, a.id);
+      if (s != null && s.enAttente) {
+        a.quantiteSaisie = s.quantite;
+        a.isSynced = false;
+      }
+    }
+    return produits;
   }
 
   Future<List<Product>> searchProductOnline(ApiService api, String inventoryId, String query) async {
+    _inventoryId = inventoryId;
     _isLoading = true; _error = null; notifyListeners();
     List<Product> results = [];
     try {
-      results = await api.fetchProducts(inventoryId, _selectedRayon?.id, query: query);
+      // La liste en mémoire ne sert qu'à l'affichage : chaque quantité saisie est déjà dans la file
+      // persistante, un nouveau scan n'en efface aucune (correction P1).
+      results = _appliquerAttentes(inventoryId, await api.fetchProducts(inventoryId, _selectedRayon?.id, query: query));
       if (results.isNotEmpty && _selectedRayon == null) {
         _allProducts = results;
         _filteredProducts = results;
@@ -311,6 +392,7 @@ class EntryProvider with ChangeNotifier {
   }
 
   Future<void> loadGlobalInventory(ApiService api, String inventoryId) async {
+    _inventoryId = inventoryId;
     _isLoading = true; _isGlobalMode = true; _error = null; notifyListeners();
     try {
       final rs = await api.fetchRayons(inventoryId);
@@ -326,26 +408,32 @@ class EntryProvider with ChangeNotifier {
     _isLoading = false; notifyListeners();
   }
 
+  /// Quantité saisie pour le produit courant : écrite dans la file persistante AVANT tout envoi.
+  /// Valeur vide ou invalide : rien n'est enregistré (jamais de 0 implicite).
   Future<void> updateQuantity(String value, String inventoryId) async {
-    if (currentProduct != null) {
-      final qte = int.tryParse(value) ?? 0;
-      currentProduct!.quantiteSaisie = qte;
-      currentProduct!.isSynced = false;
-      _locallyTouchedProductIds.add(currentProduct!.id);
-      await _saveUnsyncedData(inventoryId);
-      notifyListeners();
-    }
+    final p = currentProduct;
+    if (p == null) return;
+    final qte = SaisieInput.parseQuantite(value);
+    if (qte == null) return;
+    await _enregistrer(p, qte, inventoryId);
+    p.quantiteSaisie = qte;
+    p.isSynced = false;
+    _locallyTouchedProductIds.add(p.id);
+    notifyListeners();
   }
 
+  /// Quantité [p.quantiteSaisie] d'un produit trouvé par recherche / scan : écrite dans la file
+  /// persistante même si le produit n'est pas (ou plus) dans la liste affichée.
   Future<void> updateSpecificProduct(Product p, String inventoryId) async {
+    await _enregistrer(p, p.quantiteSaisie, inventoryId);
+    p.isSynced = false;
     final index = _allProducts.indexWhere((item) => item.id == p.id);
     if (index != -1) {
       _allProducts[index].quantiteSaisie = p.quantiteSaisie;
       _allProducts[index].isSynced = false;
-      _locallyTouchedProductIds.add(p.id);
-      await _saveUnsyncedData(inventoryId);
-      notifyListeners();
     }
+    _locallyTouchedProductIds.add(p.id);
+    notifyListeners();
   }
 
   void nextProduct(String inventoryId) {
@@ -373,31 +461,19 @@ class EntryProvider with ChangeNotifier {
     }
   }
 
+  /// Envoie les saisies en attente de l'inventaire (tous rayons), dans l'ordre de saisie.
+  /// Renvoie le nombre de saisies confirmées par le serveur.
   Future<int> sendDataToServer(ApiService api, String inventoryId, [Function(int, int)? onProgress]) async {
-    List<Product> unsynced = _allProducts.where((p) => !p.isSynced).toList();
-    int total = unsynced.length;
-    int successCount = 0; // NOUVEAU : On compte les vrais succès
+    return (await envoyerInventaire(inventoryId, onProgress)).envoyees;
+  }
 
-    if (total == 0) return 0;
-
-    for (int i = 0; i < total; i++) {
-      try {
-        await api.updateProductQuantity(unsynced[i].id, unsynced[i].quantiteSaisie);
-        // Ces lignes ne s'exécutent QUE si le serveur a répondu OK
-        unsynced[i].isSynced = true;
-        _locallyTouchedProductIds.add(unsynced[i].id);
-        successCount++;
-        onProgress?.call(successCount, total);
-      } catch (e) {
-        print("Erreur réseau détectée : $e");
-        break; // NOUVEAU : On stoppe la boucle si le réseau est coupé !
-      }
-    }
-
-    await _saveUnsyncedData(inventoryId);
-    notifyListeners();
-
-    return successCount; // On renvoie le vrai nombre de produits envoyés
+  Future<BilanEnvoi> envoyerInventaire(String inventoryId, [Function(int, int)? onProgress]) async {
+    _inventoryId = inventoryId;
+    final q = _queue;
+    if (q == null) return const BilanEnvoi();
+    final bilan = await q.envoyer(inventaireId: inventoryId, onProgress: onProgress == null ? null : (a, b) => onProgress(a, b));
+    _surChangementFile();
+    return bilan;
   }
 
   void reset() {

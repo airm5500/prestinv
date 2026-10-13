@@ -109,6 +109,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                       Navigator.of(context).push(MaterialPageRoute(
                         builder: (_) => InventoryEntryScreen(
                           inventoryId: provider.inventories[i].id,
+                          inventoryName: provider.inventories[i].libelle,
                           isQuickMode: widget.isQuickMode,
                         ),
                       ));

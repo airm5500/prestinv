@@ -1,8 +1,10 @@
 // lib/main.dart
 
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 // --- IMPORTS CONFIG & API ---
@@ -10,6 +12,8 @@ import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/utils/app_utils.dart';
+import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/saisie/saisie_store.dart';
 
 // --- IMPORTS PROVIDERS ---
 import 'package:prestinv/providers/auth_provider.dart';
@@ -32,11 +36,16 @@ void main() async {
 
   final authProvider = AuthProvider();
 
+  // File persistante des saisies (avant tout écran) + reprise des saisies non envoyées des versions
+  // précédentes (anciennes clés par rayon), sans perte.
+  final saisies = await ouvrirFileSaisies();
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: appConfig),
         ChangeNotifierProvider.value(value: authProvider),
+        ChangeNotifierProvider.value(value: saisies),
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
         ChangeNotifierProvider(create: (_) => EntryProvider()),
         ChangeNotifierProvider(create: (_) => LicenseProvider()),
@@ -48,6 +57,25 @@ void main() async {
   FlutterNativeSplash.remove();
 }
 
+/// Ouvre la file des saisies dans le dossier privé de l'application (survit aux redémarrages).
+Future<SaisieQueue> ouvrirFileSaisies() async {
+  Directory dossier;
+  try {
+    dossier = await getApplicationSupportDirectory();
+  } catch (_) {
+    dossier = await getApplicationDocumentsDirectory();
+  }
+  final queue = SaisieQueue(store: FichierSaisieStore(File('${dossier.path}/saisies_v1.jsonl')));
+  SaisieQueue.instance = queue;
+  await queue.load();
+  try {
+    await queue.migrerAnciennesCles();
+  } catch (_) {
+    // Les anciennes clés restent en place : nouvel essai au prochain lancement.
+  }
+  return queue;
+}
+
 class PrestinvApp extends StatefulWidget {
   const PrestinvApp({super.key});
 
@@ -57,16 +85,45 @@ class PrestinvApp extends StatefulWidget {
 
 class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
   Timer? _inactivityTimer;
+  SaisieQueue? _saisies;
+  AuthProvider? _auth;
+  bool _etaitConnecte = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _brancherFileSaisies();
 
     // VÉRIFICATION LICENCE AU DÉMARRAGE
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkLicense();
     });
+  }
+
+  /// La file des saisies envoie avec l'adresse et la session COURANTES (lues à chaque envoi) ;
+  /// rien ne part tant qu'on n'est pas connecté. Reprise automatique toutes les 15 s.
+  void _brancherFileSaisies() {
+    final config = context.read<AppConfig>();
+    final auth = context.read<AuthProvider>();
+    final queue = context.read<SaisieQueue>();
+    _saisies = queue;
+    _auth = auth;
+    queue.serveurFactory = () {
+      if (!auth.isLoggedIn || config.currentApiUrl.isEmpty) return null;
+      return ApiService(baseUrl: config.currentApiUrl, cookie: () => auth.sessionCookie);
+    };
+    queue.modeDirect = () => config.sendMode == SendMode.direct;
+    queue.demarrerReprise();
+    _etaitConnecte = auth.isLoggedIn;
+    auth.addListener(_surChangementConnexion);
+  }
+
+  /// Connexion (ou reconnexion après session expirée) : les saisies en attente repartent.
+  void _surChangementConnexion() {
+    final connecte = _auth?.isLoggedIn ?? false;
+    if (connecte && !_etaitConnecte) _saisies?.signalerReconnexion();
+    _etaitConnecte = connecte;
   }
 
   /// Vérifie la licence via le Provider
@@ -86,6 +143,8 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _auth?.removeListener(_surChangementConnexion);
+    _saisies?.arreterReprise();
     _inactivityTimer?.cancel();
     super.dispose();
   }
@@ -124,6 +183,9 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
 
       // 2. On RE-VÉRIFIE la licence chaque fois que l'app revient au premier plan
       _checkLicense();
+
+      // 3. Les saisies en attente repartent (mode Direct / corrections).
+      _saisies?.relancer();
     }
 
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
@@ -131,9 +193,10 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
     }
   }
 
+  /// Mise en arrière-plan : dernière tentative d'envoi des saisies en attente (mode Direct /
+  /// corrections). Rien n'est perdu si le système arrête l'application : tout est sur disque.
   void _attemptBackgroundSync() {
-    // Rien n'était envoyé ici (méthode vide d'origine) : conservée vide à l'étape 0.
-    // L'étape 1 (file persistante des saisies) la remplace par un vrai envoi.
+    _saisies?.relancer();
   }
 
   @override

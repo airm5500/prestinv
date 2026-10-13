@@ -2,6 +2,7 @@
 // Démarrage de l'application : avec une licence valide et sans session, l'écran de connexion s'affiche.
 // (Réparé : le test d'origine ne fournissait pas LicenseProvider → ProviderNotFoundException.)
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
@@ -12,6 +13,9 @@ import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/providers/inventory_provider.dart';
 import 'package:prestinv/providers/license_provider.dart';
 import 'package:prestinv/screens/login_screen.dart';
+import 'package:prestinv/saisie/saisie_queue.dart';
+
+import 'helpers/banc_essai.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -36,12 +40,14 @@ void main() {
     final appConfig = AppConfig();
     await appConfig.load();
     final authProvider = AuthProvider();
+    final saisies = SaisieQueue(store: DisqueMemoire());
 
     await tester.pumpWidget(
       MultiProvider(
         providers: [
           ChangeNotifierProvider.value(value: appConfig),
           ChangeNotifierProvider.value(value: authProvider),
+          ChangeNotifierProvider.value(value: saisies),
           ChangeNotifierProvider(create: (_) => InventoryProvider()),
           ChangeNotifierProvider(create: (_) => EntryProvider()),
           ChangeNotifierProvider<LicenseProvider>(create: (_) => _LicenceValide()),
@@ -53,5 +59,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(LoginScreen), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    saisies.arreterReprise();
   });
 }

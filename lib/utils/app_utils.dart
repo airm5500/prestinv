@@ -6,6 +6,7 @@ import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/screens/login_screen.dart';
 import 'package:provider/provider.dart';
+import 'package:prestinv/saisie/saisie_queue.dart';
 
 /// Affiche une boîte de dialogue de progression centrée qui écoute les changements
 /// d'un ValueNotifier pour mettre à jour son message en temps réel.
@@ -40,20 +41,25 @@ void showProgressDialog(BuildContext context, ValueNotifier<String> progressNoti
 /// Gère la déconnexion de l'utilisateur.
 /// Vérifie s'il y a des données non envoyées et demande confirmation avant de continuer.
 Future<void> performLogout(BuildContext context) async {
+  final saisies = SaisieQueue.instance;
   final entryProvider = Provider.of<EntryProvider>(context, listen: false);
+  final enAttente = saisies != null ? saisies.aTraiter() : (entryProvider.hasUnsyncedData ? 1 : 0);
 
   bool shouldLogout = true;
-  // S'il y a des modifications non enregistrées dans l'écran de saisie
-  if (entryProvider.hasUnsyncedData) {
-    // On vérifie si le widget est toujours monté avant d'utiliser son context pour afficher un dialogue
+  // Des saisies ne sont pas encore confirmées par le serveur : elles restent enregistrées sur
+  // l'appareil (file persistante) et repartiront à la prochaine connexion.
+  if (enAttente > 0) {
     if (!context.mounted) return;
 
     shouldLogout = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Text('Données non enregistrées'),
-        content: const Text('Certaines modifications n\'ont pas été envoyées au serveur. Si vous vous déconnectez, elles seront perdues. Voulez-vous continuer ?'),
+        title: const Text('Données non envoyées'),
+        content: Text(saisies != null
+            ? '$enAttente saisie(s) ne sont pas encore enregistrée(s) sur le serveur. Elles restent gardées sur cet appareil '
+                '(Accueil → « À envoyer ») et repartiront à la prochaine connexion. Voulez-vous vous déconnecter ?'
+            : 'Certaines modifications n\'ont pas été envoyées au serveur. Voulez-vous continuer ?'),
         actions: [
           TextButton(
             child: const Text('ANNULER'),

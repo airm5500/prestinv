@@ -26,6 +26,15 @@ class AuthProvider with ChangeNotifier {
     loadUserFromStorage();
   }
 
+  /// Tests : session ouverte sans appel réseau.
+  @visibleForTesting
+  void connecterPourTest({String login = 'test', String cookie = 'JSESSIONID=test'}) {
+    _user = AppUser(id: login, login: login, firstName: login, lastName: '', officine: '');
+    _sessionCookie = cookie;
+    _isLoggedIn = true;
+    notifyListeners();
+  }
+
   Future<void> loadUserFromStorage() async {
     final prefs = await SharedPreferences.getInstance();
     _rememberMe = prefs.getBool('rememberMe') ?? false;

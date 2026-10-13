@@ -17,6 +17,8 @@ import 'package:prestinv/models/product.dart';
 import 'dart:async';
 import 'package:prestinv/models/product_filter.dart';
 import 'package:prestinv/screens/cumul_history_screen.dart';
+import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/utils/saisie_input.dart';
 
 import 'dart:io';
 import 'package:intl/intl.dart';
@@ -26,9 +28,10 @@ import 'package:share_plus/share_plus.dart';
 
 class InventoryEntryScreen extends StatefulWidget {
   final String inventoryId;
+  final String inventoryName;
   final bool isQuickMode;
   const InventoryEntryScreen(
-      {super.key, required this.inventoryId, this.isQuickMode = false});
+      {super.key, required this.inventoryId, this.inventoryName = '', this.isQuickMode = false});
 
   @override
   State<InventoryEntryScreen> createState() => _InventoryEntryScreenState();
@@ -52,13 +55,16 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
   List<Product> _filteredProducts = [];
   bool _showSearchResults = false;
 
+  /// OK en cours de traitement : un second appui est ignoré (double appui = produit sauté / cumul doublé).
+  bool _validationEnCours = false;
+
   @override
   void initState() {
     super.initState();
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _apiService = ApiService(
         baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
-        sessionCookie: authProvider.sessionCookie);
+        cookie: () => authProvider.sessionCookie);
 
     _searchFocusNode.addListener(() {
       setState(() {
@@ -70,6 +76,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
       if (mounted) {
         final provider = Provider.of<EntryProvider>(context, listen: false);
         provider.reset();
+        provider.auteur = authProvider.user?.login ?? '';
+        provider.ouvrirInventaire(widget.inventoryId, libelle: widget.inventoryName);
         if (!widget.isQuickMode) {
           provider.fetchRayons(_apiService, widget.inventoryId);
         }
@@ -179,6 +187,26 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
   }
 
+  /// Toutes les saisies de l'inventaire gardées sur l'appareil (envoyées ou non), pour l'export CSV
+  /// de la saisie rapide (avant : seul le dernier produit scanné était exporté).
+  List<Product> _saisiesDeLInventaire() {
+    final q = _queue;
+    if (q == null) return Provider.of<EntryProvider>(context, listen: false).allProducts;
+    return q
+        .lignes(inventaireId: widget.inventoryId)
+        .map((s) => Product(
+              id: s.ligneId,
+              produitCip: s.cip,
+              produitName: s.nom,
+              produitPrixAchat: 0,
+              produitPrixUni: 0,
+              quantiteInitiale: 0,
+              quantiteSaisie: s.quantite,
+              isSynced: s.envoyee,
+            ))
+        .toList();
+  }
+
   void _navigateToRecap() async {
     showDialog(
         context: context,
@@ -263,45 +291,49 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     } else if (value == 'OK') {
       _validateAndProceed();
     } else {
-      _quantityController.text += value;
+      _quantityController.text = SaisieInput.ajouterChiffre(_quantityController.text, value);
     }
   }
 
-  Future<void> _sendDataToServer() async {
-    if (!mounted) return;
+  SaisieQueue? get _queue => Provider.of<EntryProvider>(context, listen: false).queue;
+
+  /// Envoie les saisies en attente de l'inventaire (tous rayons). Renvoie `true` si tout est confirmé.
+  Future<bool> _sendDataToServer() async {
+    if (!mounted) return false;
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final appConfig = Provider.of<AppConfig>(context, listen: false);
+    final enAttente = provider.pendingCountInventory;
 
-    if (appConfig.sendMode == SendMode.direct && !provider.hasUnsyncedData) {
+    if (appConfig.sendMode == SendMode.direct && enAttente == 0) {
       _showNotification('Mode Direct : Tout est déjà synchronisé.', Colors.blue);
-      return;
+      return true;
     }
 
-    if (!provider.hasUnsyncedData) {
+    if (enAttente == 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Aucune donnée en attente d\'envoi.'),
           backgroundColor: Colors.orange,
           duration: Duration(seconds: 2)));
-      return;
+      return true;
     }
 
     final ValueNotifier<String> progressNotifier = ValueNotifier('Connexion au serveur...');
     showProgressDialog(context, progressNotifier);
 
-    int unsyncedCount = provider.allProducts.where((p) => !p.isSynced).length;
-
-    // On récupère le nombre exact de succès
-    int successCount = await provider.sendDataToServer(_apiService, widget.inventoryId, (int current, int total) {
+    final bilan = await provider.envoyerInventaire(widget.inventoryId, (int current, int total) {
       progressNotifier.value = 'Envoi... ($current/$total)';
     });
 
-    // On adapte le message final en fonction du résultat
-    if (successCount == unsyncedCount) {
-      progressNotifier.value = '✅ $successCount article(s) traité(s) avec succès.';
-    } else if (successCount > 0) {
-      progressNotifier.value = '⚠️ Réseau instable : $successCount/$unsyncedCount envoyé(s).';
+    if (bilan.complet && bilan.refusees == 0) {
+      progressNotifier.value = '✅ ${bilan.envoyees} article(s) traité(s) avec succès.';
+    } else if (bilan.envoyees > 0) {
+      progressNotifier.value = '⚠️ Réseau instable : ${bilan.envoyees}/$enAttente envoyé(s). '
+          'Le reste est gardé sur l\'appareil (« À envoyer »).';
+    } else if (bilan.refusees > 0 && bilan.interruption == null) {
+      progressNotifier.value = '❌ ${bilan.refusees} saisie(s) refusée(s) par le serveur (voir « À envoyer »).';
     } else {
-      progressNotifier.value = '❌ Échec : Vérifiez votre connexion au serveur.';
+      progressNotifier.value = '❌ Échec : ${bilan.interruption ?? 'Vérifiez votre connexion au serveur.'} '
+          'Les saisies restent sur l\'appareil.';
     }
 
     _sendReminderTimer?.cancel();
@@ -309,19 +341,41 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     // On laisse le message affiché 2.5 secondes pour que l'utilisateur puisse lire l'erreur
     await Future.delayed(const Duration(milliseconds: 2500));
     if (mounted) Navigator.of(context).pop();
+    return bilan.complet;
+  }
+
+  /// Mode Direct : envoi immédiat de la ligne (déjà enregistrée sur l'appareil).
+  void _envoyerDirect(Product product) {
+    final q = _queue;
+    if (q == null) return;
+    q.envoyerLigne(widget.inventoryId, product.id).then((r) {
+      if (!r.estOk && mounted) {
+        _showNotification('Non envoyé (réseau) : gardé sur l\'appareil, nouvel essai automatique.', Colors.red);
+      }
+    });
   }
 
   void _validateAndProceed() async {
-    if (!mounted) return;
+    if (!mounted || _validationEnCours) return;
+    _validationEnCours = true;
+    try {
+      await _validerEtAvancer();
+    } finally {
+      _validationEnCours = false;
+    }
+  }
+
+  Future<void> _validerEtAvancer() async {
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final appConfig = Provider.of<AppConfig>(context, listen: false);
 
-    if (_quantityController.text.isEmpty) {
-      _showNotification('Veuillez saisir une quantité.', Colors.orange);
+    final erreur = SaisieInput.erreurQuantite(_quantityController.text);
+    if (erreur != null) {
+      _showNotification(erreur, Colors.orange);
       return;
     }
 
-    final inputQuantity = int.tryParse(_quantityController.text) ?? 0;
+    final inputQuantity = SaisieInput.parseQuantite(_quantityController.text)!;
     int finalQuantity = inputQuantity;
 
     final currentProductAtClick = provider.currentProduct;
@@ -377,19 +431,19 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     }
 
     Future<void> proceedToNext(int quantityToSave, Product productToUpdate) async {
-      await provider.updateQuantity(quantityToSave.toString(), widget.inventoryId);
+      // 1. Enregistrée sur l'appareil AVANT tout envoi et avant de passer au produit suivant.
+      try {
+        await provider.updateQuantity(quantityToSave.toString(), widget.inventoryId);
+      } catch (e) {
+        if (mounted) _showNotification('Enregistrement impossible sur l\'appareil : $e', Colors.red);
+        return;
+      }
+      if (!mounted) return;
       _resetSendReminderTimer();
 
+      // 2. Mode Direct : envoi immédiat (la file renvoie une correction faite pendant l'envoi).
       if (appConfig.sendMode == SendMode.direct) {
-        _apiService
-            .updateProductQuantity(productToUpdate.id, quantityToSave)
-            .then((_) {
-          // LA CORRECTION EST ICI : On passe l'inventoryId pour nettoyer le cache
-          provider.markAsConfirmedFromServer(productToUpdate.id, widget.inventoryId);
-        })
-            .catchError((e) {
-          if (mounted) _showNotification('Erreur réseau.', Colors.red);
-        });
+        _envoyerDirect(productToUpdate);
       }
 
       bool isLastProduct =
@@ -526,8 +580,16 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
           if (hasUnsynced)
             ElevatedButton(
                 onPressed: () async {
-                  await _sendDataToServer();
-                  if (mounted) Navigator.of(ctx).pop(true);
+                  final toutEnvoye = await _sendDataToServer();
+                  if (!ctx.mounted) return;
+                  // On ne quitte que si tout est réellement envoyé ; sinon on reste (les saisies
+                  // restent de toute façon enregistrées sur l'appareil).
+                  Navigator.of(ctx).pop(toutEnvoye);
+                  if (!toutEnvoye && mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Envoi incomplet : les saisies restent sur l\'appareil (« À envoyer »).'),
+                        backgroundColor: Colors.orange));
+                  }
                 },
                 child: const Text('Envoyer et Quitter')),
         ],
@@ -650,6 +712,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     final quickQtyController = TextEditingController();
     final appConfig = Provider.of<AppConfig>(context, listen: false);
     final provider = Provider.of<EntryProvider>(context, listen: false);
+    // OK verrouillé pendant le traitement (double appui = cumul proposé deux fois).
+    var okEnCours = false;
 
     showDialog(
       context: context,
@@ -681,9 +745,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                   child: NumericKeyboard(
                     onKeyPressed: (key) async {
                       if (key == 'OK') {
-                        if (quickQtyController.text.isEmpty) return;
-                        int inputQty =
-                            int.tryParse(quickQtyController.text) ?? 0;
+                        if (okEnCours) return;
+                        final int? saisie = SaisieInput.parseQuantite(quickQtyController.text);
+                        if (saisie == null) return;
+                        okEnCours = true;
+                        int inputQty = saisie;
                         int finalQty = inputQty;
 
                         if (appConfig.isCumulEnabled) {
@@ -739,7 +805,11 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                           }
                         }
 
-                        _saveScannedQuantity(product, finalQty);
+                        // Enregistrée sur l'appareil AVANT de fermer la fenêtre.
+                        final enregistre = await _saveScannedQuantity(product, finalQty);
+                        okEnCours = false;
+                        if (!enregistre) return;
+                        if (!ctx.mounted) return;
                         Navigator.of(ctx).pop();
                         _searchController.clear();
                         setState(() {
@@ -755,7 +825,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                               .substring(0, quickQtyController.text.length - 1);
                         }
                       } else {
-                        quickQtyController.text += key;
+                        quickQtyController.text = SaisieInput.ajouterChiffre(quickQtyController.text, key);
                       }
                     },
                   ),
@@ -850,28 +920,28 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     );
   }
 
-  void _saveScannedQuantity(Product product, int quantity) async {
+  /// Saisie rapide : la quantité est écrite dans la file persistante (même sans rayon choisi) avant
+  /// tout envoi. Chaque scan ajoute sa saisie à la file : aucune ne remplace celle d'un autre produit.
+  Future<bool> _saveScannedQuantity(Product product, int quantity) async {
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final appConfig = Provider.of<AppConfig>(context, listen: false);
     product.quantiteSaisie = quantity;
 
-    await provider.updateSpecificProduct(product, widget.inventoryId);
+    try {
+      await provider.updateSpecificProduct(product, widget.inventoryId);
+    } catch (e) {
+      if (mounted) _showNotification('Enregistrement impossible sur l\'appareil : $e', Colors.red);
+      return false;
+    }
 
     if (mounted) {
       _showNotification(
           'Saisie enregistrée : ${product.produitName}', Colors.green);
     }
     if (appConfig.sendMode == SendMode.direct) {
-      _apiService
-          .updateProductQuantity(product.id, quantity)
-          .then((_) {
-        // LA CORRECTION EST ICI AUSSI pour le scan direct
-        provider.markAsConfirmedFromServer(product.id, widget.inventoryId);
-      })
-          .catchError((e) {
-        print("Erreur sync direct scan: $e");
-      });
+      _envoyerDirect(product);
     }
+    return true;
   }
 
   void _selectProduct(Product product) {
@@ -1228,7 +1298,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                 builder: (context, provider, child) {
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: provider.hasUnsyncedData
+                    child: !provider.inventaireAJour
                         ? const Tooltip(
                       message: "Envoi au serveur...",
                       child: Icon(Icons.cloud_upload, color: Colors.orangeAccent),
@@ -1257,7 +1327,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
                     icon: const Icon(Icons.file_download),
                     tooltip: 'Exporter la session (CSV)',
                     onPressed: () => _exportProductsToCsv(
-                        provider.allProducts, "Saisie_Rapide"),
+                        _saisiesDeLInventaire(), "Saisie_Rapide"),
                   ),
                 ),
               Consumer<EntryProvider>(builder: (context, provider, child) {
