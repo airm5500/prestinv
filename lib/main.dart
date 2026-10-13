@@ -25,6 +25,7 @@ import 'package:prestinv/providers/license_provider.dart';
 import 'package:prestinv/interface_version.dart';
 import 'package:prestinv/screens/login_screen.dart';
 import 'package:prestinv/screens/license_register_screen.dart';
+import 'package:prestinv/screens/serveur_injoignable_screen.dart';
 
 void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -130,18 +131,18 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
     _etaitConnecte = connecte;
   }
 
-  /// Vérifie la licence via le Provider
-  void _checkLicense() {
+  /// Vérifie la licence via le Provider ([silent] : retour au premier plan, sans sablier plein écran).
+  Future<void> _checkLicense({bool silent = false}) async {
     // Sécurité : Vérifier si le widget est encore monté
     if (!mounted) return;
 
     final config = context.read<AppConfig>();
     final auth = context.read<AuthProvider>();
-    final api = ApiService(baseUrl: config.currentApiUrl, sessionCookie: auth.sessionCookie);
+    final api = ApiService(baseUrl: config.currentApiUrl, cookie: () => auth.sessionCookie);
 
     // Cette méthode mettra à jour le status du LicenseProvider.
     // Si la licence est expirée, le Consumer dans build() redirigera automatiquement vers l'écran d'enregistrement.
-    context.read<LicenseProvider>().checkLicense(api);
+    await context.read<LicenseProvider>().checkLicense(api, silent: silent);
   }
 
   @override
@@ -186,8 +187,8 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
       // 1. On relance le timer d'inactivité
       _resetInactivityTimer(context);
 
-      // 2. On RE-VÉRIFIE la licence chaque fois que l'app revient au premier plan
-      _checkLicense();
+      // 2. On RE-VÉRIFIE la licence chaque fois que l'app revient au premier plan (sans sablier)
+      _checkLicense(silent: true);
 
       // 3. Les saisies en attente repartent (mode Direct / corrections).
       _saisies?.relancer();
@@ -222,6 +223,10 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
             homeWidget = const Scaffold(
                 body: Center(child: CircularProgressIndicator())
             );
+          }
+          else if (license.status == LicenseStatus.unreachable) {
+            // Serveur injoignable ≠ « Application non activée » : réessai automatique toutes les 10 s.
+            homeWidget = ServeurInjoignableScreen(reessayer: () => _checkLicense());
           }
           else if (license.status == LicenseStatus.none || license.status == LicenseStatus.expired) {
             homeWidget = const LicenseRegisterScreen();

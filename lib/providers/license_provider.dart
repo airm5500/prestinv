@@ -5,8 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/models/license.dart';
+import 'package:prestinv/utils/journal.dart';
 
-enum LicenseStatus { loading, valid, expired, none, error }
+/// [unreachable] : serveur injoignable au premier lancement (aucune licence en cache) — ce n'est PAS
+/// un problème de licence ; écran « Serveur injoignable » avec réessai automatique (avant : écran
+/// « Application non activée »).
+enum LicenseStatus { loading, valid, expired, none, error, unreachable }
 
 class LicenseProvider with ChangeNotifier {
   License? _license;
@@ -36,29 +40,41 @@ class LicenseProvider with ChangeNotifier {
     return end.difference(today).inDays;
   }
 
-  /// Vérifie la licence (Serveur puis Cache si échec)
-  Future<void> checkLicense(ApiService api) async {
-    _status = LicenseStatus.loading;
-    _error = null;
-    notifyListeners();
+  /// Vérifie la licence (serveur, puis cache si le serveur ne répond pas).
+  ///
+  /// [silent] (retour au premier plan) : pas de passage par l'état « chargement » — l'écran en cours
+  /// n'est plus remplacé par un sablier à chaque retour dans l'application.
+  Future<void> checkLicense(ApiService api, {bool silent = false}) async {
+    final silencieux = silent && (_status == LicenseStatus.valid || _status == LicenseStatus.expired);
+    if (!silencieux) {
+      _status = LicenseStatus.loading;
+      _error = null;
+      notifyListeners();
+    }
 
     try {
       // 1. Priorité au serveur (Mise à jour date fin, renouvellement...)
       final onlineLicense = await api.findLicense();
       _license = onlineLicense;
+      _error = null;
       await _cacheLicense(onlineLicense); // Mise à jour du cache
       _updateStatus();
     } catch (e) {
-      print("Erreur licence ligne : $e. Passage en mode HORS-LIGNE.");
+      journal('Licence non lue sur le serveur ($e) : repli sur la licence en cache.');
+      final reseau = e is ApiLoadException && e.reseau;
       // 2. Repli sur le cache local
       final cached = await _loadCachedLicense();
       if (cached != null) {
         _license = cached;
         _updateStatus();
+      } else if (reseau) {
+        // Premier lancement sans joindre le serveur : on ne sait rien de la licence.
+        _status = LicenseStatus.unreachable;
+        _error = e.message;
       } else {
-        // Pas de cache et pas de réseau = On ne peut pas valider -> État 'none' ou 'error'
+        // Le serveur a répondu mais sans licence valide.
         _status = LicenseStatus.none;
-        _error = "Impossible de vérifier la licence (Premier démarrage sans réseau ?)";
+        _error = "Aucune licence valide n'a été trouvée sur le serveur.";
       }
     }
     notifyListeners();
