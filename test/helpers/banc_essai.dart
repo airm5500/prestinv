@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
+import 'package:prestinv/models/license.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/providers/inventory_provider.dart';
@@ -96,7 +97,11 @@ Widget monter(Banc b, Widget ecran) => MultiProvider(
         ChangeNotifierProvider.value(value: b.queue),
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
         ChangeNotifierProvider.value(value: b.entry),
-        ChangeNotifierProvider(create: (_) => LicenseProvider()),
+        // Licence valide (pas d'alerte d'expiration sur l'accueil).
+        ChangeNotifierProvider(
+          create: (_) => LicenseProvider()
+            ..setLicenseForTest(License(id: 'L', dateStart: DateTime(2026), dateEnd: DateTime.now().add(const Duration(days: 400)), typeLicence: 'TEST')),
+        ),
       ],
       child: MaterialApp(home: ecran),
     );

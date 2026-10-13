@@ -18,6 +18,7 @@ import 'dart:async';
 import 'package:prestinv/models/product_filter.dart';
 import 'package:prestinv/screens/cumul_history_screen.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/saisie/saisie_serveur.dart';
 import 'package:prestinv/utils/saisie_input.dart';
 
 import 'dart:io';
@@ -350,7 +351,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> {
     if (q == null) return;
     q.envoyerLigne(widget.inventoryId, product.id).then((r) {
       if (!r.estOk && mounted) {
-        _showNotification('Non envoyé (réseau) : gardé sur l\'appareil, nouvel essai automatique.', Colors.red);
+        // Inventaire clôturé / refus : motif du serveur ; réseau : gardé sur l'appareil, nouvel essai.
+        _showNotification(
+            r.type == ResultatEnvoi.refus ? r.message : 'Non envoyé (réseau) : gardé sur l\'appareil, nouvel essai automatique.',
+            Colors.red);
       }
     });
   }

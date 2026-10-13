@@ -11,6 +11,7 @@ import 'package:prestinv/screens/config_screen.dart';
 import 'package:prestinv/screens/analysis_screen.dart';
 import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/screens/collection_screen.dart';
+import 'package:prestinv/screens/a_envoyer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -137,6 +138,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const Divider(height: 1, thickness: 1),
+          // Saisies pas encore confirmées par le serveur, tous rayons (invisible s'il n'y en a pas).
+          const AEnvoyerBandeau(),
 
           Expanded(
             child: Center(
