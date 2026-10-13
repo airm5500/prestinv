@@ -299,7 +299,7 @@ class SaisieQueue extends ChangeNotifier {
       if (s.refusee) return ReponseEnvoi(ResultatEnvoi.refus, s.motif ?? 'Refusée');
       final version = s.version;
       final quantite = s.quantite;
-      final requete = _poser(serveur, s.ligneId, quantite);
+      final requete = _poser(serveur, s.ligneId, quantite, auteurServeur: s.origine == OrigineSaisie.versement);
       _enVol[cle] = requete;
       notifyListeners();
       ReponseEnvoi r;
@@ -355,8 +355,10 @@ class SaisieQueue extends ChangeNotifier {
     return const ReponseEnvoi(ResultatEnvoi.reseau, 'Trop de corrections successives : nouvel essai plus tard.');
   }
 
-  Future<ReponseEnvoi> _poser(SaisieServeur serveur, int ligneId, int quantite) async {
+  Future<ReponseEnvoi> _poser(SaisieServeur serveur, int ligneId, int quantite, {bool auteurServeur = false}) async {
     try {
+      // Versement de la collecte : route qui enregistre l'auteur (session exigée).
+      if (auteurServeur) return await serveur.poserQuantiteSession(ligneId, quantite);
       return await serveur.poserQuantite(ligneId, quantite);
     } catch (e) {
       return ReponseEnvoi(ResultatEnvoi.reseau, 'Erreur réseau : $e');

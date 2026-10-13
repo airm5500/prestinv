@@ -1,6 +1,5 @@
 // lib/screens/collection_screen.dart
 
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:prestinv/utils/saisie_input.dart';
@@ -13,6 +12,10 @@ import 'package:prestinv/models/collected_item.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:prestinv/collecte/collecte_store.dart';
+import 'package:prestinv/collecte/versement.dart';
+import 'package:prestinv/screens/rapport_versement_screen.dart';
+import 'package:prestinv/screens/versement_screen.dart';
 
 // Imports pour l'impression PDF
 import 'package:pdf/pdf.dart';
@@ -37,6 +40,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
   // Variable pour empêcher le double-clic sur l'impression
   bool _isPrinting = false;
 
+  /// Versement interrompu (coupure, annulation) : lignes restant à verser.
+  Versement? _aReprendre;
+
   @override
   void initState() {
     super.initState();
@@ -53,23 +59,56 @@ class _CollectionScreenState extends State<CollectionScreen> {
   // --- PERSISTANCE (Sauvegarde locale) ---
   Future<void> _loadItems() async {
     setState(() => _isLoading = true);
-    final prefs = await SharedPreferences.getInstance();
-    final String? data = prefs.getString('collection_data');
-    if (data != null) {
-      final List<dynamic> jsonList = json.decode(data);
-      setState(() {
-        _items = jsonList.map((e) => CollectedItem.fromJson(e)).toList();
-        // Tri par date décroissante (le dernier ajouté en haut)
-        _items.sort((a, b) => b.dateScan.compareTo(a.dateScan));
-      });
-    }
-    setState(() => _isLoading = false);
+    // Même clé qu'avant (« collection_data ») ; tri par date décroissante (le dernier ajouté en haut).
+    final items = await CollecteStore.lire();
+    final reprise = await StockageVersements.aReprendre();
+    if (!mounted) return;
+    setState(() {
+      _items = items;
+      _aReprendre = reprise;
+      _isLoading = false;
+    });
   }
 
-  Future<void> _saveItems() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String data = json.encode(_items.map((e) => e.toJson()).toList());
-    await prefs.setString('collection_data', data);
+  Future<void> _saveItems() => CollecteStore.ecrire(_items);
+
+  /// Lignes pas encore versées dans un inventaire.
+  List<CollectedItem> get _nonVersees => _items.where((i) => !i.versee).toList();
+
+  Future<void> _verser() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const VersementScreen()));
+    if (mounted) await _loadItems();
+  }
+
+  Future<void> _reprendre() async {
+    final v = _aReprendre;
+    if (v == null) return;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => VersementScreen(reprise: v)));
+    if (mounted) await _loadItems();
+  }
+
+  Future<void> _rapports() async {
+    final tous = await StockageVersements.lire();
+    if (!mounted) return;
+    final choisi = await showDialog<Versement>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Rapports de versement'),
+        children: [
+          if (tous.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Aucun versement pour l\'instant.')),
+          for (final v in tous)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(ctx).pop(v),
+              child: Text('${DateFormat('dd/MM HH:mm').format(v.debut)} — ${v.inventaireLibelle}\n'
+                  '${v.versees.length} versé(s), ${v.nonReconnues.length} non reconnu(s), ${v.erreurs.length + v.aVerser.length} à reprendre',
+                  maxLines: 3, overflow: TextOverflow.ellipsis),
+            ),
+        ],
+      ),
+    );
+    if (choisi == null || !mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => RapportVersementScreen(versement: choisi)));
+    if (mounted) await _loadItems();
   }
 
   Future<void> _clearList() async {
@@ -137,8 +176,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
   void _addItem(String code, int quantity) {
     setState(() {
       try {
-        // Agrégation : Si le code existe déjà, on ajoute la quantité
-        final existingItem = _items.firstWhere((item) => item.code == code);
+        // Agrégation : Si le code existe déjà (et n'est pas encore versé), on ajoute la quantité ;
+        // une ligne déjà versée n'est plus modifiée (nouvelle ligne).
+        final existingItem = _items.firstWhere((item) => item.code == code && !item.versee);
         existingItem.quantity += quantity;
         // On le remonte en haut de liste pour visibilité
         _items.remove(existingItem);
@@ -404,6 +444,18 @@ class _CollectionScreenState extends State<CollectionScreen> {
         title: const Text('Mode Collecte (Hors-ligne)'),
         actions: [
           IconButton(
+            key: const ValueKey('verser-collecte'),
+            icon: const Icon(Icons.upload),
+            tooltip: 'Verser dans un inventaire',
+            onPressed: _nonVersees.isEmpty ? null : _verser,
+          ),
+          IconButton(
+            key: const ValueKey('rapports-versement'),
+            icon: const Icon(Icons.receipt_long),
+            tooltip: 'Rapports de versement',
+            onPressed: _rapports,
+          ),
+          IconButton(
             icon: const Icon(Icons.delete_sweep),
             tooltip: 'Vider la liste',
             onPressed: _items.isEmpty ? null : _clearList,
@@ -447,6 +499,26 @@ class _CollectionScreenState extends State<CollectionScreen> {
             ),
           ),
 
+          if (_aReprendre != null)
+            Material(
+              color: Colors.orange.shade50,
+              child: ListTile(
+                key: const ValueKey('bandeau-reprise'),
+                leading: Icon(Icons.warning_amber, color: Colors.orange.shade800),
+                title: Text('Versement interrompu vers « ${_aReprendre!.inventaireLibelle} »'),
+                subtitle: Text('${_aReprendre!.aReprendre.length} ligne(s) à reprendre ; ce qui est envoyé reste envoyé.'),
+                trailing: TextButton(onPressed: _reprendre, child: const Text('Reprendre')),
+              ),
+            )
+          else if (_items.isNotEmpty && _nonVersees.isEmpty)
+            Material(
+              color: Colors.green.shade50,
+              child: const ListTile(
+                key: ValueKey('bandeau-collecte-versee'),
+                leading: Icon(Icons.check_circle, color: Colors.green),
+                title: Text('Collecte entièrement versée'),
+              ),
+            ),
           const Divider(height: 1),
 
           Expanded(
@@ -476,7 +548,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
                       child: Text('${index + 1}', style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
                     ),
                     title: Text(item.code, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    subtitle: Text(DateFormat('dd/MM/yyyy HH:mm').format(item.dateScan)),
+                    subtitle: Text(item.versee
+                        ? '${DateFormat('dd/MM/yyyy HH:mm').format(item.dateScan)}\n✓ versé le ${DateFormat('dd/MM HH:mm').format(item.verseLe!)} dans « ${item.verseDans ?? ''} »'
+                        : DateFormat('dd/MM/yyyy HH:mm').format(item.dateScan)),
 
                     // Affichage Quantité + Bouton Supprimer
                     trailing: Row(

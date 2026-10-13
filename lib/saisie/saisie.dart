@@ -17,7 +17,9 @@ enum EtatSaisie {
   refusee,
 }
 
-enum OrigineSaisie { guidee, rapide, ecarts, restants, migration }
+/// Origine d'une saisie. [versement] : quantité versée depuis la collecte hors ligne (envoyée par la
+/// route qui enregistre l'auteur, voir SaisieServeur.poserQuantiteSession).
+enum OrigineSaisie { guidee, rapide, ecarts, restants, migration, versement }
 
 class SaisieLigne {
   final String inventaireId;
