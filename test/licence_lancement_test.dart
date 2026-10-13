@@ -54,6 +54,14 @@ void main() {
       expect(l.status, LicenseStatus.none);
     });
 
+    test('erreur du serveur (500) sur la licence : « injoignable / erreur serveur », PAS « non activée »', () async {
+      srv.codes['find'] = 500;
+      final l = LicenseProvider();
+      await l.checkLicense(api);
+      expect(l.status, LicenseStatus.unreachable);
+      expect(l.error, contains('code 500'));
+    });
+
     test('vérification au retour au premier plan : aucun passage par « chargement »', () async {
       final l = LicenseProvider();
       await l.checkLicense(api);

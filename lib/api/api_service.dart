@@ -402,6 +402,13 @@ class ApiService implements SaisieServeur {
     } catch (e) {
       throw const ApiLoadException('Serveur injoignable : impossible de vérifier la licence.', TypeErreurChargement.reseau);
     }
+    // Erreur du serveur (5xx) ou réponse d'accès inattendue : le serveur n'a pas pu répondre,
+    // on ne conclut RIEN sur la licence (même règle que les autres applications Prestige).
+    if (response.statusCode >= 500 || response.statusCode == 401 || response.statusCode == 403) {
+      throw ApiLoadException(
+          'Le serveur Prestige a répondu par une erreur (code ${response.statusCode}) : la licence n\'est pas en cause. Réessayez dans un instant.',
+          TypeErreurChargement.reseau);
+    }
     if (response.statusCode != 200) {
       throw ApiLoadException('Aucune licence valide trouvée (code ${response.statusCode}).');
     }
