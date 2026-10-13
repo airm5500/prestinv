@@ -3,6 +3,8 @@
 
     <!-- Permissions requises par l'application -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Vibration après un scan (succès / déjà compté / erreur) : autorisation normale, sans demande. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- On déclare que la caméra est une fonctionnalité utilisée,

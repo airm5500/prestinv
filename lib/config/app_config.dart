@@ -31,6 +31,15 @@ class AppConfig with ChangeNotifier {
   // CORRECTION : Variable d'instance privée (pas de static)
   bool _isCumulEnabled = false;
 
+  // --- Scan (douchette) ---
+  bool _sonScan = true;
+  bool _vibrationScan = true;
+  // Quantité proposée dans la fenêtre de quantité après un scan (null : aucune, saisie obligatoire).
+  int? _quantiteScanDefaut = quantiteScanDefautInitiale;
+
+  /// Quantité proposée après un scan sur une nouvelle installation (et tant que rien n'est réglé).
+  static const int quantiteScanDefautInitiale = 1;
+
   // --- Getters publics pour un accès sécurisé depuis l'UI ---
   String get localApiAddress => _localApiAddress;
   String get localApiPort => _localApiPort;
@@ -48,6 +57,15 @@ class AppConfig with ChangeNotifier {
 
   // CORRECTION : Getter public ajouté
   bool get isCumulEnabled => _isCumulEnabled;
+
+  /// Bip après un scan (succès / déjà compté / erreur).
+  bool get sonScan => _sonScan;
+
+  /// Vibration après un scan.
+  bool get vibrationScan => _vibrationScan;
+
+  /// Quantité proposée après un scan (null : aucune).
+  int? get quantiteScanDefaut => _quantiteScanDefaut;
 
   /// Construit l'URL complète actuelle en fonction du mode (Local/Distant)
   String get currentApiUrl {
@@ -102,6 +120,13 @@ class AppConfig with ChangeNotifier {
 
     // CORRECTION : Chargement correct de la variable
     _isCumulEnabled = _prefs.getBool('isCumulEnabled') ?? false;
+
+    _sonScan = _prefs.getBool('scanSon') ?? true;
+    _vibrationScan = _prefs.getBool('scanVibration') ?? true;
+    final qDefaut = _prefs.getInt('scanQuantiteDefaut');
+    _quantiteScanDefaut = qDefaut == null
+        ? quantiteScanDefautInitiale
+        : (qDefaut >= 1 && qDefaut <= 99999 ? qDefaut : null);
 
     // On charge les énumérations à partir de leur index stocké (valeur abîmée : valeur par défaut)
     final apiModeIndex = _prefs.getInt('apiMode') ?? ApiMode.local.index;
@@ -199,6 +224,26 @@ class AppConfig with ChangeNotifier {
     if (isCumulEnabled != null) {
       _isCumulEnabled = isCumulEnabled;
       await _prefs.setBool('isCumulEnabled', isCumulEnabled);
+    }
+    notifyListeners();
+  }
+
+  /// Réglages du scan : son, vibration, quantité proposée ([aucuneQuantite] : plus de quantité proposée).
+  Future<void> setScanSettings({bool? son, bool? vibration, int? quantiteDefaut, bool aucuneQuantite = false}) async {
+    if (son != null) {
+      _sonScan = son;
+      await _prefs.setBool('scanSon', son);
+    }
+    if (vibration != null) {
+      _vibrationScan = vibration;
+      await _prefs.setBool('scanVibration', vibration);
+    }
+    if (aucuneQuantite) {
+      _quantiteScanDefaut = null;
+      await _prefs.setInt('scanQuantiteDefaut', -1);
+    } else if (quantiteDefaut != null && quantiteDefaut >= 1 && quantiteDefaut <= 99999) {
+      _quantiteScanDefaut = quantiteDefaut;
+      await _prefs.setInt('scanQuantiteDefaut', quantiteDefaut);
     }
     notifyListeners();
   }

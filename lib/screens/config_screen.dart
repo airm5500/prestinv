@@ -8,6 +8,7 @@ import 'package:prestinv/interface_version.dart';
 import 'package:http/http.dart' as http;
 import 'package:prestinv/widgets/pin_admin.dart';
 import 'package:prestinv/utils/saisie_input.dart';
+import 'package:prestinv/scan/retour_scan.dart';
 
 class ConfigScreen extends StatefulWidget {
   const ConfigScreen({super.key});
@@ -28,10 +29,13 @@ class _ConfigScreenState extends State<ConfigScreen> {
   final _autoLogoutController = TextEditingController();
   final _exportPathController = TextEditingController();
   final _sendReminderController = TextEditingController();
+  final _quantiteScanController = TextEditingController();
 
   // Variables d'état
   late bool _showStockValue;
   late bool _isCumulEnabled; // Doit être initialisée dans initState
+  late bool _sonScan;
+  late bool _vibrationScan;
   bool _isAppNameEditable = false;
   bool _isTestingConnection = false;
 
@@ -75,6 +79,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _showStockValue = appConfig.showTheoreticalStock;
     // CORRECTION : Initialisation de la variable (sinon crash)
     _isCumulEnabled = appConfig.isCumulEnabled;
+    _sonScan = appConfig.sonScan;
+    _vibrationScan = appConfig.vibrationScan;
+    _quantiteScanController.text = appConfig.quantiteScanDefaut?.toString() ?? '';
   }
 
   @override
@@ -90,6 +97,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _autoLogoutController.dispose();
     _exportPathController.dispose();
     _sendReminderController.dispose();
+    _quantiteScanController.dispose();
     super.dispose();
   }
 
@@ -176,6 +184,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
       sendReminderMinutes: sendReminder,
       // CORRECTION : Sauvegarde du paramètre Cumul
       isCumulEnabled: _isCumulEnabled,
+    );
+
+    final qScan = int.tryParse(_quantiteScanController.text.trim());
+    await appConfig.setScanSettings(
+      son: _sonScan,
+      vibration: _vibrationScan,
+      quantiteDefaut: qScan,
+      aucuneQuantite: qScan == null,
     );
 
     if (!mounted) return;
@@ -292,6 +308,40 @@ class _ConfigScreenState extends State<ConfigScreen> {
               subtitle: Text(appConfig.sendMode == SendMode.direct ? 'Direct (après chaque saisie)' : 'Collecte (envoi manuel)'),
               value: appConfig.sendMode == SendMode.direct,
               onChanged: (bool value) => Provider.of<AppConfig>(context, listen: false).setSendMode(value ? SendMode.direct : SendMode.collect),
+            ),
+            const Divider(height: 32),
+            Text('Scan (douchette)', style: Theme.of(context).textTheme.titleLarge),
+            SwitchListTile(
+              key: const ValueKey('reglage-son-scan'),
+              title: const Text('Son après un scan'),
+              subtitle: const Text('Bip court : trouvé · double : déjà compté · long : erreur'),
+              contentPadding: EdgeInsets.zero,
+              value: _sonScan,
+              onChanged: (v) => setState(() => _sonScan = v),
+            ),
+            SwitchListTile(
+              key: const ValueKey('reglage-vibration-scan'),
+              title: const Text('Vibration après un scan'),
+              contentPadding: EdgeInsets.zero,
+              value: _vibrationScan,
+              onChanged: (v) => setState(() => _vibrationScan = v),
+            ),
+            Wrap(spacing: 4, children: [
+              TextButton(onPressed: () => RetourScan.jouer(TypeRetour.succes, son: _sonScan, vibration: _vibrationScan), child: const Text('Essai : trouvé')),
+              TextButton(onPressed: () => RetourScan.jouer(TypeRetour.dejaCompte, son: _sonScan, vibration: _vibrationScan), child: const Text('déjà compté')),
+              TextButton(onPressed: () => RetourScan.jouer(TypeRetour.erreur, son: _sonScan, vibration: _vibrationScan), child: const Text('erreur')),
+            ]),
+            const SizedBox(height: 8),
+            TextFormField(
+              key: const ValueKey('reglage-quantite-scan'),
+              controller: _quantiteScanController,
+              validator: (v) => (v ?? '').trim().isEmpty ? null : SaisieInput.erreurEntier(v, 1, SaisieInput.maxQuantite, 'Quantité proposée'),
+              decoration: const InputDecoration(
+                  labelText: 'Quantité proposée après un scan (vide = aucune)',
+                  helperText: 'Saisie rapide : remplacée dès qu\'on tape un chiffre',
+                  border: OutlineInputBorder()),
+              keyboardType: TextInputType.number,
+              inputFormatters: SaisieInput.quantiteFormatters,
             ),
             const SizedBox(height: 24),
             SizedBox(
