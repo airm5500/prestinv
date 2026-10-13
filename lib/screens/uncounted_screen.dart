@@ -12,6 +12,9 @@ import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
 import 'package:prestinv/providers/entry_provider.dart';
+import 'package:prestinv/saisie/saisie.dart';
+import 'package:prestinv/saisie/saisie_correction.dart';
+import 'package:prestinv/utils/saisie_input.dart';
 
 enum StockFilterType { none, less, more, lessEq, moreEq, diff, equal }
 
@@ -59,7 +62,7 @@ class _UncountedScreenState extends State<UncountedScreen> {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _apiService = ApiService(
       baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
-      sessionCookie: authProvider.sessionCookie,
+      cookie: () => authProvider.sessionCookie,
     );
 
     _searchFocusNode.addListener(() {
@@ -331,12 +334,15 @@ class _UncountedScreenState extends State<UncountedScreen> {
   void _openSaisieDialog(Product product) {
     final qtyController = TextEditingController();
     final appConfig = Provider.of<AppConfig>(context, listen: false);
+    // Envoi en cours (OK verrouillé) et message d'erreur affiché dans la fenêtre.
+    bool envoiEnCours = false;
+    String? erreur;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        return AlertDialog(
+        return StatefulBuilder(builder: (ctx, setDialogState) => AlertDialog(
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -376,8 +382,8 @@ class _UncountedScreenState extends State<UncountedScreen> {
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
                       color: AppColors.accent),
-                  decoration: const InputDecoration(
-                      labelText: 'Quantité', border: OutlineInputBorder()),
+                  decoration: InputDecoration(
+                      labelText: 'Quantité', border: const OutlineInputBorder(), errorText: erreur, errorMaxLines: 4),
                   readOnly: true,
                   autofocus: true,
                   showCursor: true,
@@ -386,10 +392,31 @@ class _UncountedScreenState extends State<UncountedScreen> {
                 SizedBox(
                   height: 280,
                   child: NumericKeyboard(
-                    onKeyPressed: (key) {
+                    okActif: !envoiEnCours,
+                    onKeyPressed: (key) async {
                       if (key == 'OK') {
-                        final int qty = int.tryParse(qtyController.text) ?? 0;
-                        _applySaisie(product, qty);
+                        if (envoiEnCours) return;
+                        // Champ vide : refusé (avant, OK sur un champ vide enregistrait 0).
+                        final e = SaisieInput.erreurQuantite(qtyController.text);
+                        if (e != null) {
+                          setDialogState(() => erreur = e);
+                          return;
+                        }
+                        final int qty = SaisieInput.parseQuantite(qtyController.text)!;
+                        setDialogState(() {
+                          envoiEnCours = true;
+                          erreur = null;
+                        });
+                        final echec = await _applySaisie(product, qty);
+                        if (!ctx.mounted) return;
+                        if (echec != null) {
+                          // Rien n'est retiré de la liste : la fenêtre reste ouverte avec le motif.
+                          setDialogState(() {
+                            envoiEnCours = false;
+                            erreur = echec;
+                          });
+                          return;
+                        }
                         Navigator.of(ctx).pop();
 
                         Future.delayed(const Duration(milliseconds: 100), () {
@@ -401,7 +428,8 @@ class _UncountedScreenState extends State<UncountedScreen> {
                               0, qtyController.text.length - 1);
                         }
                       } else {
-                        qtyController.text += key;
+                        qtyController.text = SaisieInput.ajouterChiffre(qtyController.text, key);
+                        if (erreur != null) setDialogState(() => erreur = null);
                       }
                     },
                   ),
@@ -411,18 +439,30 @@ class _UncountedScreenState extends State<UncountedScreen> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
+                onPressed: envoiEnCours ? null : () => Navigator.of(ctx).pop(),
                 child:
                 const Text('Annuler', style: TextStyle(color: Colors.red))),
           ],
-        );
+        ));
       },
     );
   }
 
-  void _applySaisie(Product product, int quantity) async {
+  /// Enregistre sur l'appareil puis envoie. Le produit ne quitte la liste des restants qu'après
+  /// confirmation du serveur. Renvoie `null` si confirmé, sinon le message d'échec.
+  Future<String?> _applySaisie(Product product, int quantity) async {
     try {
-      await _apiService.updateProductQuantity(product.id, quantity);
+      final r = await corrigerQuantite(
+        inventoryId: widget.inventoryId,
+        inventoryName: widget.inventoryName,
+        product: product,
+        quantite: quantity,
+        origine: OrigineSaisie.restants,
+        rayonId: _selectedRayon?.id,
+        rayonLibelle: _selectedRayon?.libelle,
+        auteur: Provider.of<AuthProvider>(context, listen: false).user?.login ?? '',
+      );
+      if (!r.estOk) return messageEchecCorrection(r);
 
       if (mounted) {
         _showNotification(
@@ -435,10 +475,9 @@ class _UncountedScreenState extends State<UncountedScreen> {
         final provider = Provider.of<EntryProvider>(context, listen: false);
         provider.loadRayonStatuses(_apiService, widget.inventoryId);
       }
+      return null;
     } catch (e) {
-      if (mounted) {
-        _showNotification("Erreur d'envoi : $e", Colors.red);
-      }
+      return 'Enregistrement impossible sur l\'appareil : $e';
     }
   }
 

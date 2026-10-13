@@ -9,6 +9,10 @@ import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
+import 'package:prestinv/saisie/saisie.dart';
+import 'package:prestinv/saisie/saisie_correction.dart';
+import 'package:prestinv/saisie/saisie_serveur.dart';
+import 'package:prestinv/utils/saisie_input.dart';
 import 'package:provider/provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -51,6 +55,9 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
   bool _isPrinting = false;
 
+  /// Envoi d'une correction en cours : OK verrouillé.
+  bool _envoiEnCours = false;
+
   bool _continuousScanMode = false;
   bool _isSearching = false;
 
@@ -64,7 +71,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _apiService = ApiService(
       baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
-      sessionCookie: authProvider.sessionCookie,
+      cookie: () => authProvider.sessionCookie,
     );
     _fetchAndSetupProducts();
     _searchController.addListener(_filterProducts);
@@ -179,6 +186,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
       extentOffset: quickQtyController.text.length,
     );
     bool isQuickNewEntry = true;
+    String? erreurSaisie;
 
     showDialog(
       context: context,
@@ -233,7 +241,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
                         controller: quickQtyController,
                         textAlign: TextAlign.center,
                         style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.accent),
-                        decoration: const InputDecoration(labelText: 'Nouvelle Qté', border: OutlineInputBorder()),
+                        decoration: InputDecoration(labelText: 'Nouvelle Qté', border: const OutlineInputBorder(), errorText: erreurSaisie),
                         readOnly: true,
                         autofocus: true,
                         showCursor: true,
@@ -244,7 +252,14 @@ class _VarianceScreenState extends State<VarianceScreen> {
                         child: NumericKeyboard(
                           onKeyPressed: (key) {
                             if (key == 'OK') {
-                              final int qty = int.tryParse(quickQtyController.text) ?? 0;
+                              // Champ vide : refusé (avant, il envoyait 0 = « produit absent »).
+                              final erreur = SaisieInput.erreurQuantite(quickQtyController.text);
+                              if (erreur != null) {
+                                setDialogState(() => erreurSaisie = erreur);
+                                return;
+                              }
+                              if (_envoiEnCours) return;
+                              final int qty = SaisieInput.parseQuantite(quickQtyController.text)!;
                               _applyQuickCorrection(product, qty);
                               Navigator.of(ctx).pop();
 
@@ -268,11 +283,12 @@ class _VarianceScreenState extends State<VarianceScreen> {
                               });
                             } else {
                               setDialogState(() {
+                                erreurSaisie = null;
                                 if (isQuickNewEntry) {
                                   quickQtyController.text = key;
                                   isQuickNewEntry = false;
                                 } else {
-                                  quickQtyController.text += key;
+                                  quickQtyController.text = SaisieInput.ajouterChiffre(quickQtyController.text, key);
                                 }
                                 // Replace le curseur à la fin
                                 quickQtyController.selection = TextSelection.collapsed(offset: quickQtyController.text.length);
@@ -296,28 +312,48 @@ class _VarianceScreenState extends State<VarianceScreen> {
     );
   }
 
+  /// Correction depuis la fenêtre rapide : enregistrée sur l'appareil puis envoyée ; la valeur
+  /// affichée ne change qu'après confirmation du serveur.
   void _applyQuickCorrection(Product product, int newQuantity) async {
-    setState(() {
-      product.quantiteSaisie = newQuantity;
-      if (_productsWithVariance.isNotEmpty &&
-          _productsWithVariance[_currentProductIndex].id == product.id) {
-        _quantityController.text = newQuantity.toString();
-        // On remet la sélection après la correction rapide si c'était le même produit à l'écran
-        _quantityController.selection = TextSelection(
-          baseOffset: 0,
-          extentOffset: _quantityController.text.length,
-        );
-        _isNewEntry = true;
-      }
-    });
-
+    if (_envoiEnCours) return;
+    setState(() => _envoiEnCours = true);
     try {
-      await _apiService.updateProductQuantity(product.id, newQuantity);
-      if (mounted) _showNotification('Correction enregistrée !', Colors.green);
+      final r = await _corriger(product, newQuantity);
+      if (!mounted) return;
+      if (r.estOk) {
+        setState(() {
+          product.quantiteSaisie = newQuantity;
+          if (_productsWithVariance.isNotEmpty &&
+              _productsWithVariance[_currentProductIndex].id == product.id) {
+            _quantityController.text = newQuantity.toString();
+            // On remet la sélection après la correction rapide si c'était le même produit à l'écran
+            _quantityController.selection = TextSelection(
+              baseOffset: 0,
+              extentOffset: _quantityController.text.length,
+            );
+            _isNewEntry = true;
+          }
+        });
+        _showNotification('Correction enregistrée !', Colors.green);
+      } else {
+        _showNotification(messageEchecCorrection(r), Colors.red);
+      }
     } catch (e) {
-      if (mounted) _showNotification('Erreur sauvegarde: $e', Colors.red);
+      if (mounted) _showNotification('Enregistrement impossible sur l\'appareil : $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _envoiEnCours = false);
     }
   }
+
+  Future<ReponseEnvoi> _corriger(Product product, int quantite) => corrigerQuantite(
+        inventoryId: widget.inventoryId,
+        product: product,
+        quantite: quantite,
+        origine: OrigineSaisie.ecarts,
+        rayonId: widget.rayonId,
+        rayonLibelle: widget.rayonName,
+        auteur: Provider.of<AuthProvider>(context, listen: false).user?.login ?? '',
+      );
 
   void _filterProducts() {
     final query = _searchController.text.toLowerCase();
@@ -380,33 +416,41 @@ class _VarianceScreenState extends State<VarianceScreen> {
           _quantityController.text = value; // Écrase le texte
           _isNewEntry = false;
         } else {
-          _quantityController.text += value; // Ajoute à la suite
+          _quantityController.text = SaisieInput.ajouterChiffre(_quantityController.text, value); // Ajoute à la suite (5 chiffres max)
         }
         _quantityController.selection = TextSelection.collapsed(offset: _quantityController.text.length);
       });
     }
   }
 
+  /// OK de l'écran principal : champ vide refusé, OK verrouillé pendant l'envoi, « Correction
+  /// envoyée » et passage au suivant seulement après confirmation du serveur.
   void _updateQuantityAndSend() async {
-    if (_productsWithVariance.isEmpty || !mounted) return;
+    if (_productsWithVariance.isEmpty || !mounted || _envoiEnCours) return;
 
     final product = _productsWithVariance[_currentProductIndex];
-    final newQuantity = int.tryParse(_quantityController.text) ?? 0;
+    final erreur = SaisieInput.erreurQuantite(_quantityController.text);
+    if (erreur != null) {
+      _showNotification(erreur, Colors.orange);
+      return;
+    }
+    final newQuantity = SaisieInput.parseQuantite(_quantityController.text)!;
 
-    setState(() {
-      product.quantiteSaisie = newQuantity;
-    });
-
+    setState(() => _envoiEnCours = true);
     try {
-      await _apiService.updateProductQuantity(product.id, newQuantity);
-      if (mounted) {
+      final r = await _corriger(product, newQuantity);
+      if (!mounted) return;
+      if (r.estOk) {
+        setState(() => product.quantiteSaisie = newQuantity);
         _showNotification('Correction envoyée !', Colors.green);
         _nextProduct();
+      } else {
+        _showNotification(messageEchecCorrection(r), Colors.red);
       }
     } catch (e) {
-      if (mounted) {
-        _showNotification('Erreur d\'envoi: $e', Colors.red);
-      }
+      if (mounted) _showNotification('Enregistrement impossible sur l\'appareil : $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _envoiEnCours = false);
     }
   }
 
@@ -637,7 +681,7 @@ class _VarianceScreenState extends State<VarianceScreen> {
           ),
           _buildNotificationArea(),
           if (!_isSearching && !_showSearchResults)
-            NumericKeyboard(onKeyPressed: _onKeyPressed),
+            NumericKeyboard(onKeyPressed: _onKeyPressed, okActif: !_envoiEnCours),
         ],
       ),
     );

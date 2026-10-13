@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 class NumericKeyboard extends StatelessWidget {
   final Function(String) onKeyPressed;
 
-  const NumericKeyboard({super.key, required this.onKeyPressed});
+  /// `false` pendant un envoi : la touche OK est verrouillée (sablier) pour éviter un double envoi.
+  final bool okActif;
+
+  const NumericKeyboard({super.key, required this.onKeyPressed, this.okActif = true});
 
   @override
   Widget build(BuildContext context) {
@@ -54,8 +57,10 @@ class NumericKeyboard extends StatelessWidget {
             foregroundColor: (key == 'OK' || key == 'DEL') ? Colors.white : Colors.black,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
-          onPressed: () => onKeyPressed(key),
-          child: Text(key, style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold)),
+          onPressed: (key == 'OK' && !okActif) ? null : () => onKeyPressed(key),
+          child: (key == 'OK' && !okActif)
+              ? SizedBox(width: fontSize, height: fontSize, child: const CircularProgressIndicator(strokeWidth: 2))
+              : Text(key, style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold)),
         ),
       ),
     );

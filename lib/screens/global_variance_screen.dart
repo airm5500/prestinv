@@ -10,6 +10,9 @@ import 'package:prestinv/models/product.dart';
 import 'package:prestinv/models/rayon.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
+import 'package:prestinv/saisie/saisie.dart';
+import 'package:prestinv/saisie/saisie_correction.dart';
+import 'package:prestinv/utils/saisie_input.dart';
 
 class GlobalVarianceScreen extends StatefulWidget {
   final String inventoryId;
@@ -49,7 +52,7 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _apiService = ApiService(
       baseUrl: Provider.of<AppConfig>(context, listen: false).currentApiUrl,
-      sessionCookie: authProvider.sessionCookie,
+      cookie: () => authProvider.sessionCookie,
     );
 
     _loadInitialData();
@@ -230,6 +233,9 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
     int currentIndex = startIndex;
     final qtyController = TextEditingController();
     final appConfig = Provider.of<AppConfig>(context, listen: false);
+    // Envoi en cours (OK verrouillé) et message d'erreur affiché dans la fenêtre.
+    bool envoiEnCours = false;
+    String? erreur;
 
     showDialog(
       context: context,
@@ -293,10 +299,11 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
                           // Flèche Précédent
                           IconButton(
                             icon: Icon(Icons.chevron_left, size: 36, color: currentIndex > 0 ? Colors.deepPurple : Colors.grey),
-                            onPressed: currentIndex > 0 ? () {
+                            onPressed: currentIndex > 0 && !envoiEnCours ? () {
                               setDialogState(() {
                                 currentIndex--;
                                 qtyController.clear();
+                                erreur = null;
                               });
                             } : null,
                           ),
@@ -306,7 +313,7 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
                               controller: qtyController,
                               textAlign: TextAlign.center,
                               style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.accent),
-                              decoration: const InputDecoration(labelText: 'Quantité', border: OutlineInputBorder()),
+                              decoration: InputDecoration(labelText: 'Quantité', border: const OutlineInputBorder(), errorText: erreur, errorMaxLines: 4),
                               readOnly: true,
                               autofocus: true,
                               showCursor: true,
@@ -315,10 +322,11 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
                           // Flèche Suivant
                           IconButton(
                             icon: Icon(Icons.chevron_right, size: 36, color: currentIndex < _displayedVariances.length - 1 ? Colors.deepPurple : Colors.grey),
-                            onPressed: currentIndex < _displayedVariances.length - 1 ? () {
+                            onPressed: currentIndex < _displayedVariances.length - 1 && !envoiEnCours ? () {
                               setDialogState(() {
                                 currentIndex++;
                                 qtyController.clear();
+                                erreur = null;
                               });
                             } : null,
                           ),
@@ -329,13 +337,30 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
                       SizedBox(
                         height: 280,
                         child: NumericKeyboard(
-                          onKeyPressed: (key) {
+                          okActif: !envoiEnCours,
+                          onKeyPressed: (key) async {
                             if (key == 'OK') {
-                              if (qtyController.text.isEmpty) return;
-                              final int qty = int.tryParse(qtyController.text) ?? 0;
+                              if (envoiEnCours) return;
+                              final e = SaisieInput.erreurQuantite(qtyController.text);
+                              if (e != null) {
+                                setDialogState(() => erreur = e);
+                                return;
+                              }
+                              final int qty = SaisieInput.parseQuantite(qtyController.text)!;
 
-                              // 1. Appliquer la correction et mémoriser la validation
-                              _applyCorrection(product, qty);
+                              // 1. Enregistrée sur l'appareil puis envoyée ; « validé » SEULEMENT si le
+                              //    serveur a confirmé (avant : marqué validé même en cas d'échec).
+                              setDialogState(() {
+                                envoiEnCours = true;
+                                erreur = null;
+                              });
+                              final echec = await _applyCorrection(product, qty);
+                              if (!ctx.mounted) return;
+                              setDialogState(() {
+                                envoiEnCours = false;
+                                erreur = echec;
+                              });
+                              if (echec != null) return; // pas de passage au suivant : à refaire ou à passer (›)
                               setState(() { _correctedProductIds.add(product.id); }); // Mémorise la validation
 
                               // 2. Passage automatique
@@ -359,7 +384,8 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
                                 qtyController.text = qtyController.text.substring(0, qtyController.text.length - 1);
                               }
                             } else {
-                              qtyController.text += key;
+                              qtyController.text = SaisieInput.ajouterChiffre(qtyController.text, key);
+                              if (erreur != null) setDialogState(() => erreur = null);
                             }
                           },
                         ),
@@ -369,7 +395,7 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
                 ),
                 actions: [
                   TextButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
+                      onPressed: envoiEnCours ? null : () => Navigator.of(ctx).pop(),
                       child: const Text('Fermer', style: TextStyle(color: Colors.red))
                   ),
                 ],
@@ -380,19 +406,27 @@ class _GlobalVarianceScreenState extends State<GlobalVarianceScreen> {
     );
   }
 
-  void _applyCorrection(Product product, int newQuantity) async {
-    setState(() {
-      product.quantiteSaisie = newQuantity;
-    });
-
+  /// Enregistre sur l'appareil puis envoie. La valeur affichée ne change qu'après confirmation du
+  /// serveur. Renvoie `null` si confirmé, sinon le message d'échec.
+  Future<String?> _applyCorrection(Product product, int newQuantity) async {
     try {
-      await _apiService.updateProductQuantity(product.id, newQuantity);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Erreur d'envoi : $e"), backgroundColor: Colors.red)
-        );
+      final r = await corrigerQuantite(
+        inventoryId: widget.inventoryId,
+        inventoryName: widget.inventoryName,
+        product: product,
+        quantite: newQuantity,
+        origine: OrigineSaisie.ecarts,
+        rayonId: _selectedRayonFilter?.id,
+        rayonLibelle: _selectedRayonFilter?.libelle,
+        auteur: Provider.of<AuthProvider>(context, listen: false).user?.login ?? '',
+      );
+      if (r.estOk) {
+        if (mounted) setState(() => product.quantiteSaisie = newQuantity);
+        return null;
       }
+      return messageEchecCorrection(r);
+    } catch (e) {
+      return 'Enregistrement impossible sur l\'appareil : $e';
     }
   }
 

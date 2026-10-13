@@ -101,10 +101,10 @@ Widget monter(Banc b, Widget ecran) => MultiProvider(
       child: MaterialApp(home: ecran),
     );
 
-/// Écran de test de 480 × 960 dp. (La police des tests, où chaque lettre est un carré plein, est bien
+/// Écran de test de 600 × 1000 dp. (La police des tests, où chaque lettre est un carré plein, est bien
 /// plus large que Roboto : à 360 dp elle fait déborder des libellés qui tiennent sur le terminal.)
 void ecranTerminal(WidgetTester tester) {
-  tester.view.physicalSize = const Size(960, 1920);
+  tester.view.physicalSize = const Size(1200, 2000);
   tester.view.devicePixelRatio = 2.0;
 }
 
