@@ -1,14 +1,15 @@
-// Interrupteur « Nouvelle interface » : éteint par défaut, choix mémorisé, accueil d'origine dans les deux cas.
+// Interrupteur « Nouvelle interface » : ALLUMÉ par défaut depuis la 4.12.0 (demande du client ; avant :
+// éteint), choix mémorisé, aiguillage d'accueil unique (HomeScreen) dans les deux cas.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/interface_version.dart';
 import 'package:prestinv/screens/home_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  test('éteint par défaut (nouvelle installation)', () async {
+  test('allumé par défaut (nouvelle installation)', () async {
     SharedPreferences.setMockInitialValues({});
     await InterfaceVersion.load();
-    expect(InterfaceVersion.useNew.value, isFalse);
+    expect(InterfaceVersion.useNew.value, isTrue);
     expect(InterfaceVersion.home(), isA<HomeScreen>());
   });
 

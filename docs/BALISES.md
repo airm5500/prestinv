@@ -10,12 +10,13 @@ sur le terrain, on peut reconstruire l'APK d'avant l'étape sans rien chercher d
 | `prestinv-avant-etape-2` | dernier commit de l'étape 1 | Fiabilité de la saisie (file locale persistante des saisies, envoi rejouable, « À envoyer », mode Direct par défaut pour les nouvelles installations). |
 | `prestinv-avant-etape-3` | dernier commit de l'étape 2 | Robustesse et sécurité (erreurs ≠ liste vide, session expirée, serveur injoignable ≠ licence, mot de passe chiffré, code administrateur, contrôles de saisie). |
 | `prestinv-avant-refonte` | `c8eaae3` (branche `claude/scan-et-collecte`, version 4.10.0+6) | Avant l'étape 4 « refonte visuelle » (nouvelle interface A / B / C derrière l'interrupteur, version 4.11.0+7, `docs/NOTE_VERSION_REFONTE.md`). |
+| `prestinv-avant-defaut-nouvelle` | `71153ce` (branche `claude/refonte`, version 4.11.0+7) | Avant la 4.12.0+8 : nouvelle interface **activée par défaut** (installations nouvelles et existantes sans choix ; choix explicite de l'ancienne respecté). Contient déjà « Actualiser l'avancement ». |
 | `prestinv-avant-scan-collecte` | `b10e069` (branche `claude/fiabilite-saisie`, version 4.9.0+5) | Avant l'étape 3 « scan » (douchette toujours prête, bips, journal, quantité rapide) et le versement de la collecte / la création d'inventaire (version 4.10.0+6, `docs/NOTE_VERSION_SCAN_COLLECTE.md`). |
 
 Les balises sont créées **localement** ; les publier avec :
 
 ```bash
-git push origin prestinv-avant-etape-0 prestinv-avant-etape-1 prestinv-avant-etape-2 prestinv-avant-etape-3 prestinv-avant-scan-collecte prestinv-avant-refonte
+git push origin prestinv-avant-etape-0 prestinv-avant-etape-1 prestinv-avant-etape-2 prestinv-avant-etape-3 prestinv-avant-scan-collecte prestinv-avant-refonte prestinv-avant-defaut-nouvelle
 ```
 
 ## Revenir à une version précédente
@@ -36,9 +37,11 @@ reprises) sont dans `versements_v1`. Une version antérieure ignore simplement l
 
 ## Interrupteur « Nouvelle interface »
 
-`lib/interface_version.dart` (même principe que `prestige_vente_app`). **Désactivé par défaut**
-(installations existantes comme nouvelles), proposé dans la Configuration d'origine et dans la nouvelle
-(« Nouvelle interface », code administrateur). Depuis la 4.11.0 :
+`lib/interface_version.dart` (même principe que `prestige_vente_app`). **Activé par défaut depuis la
+4.12.0** (nouvelles installations, et installations existantes où aucun choix n'a été enregistré) ; un
+choix explicite des écrans d'origine est respecté. Présent dans la Configuration d'origine et dans les
+Réglages de la nouvelle (« Nouvelle interface », code administrateur). En 4.11.0 il était désactivé par
+défaut. Depuis la 4.11.0 :
 
 - désactivé : écrans d'origine (`lib/screens/…`), contenu inchangé ; seuls `HomeScreen` et
   `LoginScreen` sont devenus des aiguillages (écrans d'origine renommés `AncienHomeScreen` /
@@ -47,9 +50,11 @@ reprises) sont dans `versements_v1`. Une version antérieure ignore simplement l
 - activé : nouveaux écrans (`lib/ui/ecrans/…`), mêmes données, même file des saisies.
 
 **Revenir en arrière** (trois niveaux, du plus simple au plus radical) :
-1. sur le terminal : Configuration → « Nouvelle interface » → désactiver (code administrateur). Effet
-   immédiat au retour à l'accueil ; rien à réinstaller, aucune donnée touchée ;
-2. pour tout le parc : préférence `interface_nouvelle_version_v1` à `false` (ou ne jamais l'activer) ;
+1. sur le terminal : Réglages (ou Configuration) → « Nouvelle interface » → désactiver (code
+   administrateur). Effet immédiat au retour à l'accueil ; rien à réinstaller, aucune donnée touchée ;
+   le choix est gardé aux mises à jour suivantes ;
+2. pour tout le parc : préférence `interface_nouvelle_version_v1` à `false` (absente = nouvelle
+   interface depuis la 4.12.0), ou reconstruire la 4.11.0+7 : `git checkout prestinv-avant-defaut-nouvelle` ;
 3. reconstruire l'APK d'avant l'étape 4 : `git checkout prestinv-avant-refonte` (4.10.0+6) — les
    données (saisies, collecte, versements, réglages) gardent les mêmes clés : rien n'est perdu.
 

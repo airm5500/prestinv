@@ -1,35 +1,51 @@
-# Prestige Inventaire 4.11.0 — Note de version « Nouvelle interface »
+# Prestige Inventaire 4.12.0 — Note de version « Nouvelle interface »
 
-*Pour le pharmacien et l'équipe qui compte. L'application peut maintenant s'afficher avec une
-nouvelle présentation, aux couleurs communes des applications Prestige (bleu nuit et ambre), pensée
-pour le terminal Sunmi, le téléphone et la tablette. Elle est **proposée, pas imposée** : tant que vous
-ne l'activez pas, rien ne change à l'écran.*
+*Pour le pharmacien et l'équipe qui compte. L'application s'affiche avec une nouvelle présentation,
+aux couleurs communes des applications Prestige (bleu nuit et ambre), pensée pour le terminal Sunmi,
+le téléphone et la tablette. Depuis la 4.12.0, c'est la **présentation par défaut** ; les écrans
+d'origine restent disponibles à tout moment depuis les Réglages (code administrateur).*
 
-Version : **4.11.0** (code 7). Elle s'installe par-dessus la 4.10.0 (ou plus ancienne) sans
+Version : **4.12.0** (code 8). Elle s'installe par-dessus la 4.11.0, la 4.10.0 (ou plus ancienne) sans
 désinstaller. Rien n'est perdu : réglages, saisies en attente, collecte et rapports sont repris tels quels.
+
+### Nouveau en 4.12.0
+
+- **La nouvelle interface s'affiche par défaut** : sur les nouvelles installations, et sur les
+  terminaux mis à jour où personne n'avait encore fait de choix (cas de la 4.11.0, où elle était
+  seulement proposée).
+- **Votre choix est respecté** : un terminal sur lequel les écrans d'origine avaient été choisis
+  (interrupteur désactivé avec le code administrateur) les garde après la mise à jour.
+- **Accueil : « Actualiser l'avancement »** sur la carte de l'inventaire en cours (voir § 5.4).
+
+Historique : 4.11.0 (code 7) — nouvelle interface proposée, désactivée par défaut.
 
 Aperçus réels (polices et couleurs de l'application) : `docs/maquettes/apercus/refonte_*.png`, et la
 planche avant / après `refonte_0_avant_apres.png`.
 
 ---
 
-## 1. Activer la nouvelle interface
+## 1. La nouvelle interface, par défaut
 
-1. Ouvrez la **Configuration** (roue dentée en haut de l'accueil, ou sur l'écran de connexion).
-2. Descendez jusqu'à **« Nouvelle interface (proposée) »** et touchez l'interrupteur.
-3. Saisissez le **code administrateur** (le même que pour modifier l'adresse du serveur).
-4. Revenez à l'accueil : la nouvelle présentation s'affiche.
+Rien à faire : après installation ou mise à jour en 4.12.0, la nouvelle présentation s'affiche dès
+l'écran de connexion — sauf sur un terminal où les écrans d'origine avaient été **choisis** (voir § 2),
+qui les garde.
 
-Le choix est gardé sur l'appareil : chaque terminal peut être passé à la nouvelle interface à son
-rythme (par exemple un seul terminal pour essayer).
+Le choix est gardé sur l'appareil : chaque terminal peut rester sur les écrans d'origine ou passer à
+la nouvelle interface à son rythme.
 
-## 2. Revenir aux écrans d'origine
+## 2. Revenir aux écrans d'origine (et inversement)
 
 À tout moment, sans réinstaller et sans rien perdre :
 
 1. Barre du bas → **Réglages** (sur tablette : **Réglages** dans le menu de gauche).
-2. Rubrique **Interface** → désactivez **« Nouvelle interface »** → code administrateur.
-3. Revenez à l'accueil : les écrans d'origine reviennent, exactement comme avant.
+2. Rubrique **Interface** → désactivez **« Nouvelle interface »** → **code administrateur** (le même
+   que pour modifier l'adresse du serveur).
+3. Revenez à l'accueil : les écrans d'origine reviennent, exactement comme avant. Ce choix est
+   mémorisé : il est conservé aux redémarrages et aux mises à jour suivantes.
+
+Pour revenir à la nouvelle interface depuis les écrans d'origine : **Configuration** (roue dentée en
+haut de l'accueil, ou sur l'écran de connexion) → **« Nouvelle interface (désactivée) »** → activer →
+code administrateur.
 
 Les saisies faites dans l'une ou l'autre présentation sont les **mêmes** : une saisie commencée dans la
 nouvelle interface se retrouve dans « À envoyer » de l'ancienne, et inversement.
@@ -68,7 +84,7 @@ rafale sans perte ; touches latérales Sunmi).
   « déjà compté » vérifié auprès du serveur, jamais d'écrasement silencieux).
 - Les **réglages** et le **code administrateur**.
 - Le **serveur** : aucune modification, aucune nouvelle requête.
-- Les **écrans d'origine** : identiques tant que l'interrupteur est désactivé.
+- Les **écrans d'origine** : identiques quand l'interrupteur est désactivé.
 
 ## 5. Petites différences de comportement (nouvelle interface seulement)
 
@@ -94,11 +110,26 @@ rafale sans perte ; touches latérales Sunmi).
 - Code : `lib/ui/` (thème, composants, écrans), aiguillages `HomeScreen` / `LoginScreen`,
   `lib/interface_version.dart`. Les écrans d'origine (`lib/screens/`) ne sont pas modifiés, hormis le
   renommage des deux classes aiguillées et l'ajout de l'interrupteur dans leur Configuration.
+- **Valeur par défaut (4.12.0)** : `InterfaceVersion.parDefaut = true`. Préférence
+  `interface_nouvelle_version_v1` : absente → nouvelle interface ; `false` (choix explicite, écrit
+  uniquement par l'interrupteur après le code administrateur) → écrans d'origine ; `true` → nouvelle.
+  Imposer les écrans d'origine à tout un parc : écrire `false` dans cette préférence (ou désactiver
+  l'interrupteur sur chaque terminal).
+- **Avancement à la demande** : `lib/ui/avancement.dart` (mêmes requêtes que « Choisir un rayon »,
+  résultat gardé sous `nv_avancement_v1_<inventaire>`).
 - Tests (CI) : `test/nv_*.dart` — rendu sans débordement de chaque écran en 360 × 640, 360 × 800,
   tablette portrait et paysage, clair et sombre ; logique branchée sur la même file des saisies ;
-  focus de la douchette ; interrupteur. Les 164 tests existants passent sans modification.
+  focus de la douchette ; interrupteur (valeur par défaut, choix explicite respecté, code
+  administrateur) ; avancement à la demande (`test/nv_avancement_test.dart`).
+- **Tests d'origine** (164, antérieurs à la refonte) : ils passent tous. Ils vérifient les écrans
+  d'origine, atteints par les aiguillages : `test/flutter_test_config.dart` les place avant chaque test
+  dans la situation « ancienne interface choisie » (sans cela, deux d'entre eux — accueil
+  d'`a_envoyer_test` et `licence_lancement_test` — afficheraient la nouvelle interface, désormais par
+  défaut). Leurs assertions ne changent pas, à une exception voulue : `test/interface_version_test.dart`
+  vérifie la valeur par défaut de l'interrupteur, qui passe d'« éteint » à « allumé ».
 - Aperçus (hors CI) : `flutter test test_apercus/refonte_apercus_test.dart --update-goldens`. Polices
   Roboto et icônes Material du SDK Flutter (chargées sans réseau). Sur la planche avant / après, les
   libellés des grands boutons de l'**accueil d'origine** apparaissent en rectangles : leur style ne
   précise pas de police et le moteur de test, contrairement à Android (Roboto), n'en a pas par défaut.
-- Version : `pubspec.yaml` 4.11.0+7 ; balise de retour : `prestinv-avant-refonte`.
+- Version : `pubspec.yaml` 4.12.0+8 ; balises de retour : `prestinv-avant-defaut-nouvelle` (4.11.0+7,
+  nouvelle interface proposée mais désactivée par défaut) et `prestinv-avant-refonte` (4.10.0+6).

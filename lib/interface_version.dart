@@ -2,13 +2,18 @@
 // Interrupteur « Nouvelle interface » (même principe que prestige_vente_app) : permet de revenir aux
 // écrans d'origine sans réinstaller l'application.
 //
-// DÉSACTIVÉ par défaut (installations existantes comme nouvelles) : il est PROPOSÉ dans la
-// Configuration (ancienne et nouvelle), où le changer demande le code administrateur.
+// ACTIVÉ par défaut depuis la 4.12.0 : nouvelles installations ET installations existantes qui n'ont
+// jamais fait de choix (aucune valeur enregistrée sous [InterfaceVersion.key]). Un choix explicite
+// est toujours respecté : qui a désactivé l'interrupteur garde les écrans d'origine.
+// Le changer (Configuration d'origine ou Réglages de la nouvelle interface) demande le code
+// administrateur.
 // - Désactivé : écrans d'origine, STRICTEMENT inchangés (lib/screens/…).
 // - Activé : nouveaux écrans (lib/ui/ecrans/…, maquettes A, B, C), mêmes données, même logique.
 // Aiguillages : HomeScreen et LoginScreen (lib/screens/…) choisissent l'écran selon [useNew] ; le
 // lancement, la licence et le serveur injoignable passent par les fonctions ci-dessous (main.dart).
-// Retour arrière : Configuration → « Nouvelle interface » → désactiver (code administrateur).
+// Retour arrière : Réglages / Configuration → « Nouvelle interface » → désactiver (code administrateur).
+// Tests : test/flutter_test_config.dart remet les écrans d'origine avant chaque test (les tests
+// d'origine visent ces écrans) ; les tests de la nouvelle interface l'activent eux-mêmes.
 import 'package:flutter/material.dart';
 import 'package:prestinv/screens/home_screen.dart';
 import 'package:prestinv/screens/license_register_screen.dart';
@@ -25,8 +30,11 @@ class InterfaceVersion {
 
   static const key = 'interface_nouvelle_version_v1';
 
-  /// Version choisie (ancienne par défaut).
-  static final ValueNotifier<bool> useNew = ValueNotifier<bool>(false);
+  /// Valeur sans choix enregistré : la nouvelle interface.
+  static const parDefaut = true;
+
+  /// Version affichée (nouvelle par défaut ; [load] applique le choix enregistré).
+  static final ValueNotifier<bool> useNew = ValueNotifier<bool>(parDefaut);
 
   /// Clair / sombre (nouvelle interface seulement).
   static ValueNotifier<Apparence> get apparence => NvApparence.valeur;
@@ -34,11 +42,13 @@ class InterfaceVersion {
   static Future<void> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      useNew.value = prefs.getBool(key) ?? false;
+      // Aucune valeur = jamais choisi → nouvelle interface ; false = ancienne choisie → respectée.
+      useNew.value = prefs.getBool(key) ?? parDefaut;
     } catch (_) {}
     await NvApparence.charger();
   }
 
+  /// Choix explicite (mémorisé : il prime désormais sur la valeur par défaut).
   static Future<void> setNew(bool value) async {
     useNew.value = value;
     try {
@@ -90,11 +100,12 @@ class InterfaceVersionTile extends StatelessWidget {
           key: const ValueKey('interrupteur-nouvelle-interface'),
           contentPadding: EdgeInsets.zero,
           secondary: Icon(isNew ? Icons.auto_awesome : Icons.new_releases_outlined),
-          title: Text(isNew ? 'Nouvelle interface' : 'Nouvelle interface (proposée)'),
+          title: Text(isNew ? 'Nouvelle interface' : 'Nouvelle interface (désactivée)'),
           subtitle: Text(isNew
-              ? 'Activée. Désactivez pour revenir aux écrans d\'origine (code administrateur).'
-              : 'Écrans d\'origine utilisés. Activez pour essayer la nouvelle présentation : mêmes données, '
-                  'mêmes réglages, retour possible à tout moment (code administrateur).'),
+              ? 'Activée (présentation par défaut). Désactivez pour revenir aux écrans d\'origine : mêmes données, '
+                  'mêmes réglages (code administrateur).'
+              : 'Écrans d\'origine utilisés, à votre demande. Activez pour retrouver la nouvelle présentation : '
+                  'mêmes données, mêmes réglages (code administrateur).'),
           value: isNew,
           onChanged: (v) => _changer(context, v),
         ),
