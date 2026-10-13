@@ -140,10 +140,19 @@ class ApiService implements SaisieServeur {
     final url = Uri.parse('$baseUrl/api/v1/ws/inventaires');
     try {
       final response = await _httpGet(url).timeout(const Duration(seconds: 20));
-      if (response.statusCode != 200) return null;
+      final code = response.statusCode;
+      if (code == 401 || code == 403) throw SessionServeurExpiree('Session expirée ou accès refusé (code $code).');
+      if (code != 200) return null;
       final data = json.decode(utf8.decode(response.bodyBytes));
+      if (data is Map) {
+        // Session perdue côté serveur (réponse « Veuillez vous connecter » au lieu de la liste).
+        final message = '${data['errors'] ?? data['message'] ?? data['msg'] ?? ''}';
+        if (message.toLowerCase().contains('connecter')) throw SessionServeurExpiree(message);
+      }
       if (data is! List) return null;
       return InventairesOuverts({for (final i in data) if (i is Map && i['id'] != null) '${i['id']}'});
+    } on SessionServeurExpiree {
+      rethrow;
     } catch (_) {
       return null;
     }

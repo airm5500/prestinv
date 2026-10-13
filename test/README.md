@@ -41,6 +41,7 @@ et refuse tout fichier `*_test.dart` rangé hors de ces dossiers.
 | « Actualiser l'avancement » | `e2e/…`, `nv_avancement_test` | — |
 | Changer d'interface dans les paramètres (code administrateur) | `e2e/…`, `nv_interrupteur_test` | `e2e/…`, `nv_interrupteur_test` |
 | Session expirée → reconnexion sans quitter l'écran | `e2e/pannes_test` | `e2e/pannes_test`, `session_expiree_test` |
+| Session expirée avant le premier envoi → « Session expirée — reconnectez-vous », envoi repris après reconnexion | `e2e/pannes_test`, `integration/services_serveur_test` | `integration/…` |
 | Serveur coupé en cours de travail → message réseau, Réessayer | `e2e/pannes_test` | `e2e/pannes_test` |
 | Saisie hors ligne puis envoi automatique au retour du serveur | `e2e/pannes_test`, `integration/…` | `e2e/pannes_test` |
 
@@ -84,12 +85,19 @@ règle est exigée. Corriger l'anomalie = retirer le saut.
 
 | Réf. | Anomalie | Où | Test |
 |---|---|---|---|
-| A1 | Session expirée **avant** le premier envoi : la file reçoit 401 sur la liste des inventaires ouverts et l'annonce comme « Serveur injoignable » (pas de proposition de reconnexion). Les saisies restent bien gardées. Correctif : distinguer 401/403 dans `ApiService.inventairesOuverts` / `SaisieServeur`. | `lib/saisie/saisie_queue.dart`, `lib/api/api_service.dart` | `integration/services_serveur_test.dart` |
-| A2 | Écrans d'origine (gelés) : textes gris sous le seuil de contraste (Licence, Accueil « j restants », bouton OK de la saisie guidée, « Scannez le produit suivant », Restants, Collecte, Configuration). Règle non exigée pour les écrans d'origine seulement. | `lib/screens/…` | `ergonomie/affichage_ecrans_test.dart` |
-| A3 | Collecte d'origine : le champ de scan est un champ texte ordinaire (clavier système) ; si le clavier est ouvert, la fenêtre « Ajout Collecte » (pavé fixe de 280 dp) déborde. | `lib/screens/collection_screen.dart` | `ergonomie/clavier_quantite_test.dart` (B) |
-| A4 | Saisie guidée, recherche par nom (clavier système ouvert) : le champ de quantité sort de la zone visible ; il revient à la fermeture du clavier. | les deux interfaces | `ergonomie/clavier_quantite_test.dart` (C bis) |
-| A5 | **Saisie guidée sur écran de 640 dp de haut (Sunmi V3 / V3H / V3mix 1080×1920, téléphone 360×640) et, en texte ×1,3, sur V2s** : le champ de quantité est poussé sous le bas de la liste défilante, partiellement (×1,0) ou totalement (×1,3) caché derrière le pavé ; il faut faire défiler pour voir la quantité tapée. Correctif proposé : épingler l'affichage de la quantité juste au-dessus du pavé, hors de la liste. | nouvelle (`saisie_guidee_screen.dart`) et ancienne (`inventory_entry_screen.dart`) | `ergonomie/clavier_quantite_test.dart` (A) |
-| A6 | Fenêtres de quantité d'origine (« Saisie Rapide », « Ajout Collecte ») : débordement en texte agrandi ×1,3. | `lib/screens/…` | `ergonomie/clavier_quantite_test.dart` (A, B) |
+| A2 | Écrans d'origine (gelés) : textes gris et boutons colorés (OK vert, boutons de l'accueil) sous le seuil de contraste (Licence, Accueil « j restants », bouton OK de la saisie guidée, « Scannez le produit suivant », Restants, Collecte, Configuration). Règle non exigée pour les écrans d'origine seulement : la correction toucherait les couleurs des boutons de plusieurs écrans gelés, laissée à la décision de l'officine. | `lib/screens/…` | `ergonomie/affichage_ecrans_test.dart` |
+| A4 (origine) | Saisie guidée **d'origine**, recherche par nom (clavier système ouvert) : le champ de quantité sort de la zone visible ; il revient à la fermeture du clavier. | `lib/screens/inventory_entry_screen.dart` | `ergonomie/clavier_quantite_test.dart` (C bis, « Saisie guidée (origine) ») |
+| A5 (origine) | Saisie guidée **d'origine** sur écran de 640 dp de haut (Sunmi V3 / V3H / V3mix 1080×1920, téléphone 360×640) et, en texte ×1,3, sur V2s : le champ de quantité est poussé sous le bas de la liste défilante, partiellement (×1,0) ou totalement (×1,3) caché derrière le pavé. Correction = refonte de la mise en page de l'écran gelé (même principe que la nouvelle interface). | `lib/screens/inventory_entry_screen.dart` | `ergonomie/clavier_quantite_test.dart` (A, « Saisie guidée (origine) ») |
+
+## Anomalies corrigées
+
+| Réf. | Anomalie | Correctif | Tests réactivés / ajoutés |
+|---|---|---|---|
+| A1 | Session expirée **avant** le premier envoi : 401/403 sur la liste des inventaires ouverts annoncé « Serveur injoignable », sans proposition de reconnexion. | `ApiService.inventairesOuverts` lève `SessionServeurExpiree` (401, 403, « Veuillez vous connecter ») ; la file le distingue d'une panne réseau : message « Session expirée — reconnectez-vous », saisies gardées, **envoi interrompu repris automatiquement après la reconnexion** (`signalerReconnexion`). Nouvelle interface : message avec l'action « Se reconnecter » après « Envoyer les données » (et en mode Direct). | `integration/services_serveur_test.dart` (401 et 403), `e2e/pannes_test.dart` (« Session expirée AVANT le premier envoi ») |
+| A3 | Fenêtre « Ajout Collecte » d'origine qui débordait quand le clavier système était ouvert. | Fenêtre défilante (`scrollable: true`). | `ergonomie/clavier_quantite_test.dart` (B, Collecte origine) |
+| A4 (nouvelle) | Saisie guidée de la nouvelle interface : pendant la recherche par nom, la quantité sortait de l'écran. | Quantité épinglée hors de la liste (voir A5) : elle reste juste au-dessus du clavier système. | `ergonomie/clavier_quantite_test.dart` (C bis, nouvelle) |
+| A5 (nouvelle) | Saisie guidée de la nouvelle interface : quantité cachée derrière le pavé sur 640 dp de haut / texte ×1,3. | Affichage de la quantité tapée **et** rappel compact du produit (`nv-zone-quantite`, `nv-produit-compact`) épinglés juste au-dessus du pavé, hors de la liste qui défile : toujours visibles sans défilement. Même enchaînement, mêmes touches, même douchette. Le scan continu n'était pas concerné (feuille de quantité). | `ergonomie/clavier_quantite_test.dart` (A et C, nouvelle) |
+| A6 | Fenêtres de quantité d'origine (« Saisie Rapide », « Ajout Collecte ») qui débordaient en texte ×1,3 (pavé de hauteur fixe 280 dp). | Pavé d'**au moins** 280 dp (aspect identique en ×1,0, plus haut si le texte est agrandi), fenêtre défilante. | `ergonomie/clavier_quantite_test.dart` (A et B, origine) |
 
 Corrigés lors de la mise en place du socle : pastilles de filtre de la nouvelle interface à 44 dp → 48 dp (règle des
 cibles tactiles) ; date de fin de licence du faux serveur figée au 31/12/2027 (les tests seraient devenus rouges à cette

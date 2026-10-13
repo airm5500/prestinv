@@ -64,6 +64,10 @@ class SaisieQueue extends ChangeNotifier {
   /// Durée de validité de la liste des inventaires ouverts lue sur le serveur.
   static const validiteListeOuverts = Duration(seconds: 60);
 
+  /// Session expirée (401 / 403) pendant un envoi, ou avant même le premier : reconnexion proposée.
+  static const messageSessionExpiree =
+      'Session expirée — reconnectez-vous : les saisies sont gardées sur l\'appareil et partiront après la reconnexion.';
+
   static const motifCloture = 'Inventaire clôturé ou supprimé sur le serveur : quantité non envoyée.';
 
   SaisieQueue({required this.store, DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
@@ -75,6 +79,10 @@ class SaisieQueue extends ChangeNotifier {
   Future<BilanEnvoi>? _envoiGroupe;
   String? _derniereErreur;
   bool _sessionExpiree = false;
+
+  /// Envoi groupé demandé puis interrompu par une session expirée : repris après la reconnexion
+  /// (clé : inventaire concerné, '' = tous).
+  String? _envoiARependre;
   InventairesOuverts? _ouverts;
   DateTime? _ouvertsLe;
   Timer? _reprise;
@@ -375,7 +383,14 @@ class SaisieQueue extends ChangeNotifier {
     if (s.envoyee) return ReponseEnvoi.ok;
     final serveur = _serveur();
     if (serveur == null) return const ReponseEnvoi(ResultatEnvoi.session, 'Non connecté au serveur.');
-    final ouvert = await _inventaireOuvert(serveur, inventaireId);
+    final bool? ouvert;
+    try {
+      ouvert = await _inventaireOuvert(serveur, inventaireId);
+    } on SessionServeurExpiree {
+      const r = ReponseEnvoi(ResultatEnvoi.session, messageSessionExpiree);
+      _noterResultat(r);
+      return r;
+    }
     if (ouvert == null) {
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Serveur injoignable : impossible de vérifier l\'inventaire.');
     }
@@ -425,7 +440,18 @@ class SaisieQueue extends ChangeNotifier {
     // Inventaires clôturés : rien n'est envoyé, les saisies passent en « refusées ».
     var refusees = 0;
     for (final inv in candidates.map((s) => s.inventaireId).toSet()) {
-      final ouvert = await _inventaireOuvert(serveur, inv);
+      final bool? ouvert;
+      try {
+        ouvert = await _inventaireOuvert(serveur, inv);
+      } on SessionServeurExpiree {
+        // 401 / 403 dès la vérification de l'inventaire (session expirée AVANT tout envoi) : ce n'est
+        // pas une panne réseau, il faut se reconnecter. Rien n'est perdu ; l'envoi reprend ensuite.
+        _sessionExpiree = true;
+        _derniereErreur = messageSessionExpiree;
+        if (!seulementAuto) _envoiARependre = inventaireId ?? '';
+        notifyListeners();
+        return BilanEnvoi(restantes: candidates.length, interruption: messageSessionExpiree, sessionExpiree: true);
+      }
       if (ouvert == null) {
         const msg = 'Serveur injoignable : saisies gardées sur l\'appareil, nouvel essai automatique.';
         _derniereErreur = msg;
@@ -456,7 +482,7 @@ class SaisieQueue extends ChangeNotifier {
         case ResultatEnvoi.reseau:
           interruption = r.message.isEmpty ? 'Serveur injoignable.' : r.message;
         case ResultatEnvoi.session:
-          interruption = 'Session expirée : reconnectez-vous (les saisies sont gardées sur l\'appareil).';
+          interruption = messageSessionExpiree;
           session = true;
       }
       if (interruption != null) break;
@@ -464,8 +490,10 @@ class SaisieQueue extends ChangeNotifier {
     _derniereErreur = interruption;
     if (session) {
       _sessionExpiree = true;
+      if (!seulementAuto) _envoiARependre = inventaireId ?? '';
     } else if (interruption == null) {
       _sessionExpiree = false;
+      _envoiARependre = null;
     }
     final restantes = aEnvoyer().length;
     notifyListeners();
@@ -498,8 +526,15 @@ class SaisieQueue extends ChangeNotifier {
   void signalerReconnexion() {
     _sessionExpiree = false;
     _derniereErreur = null;
+    final reprise = _envoiARependre;
+    _envoiARependre = null;
     notifyListeners();
-    unawaited(relancer());
+    // Envoi demandé puis interrompu par la session : il reprend tel quel ; sinon envoi automatique.
+    if (reprise != null) {
+      unawaited(envoyer(inventaireId: reprise.isEmpty ? null : reprise));
+    } else {
+      unawaited(relancer());
+    }
   }
 
   @override

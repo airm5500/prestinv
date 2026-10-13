@@ -48,7 +48,12 @@ void main() {
     expect(q2.enAttente(), 3);
     serveur.panne = null;
     q2.signalerReconnexion();
-    await Future<void>.delayed(const Duration(milliseconds: 100));
+    // Envoi réel sur disque : on attend la fin de l'envoi (et non un délai fixe, trop court quand toute
+    // la suite tourne en parallèle).
+    final limite = DateTime.now().add(const Duration(seconds: 10));
+    do {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    } while ((q2.envoiEnCours || q2.enAttente() > 0) && DateTime.now().isBefore(limite));
     expect(serveur.quantites, {1: 1, 2: 2, 3: 3});
   });
 }

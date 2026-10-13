@@ -287,6 +287,7 @@ mixin SaisieCommune<T extends StatefulWidget> on State<T>, DouchetteCibleMixin<T
     if (q == null) return;
     q.envoyerLigne(inventoryId, product.id).then((r) {
       if (!r.estOk && mounted) {
+        if (r.type == ResultatEnvoi.session) return proposerReconnexion();
         messageEnvoiDirect(
             context, r.type == ResultatEnvoi.refus ? r.message : 'Non envoyé (réseau) : gardé sur l\'appareil, nouvel essai automatique.');
       }
@@ -328,6 +329,8 @@ mixin SaisieCommune<T extends StatefulWidget> on State<T>, DouchetteCibleMixin<T
     final bilan = await provider.envoyerInventaire(inventoryId, (a, b) => progression.value = 'Envoi… ($a/$b)');
     if (bilan.complet && bilan.refusees == 0) {
       progression.value = '${bilan.envoyees} article(s) traité(s) avec succès.';
+    } else if (bilan.sessionExpiree) {
+      progression.value = SaisieQueue.messageSessionExpiree;
     } else if (bilan.envoyees > 0) {
       progression.value = 'Réseau instable : ${bilan.envoyees}/$enAttente envoyé(s). Le reste est gardé sur l\'appareil (« À envoyer »).';
     } else if (bilan.refusees > 0 && bilan.interruption == null) {
@@ -339,7 +342,18 @@ mixin SaisieCommune<T extends StatefulWidget> on State<T>, DouchetteCibleMixin<T
     _rappel?.cancel();
     await Future<void>.delayed(const Duration(milliseconds: 2500));
     if (mounted) Navigator.of(context).pop();
+    if (bilan.sessionExpiree && mounted) proposerReconnexion();
     return bilan.complet;
+  }
+
+  /// Session expirée (401 / 403) : message et action « Se reconnecter » ; après la reconnexion, la
+  /// file reprend l'envoi interrompu (saisies gardées sur l'appareil).
+  void proposerReconnexion() {
+    nvMessage(context, 'Session expirée — reconnectez-vous',
+        key: const ValueKey('nv-session-expiree'),
+        ton: context.nv.erreur,
+        duree: const Duration(seconds: 10),
+        action: SnackBarAction(label: 'Se reconnecter', onPressed: () => demanderReconnexion(context)));
   }
 
   /// Rappel d'envoi (mode Collecte), comme l'écran d'origine.

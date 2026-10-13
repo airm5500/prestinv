@@ -136,6 +136,47 @@ void main() {
     });
   });
 
+  group('Session expirée AVANT le premier envoi (A1) → « Session expirée — reconnectez-vous », jamais « Serveur injoignable »', () {
+    testWidgets('nouvelle interface : saisies gardées, envoyées après la reconnexion', (tester) async {
+      tailleEcran(tester, telephone360);
+      final app = await lancerApplication(tester);
+      await seConnecter(tester);
+      await toucher(tester, find.byKey(const ValueKey('nv-saisie-guidee')));
+      await tester.pumpAndSettle();
+      await toucher(tester, find.text('S2B2 – ANTIBIOTIQUES'));
+      await tester.pumpAndSettle();
+      final nomProduit = tester.widget<Text>(find.byKey(const ValueKey('nv-produit-courant'))).data!;
+      final ligne = app.serveur.catalogue.produits.firstWhere((p) => p.nom == nomProduit);
+      await taperNv(tester, '7');
+      await tester.pumpAndSettle();
+      expect(app.saisies.ligne('INV1', ligne.id)!.enAttente, isTrue);
+
+      app.serveur.expirerSessions();
+      await tester.tap(find.byKey(const ValueKey('nv-menu-guidee')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Envoyer les données'));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.textContaining('Session expirée — reconnectez-vous'), findsWidgets);
+      expect(find.textContaining('injoignable'), findsNothing);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('nv-session-expiree')), findsOneWidget);
+      expect(app.saisies.sessionExpiree, isTrue);
+      expect(app.saisies.ligne('INV1', ligne.id)!.enAttente, isTrue, reason: 'saisie gardée sur l\'appareil');
+
+      await tester.tap(find.widgetWithText(SnackBarAction, 'Se reconnecter'));
+      await tester.pumpAndSettle();
+      await reconnecterDansFenetre(tester);
+      await tester.pumpAndSettle();
+      expect(app.auth.sessionCookie, 'JSESSIONID=essai-2');
+      expect(find.byType(NvSaisieGuideeScreen), findsOneWidget, reason: 'écran conservé');
+      expect(app.serveur.catalogue.produit(ligne.id).saisi, 7, reason: 'envoi repris après la reconnexion');
+      expect(app.saisies.enAttente(), 0);
+      expect(app.saisies.sessionExpiree, isFalse);
+      await fermerApplication(tester);
+    });
+  });
+
   group('Serveur coupé en cours de travail → message réseau, Réessayer', () {
     testWidgets('nouvelle interface', (tester) async {
       tailleEcran(tester, telephone360);

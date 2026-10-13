@@ -34,6 +34,16 @@ class InventairesOuverts {
   const InventairesOuverts(this.ids);
 }
 
+/// Le serveur refuse la lecture faute de session valide (401 / 403, ou réponse « Veuillez vous
+/// connecter ») : il faut se reconnecter, ce n'est PAS une panne réseau.
+class SessionServeurExpiree implements Exception {
+  final String message;
+  const SessionServeurExpiree([this.message = 'Session expirée.']);
+
+  @override
+  String toString() => message;
+}
+
 abstract class SaisieServeur {
   /// Pose la quantité TOTALE [quantite] sur la ligne [ligneId]. Ne lève jamais : le résultat est classé.
   Future<ReponseEnvoi> poserQuantite(int ligneId, int quantite);
@@ -44,5 +54,6 @@ abstract class SaisieServeur {
   Future<ReponseEnvoi> poserQuantiteSession(int ligneId, int quantite);
 
   /// Identifiants des inventaires encore ouverts sur le serveur (`null` si la liste n'a pas pu être lue).
+  /// Session expirée ou accès refusé : lève [SessionServeurExpiree].
   Future<InventairesOuverts?> inventairesOuverts();
 }

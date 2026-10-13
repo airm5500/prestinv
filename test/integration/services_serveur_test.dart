@@ -328,10 +328,10 @@ void main() {
       expect(serveur.catalogue.produit(10).saisi, 9);
     });
 
-    // ANOMALIE CONNUE A1 (test/README.md) : si la session a expiré AVANT tout envoi, la lecture des
-    // inventaires ouverts reçoit 401, que la file confond avec « serveur injoignable » : message réseau
-    // affiché, pas de proposition de reconnexion (les saisies, elles, sont bien gardées).
-    test('session expirée avant le premier envoi : signalée comme session expirée', () async {
+    // Anomalie A1 (corrigée) : si la session a expiré AVANT tout envoi, la lecture des inventaires
+    // ouverts reçoit 401 ; la file l'annonçait « serveur injoignable ». Elle propose désormais de se
+    // reconnecter, garde les saisies et les envoie après la reconnexion.
+    test('session expirée avant le premier envoi : signalée comme session expirée, envoi repris après reconnexion', () async {
       final (auth, config) = await connecte();
       final q = SaisieQueue(store: DisqueMemoire());
       q.serveurFactory = () => ApiService(baseUrl: config.currentApiUrl, cookie: () => auth.sessionCookie);
@@ -339,9 +339,32 @@ void main() {
       await q.enregistrer(inventaireId: 'INV1', ligneId: 10, quantite: 9);
       serveur.expirerSessions();
       final bilan = await q.envoyer();
-      expect(q.enAttente(), 1, reason: 'saisie gardée (vérifié, OK aujourd\'hui)');
+      expect(q.enAttente(), 1, reason: 'saisie gardée');
       expect(bilan.sessionExpiree, isTrue);
-    }, skip: 'Anomalie connue A1 : 401 sur la liste des inventaires ouverts lu comme « serveur injoignable » (voir test/README.md)');
+      expect(q.sessionExpiree, isTrue);
+      expect(bilan.interruption, startsWith('Session expirée — reconnectez-vous'));
+      expect(q.derniereErreur, isNot(contains('injoignable')));
+      expect(await auth.login(CompteFictif.login, CompteFictif.motDePasse, config), isTrue);
+      q.signalerReconnexion();
+      final limite = DateTime.now().add(const Duration(seconds: 10));
+      while ((q.envoiEnCours || q.enAttente() > 0) && DateTime.now().isBefore(limite)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(serveur.catalogue.produit(10).saisi, 9, reason: 'envoyée après la reconnexion');
+      expect(q.sessionExpiree, isFalse);
+    });
+
+    test('403 sur la liste des inventaires ouverts : session expirée aussi (pas « serveur injoignable »)', () async {
+      final (auth, config) = await connecte();
+      final q = SaisieQueue(store: DisqueMemoire());
+      q.serveurFactory = () => ApiService(baseUrl: config.currentApiUrl, cookie: () => auth.sessionCookie);
+      await q.load();
+      await q.enregistrer(inventaireId: 'INV1', ligneId: 10, quantite: 9);
+      serveur.scripter('ws/inventaires', ReponseScriptee.code(403));
+      final bilan = await q.envoyer();
+      expect(bilan.sessionExpiree, isTrue);
+      expect(q.enAttente(), 1);
+    });
 
     test('versement d\'une collecte hors ligne : codes reconnus posés (route avec auteur), inconnus au rapport', () async {
       final (auth, config) = await connecte();
