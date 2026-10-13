@@ -38,6 +38,11 @@ abstract class SaisieServeur {
   /// Pose la quantité TOTALE [quantite] sur la ligne [ligneId]. Ne lève jamais : le résultat est classé.
   Future<ReponseEnvoi> poserQuantite(int ligneId, int quantite);
 
+  /// Comme [poserQuantite], par la route qui exige la session et enregistre l'AUTEUR de la saisie
+  /// (`POST /inventaire/ligne/quantite`) ; serveur sans cette route : route habituelle.
+  /// Utilisée pour le versement de la collecte.
+  Future<ReponseEnvoi> poserQuantiteSession(int ligneId, int quantite);
+
   /// Identifiants des inventaires encore ouverts sur le serveur (`null` si la liste n'a pas pu être lue).
   Future<InventairesOuverts?> inventairesOuverts();
 }

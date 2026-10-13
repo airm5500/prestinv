@@ -56,6 +56,15 @@ class FauxServeur implements SaisieServeur {
     }
   }
 
+  /// Requêtes reçues par la route « avec auteur » (versement de la collecte).
+  final List<(int, int)> requetesSession = [];
+
+  @override
+  Future<ReponseEnvoi> poserQuantiteSession(int ligneId, int quantite) {
+    requetesSession.add((ligneId, quantite));
+    return poserQuantite(ligneId, quantite);
+  }
+
   @override
   Future<InventairesOuverts?> inventairesOuverts() async {
     if (panne == ResultatEnvoi.reseau) return null;

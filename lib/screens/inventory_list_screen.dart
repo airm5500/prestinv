@@ -11,6 +11,8 @@ import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/screens/global_variance_screen.dart';
 import 'package:prestinv/screens/uncounted_screen.dart'; // NOUVEAU IMPORT
 import 'package:prestinv/widgets/chargement_erreur.dart';
+import 'package:prestinv/models/inventory.dart';
+import 'package:prestinv/screens/creation_inventaire_screen.dart';
 
 class InventoryListScreen extends StatefulWidget {
   final bool isQuickMode;
@@ -51,6 +53,16 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
         .fetchInventories(apiService, maxResult: appConfig.maxResult);
   }
 
+  /// Nouvel inventaire créé depuis le terminal : la liste est relue, il y apparaît (en tête).
+  String? _nouveauId;
+
+  Future<void> _nouvelInventaire() async {
+    final cree = await Navigator.of(context).push<Inventory>(MaterialPageRoute(builder: (_) => const CreationInventaireScreen()));
+    if (!mounted || cree == null) return;
+    setState(() => _nouveauId = cree.id);
+    await _refreshInventories();
+  }
+
   @override
   Widget build(BuildContext context) {
     String title = 'Choisir un inventaire';
@@ -61,6 +73,14 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
+        actions: [
+          IconButton(
+            key: const ValueKey('nouvel-inventaire'),
+            icon: const Icon(Icons.add_box_outlined),
+            tooltip: 'Nouvel inventaire',
+            onPressed: _nouvelInventaire,
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _refreshInventories,
@@ -85,6 +105,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 child: ListTile(
                   title: Text(provider.inventories[i].libelle),
+                  subtitle: provider.inventories[i].id == _nouveauId ? const Text('Nouveau — créé depuis ce terminal') : null,
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () {
                     // --- ROUTAGE SELON LE MODE ---

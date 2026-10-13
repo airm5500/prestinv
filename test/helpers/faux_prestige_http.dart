@@ -15,7 +15,13 @@ class FauxProduit {
   final int theorique;
   int saisi;
   String? dtUpdated;
-  FauxProduit(this.id, this.cip, this.nom, this.rayon, this.theorique, {int? saisi}) : saisi = saisi ?? theorique;
+
+  /// EAN-13 (reconnu par la recherche du serveur, absent de la réponse comme sur le vrai serveur).
+  final String? ean;
+
+  /// Auteur de la dernière quantité posée par la route « avec auteur ».
+  String? auteur;
+  FauxProduit(this.id, this.cip, this.nom, this.rayon, this.theorique, {int? saisi, this.ean}) : saisi = saisi ?? theorique;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -57,6 +63,21 @@ class FauxPrestige {
   final List<(int, int)> puts = [];
   final List<String> appels = [];
 
+  /// Quantités reçues par POST /inventaire/ligne/quantite (route qui enregistre l'auteur).
+  final List<(int, int)> postsQuantite = [];
+
+  /// Demandes de création reçues (libellé, type).
+  final List<(String, String)> creations = [];
+
+  /// Route POST /inventaire/ligne/quantite absente (ancien serveur : 404).
+  bool sansRouteLigneQuantite = false;
+
+  /// Création : réponse forcée (corps JSON) ; null = succès.
+  Map<String, dynamic>? reponseCreation;
+
+  /// Création : la réponse se perd (réseau coupé APRÈS que le serveur a créé l'inventaire).
+  bool creationReponsePerdue = false;
+
   FauxPrestige({int nombre = 60}) {
     for (var i = 1; i <= nombre; i++) {
       produits.add(FauxProduit(1000 + i, '3400${i.toString().padLeft(9, '0')}', 'PRODUIT ${i.toString().padLeft(3, '0')}', i.isEven ? 'R2' : 'R1', i % 7));
@@ -79,11 +100,41 @@ class FauxPrestige {
     if (code != null) return http.Response('', code);
     final q = req.url.queryParameters;
     final query = (q['query'] ?? '').toLowerCase();
-    bool correspond(FauxProduit p) => query.isEmpty || p.cip.contains(query) || p.nom.toLowerCase().contains(query);
+    bool correspond(FauxProduit p) =>
+        query.isEmpty || p.cip.contains(query) || p.nom.toLowerCase().contains(query) || (p.ean != null && p.ean!.startsWith(query));
     List<FauxProduit> touches() => produits.where((p) => p.dtUpdated != null).toList();
     http.Response liste(Iterable<FauxProduit> ps) =>
         http.Response.bytes(utf8.encode(json.encode(ps.map((p) => p.toJson()).toList())), 200, headers: {'content-type': 'application/json; charset=utf-8'});
 
+    if (req.method == 'POST' && fin == 'quantite') {
+      if (sansRouteLigneQuantite) return http.Response('', 404);
+      if (verrouPut != null) await verrouPut!.future;
+      final b = json.decode(req.body) as Map<String, dynamic>;
+      final id = int.tryParse('${b['lg_INVENTAIRE_FAMILLE_ID']}');
+      final quantite = (b['int_NUMBER'] as num?)?.toInt();
+      if (quantite == null || quantite < 0) return http.Response(json.encode({'success': 0, 'errors': 'Quantite invalide.'}), 200);
+      final p = produits.where((p) => p.id == id).firstOrNull;
+      if (p == null) return http.Response(json.encode({'success': 0, 'errors': "Cette ligne d'inventaire n'existe plus."}), 200);
+      postsQuantite.add((p.id, quantite));
+      p
+        ..saisi = quantite
+        ..dtUpdated = '2026-10-13T10:00:00'
+        ..auteur = 'admin';
+      return http.Response(json.encode({'success': 1, 'int_NUMBER': quantite}), 200);
+    }
+    if (req.method == 'POST' && fin == 'creation') {
+      final b = json.decode(req.body) as Map<String, dynamic>;
+      final nom = '${b['str_NAME'] ?? ''}'.trim();
+      final type = '${b['str_TYPE_TRANSACTION'] ?? ''}'.trim();
+      creations.add((nom, type));
+      if (reponseCreation != null) return http.Response.bytes(utf8.encode(json.encode(reponseCreation)), 200);
+      if (nom.isEmpty) return http.Response(json.encode({'success': 0, 'message': 'Indiquez un libelle pour cet inventaire.'}), 200);
+      if (type.isEmpty) return http.Response(json.encode({'success': 0, 'message': "Choisissez un type d'inventaire."}), 200);
+      // Le plus récent en tête (ORDER BY dtCREATED DESC).
+      inventaires = {'NEW${creations.length}': nom, ...inventaires};
+      if (creationReponsePerdue) throw const SocketException('Connection reset');
+      return http.Response(json.encode({'success': 1, 'lignes': produits.length, 'nombre': '${produits.length} article(s) inventorie(s)'}), 200);
+    }
     if (req.method == 'PUT' && fin == 'details') {
       if (verrouPut != null) await verrouPut!.future;
       final b = json.decode(req.body) as Map<String, dynamic>;
@@ -121,5 +172,19 @@ class FauxPrestige {
         return http.Response(json.encode({'success': true, 'str_LOGIN': 'admin', 'str_FIRST_NAME': 'Test'}), 200, headers: {'set-cookie': 'JSESSIONID=abc; Path=/'});
     }
     return http.Response('', 404);
+  }
+}
+
+/// Client HTTP qui délègue à [interne] mais coupe (erreur réseau) les requêtes désignées par [coupe].
+abstract class BaseClientDelegue extends http.BaseClient {
+  final http.Client interne;
+  BaseClientDelegue(this.interne);
+
+  bool coupe(Uri url, String methode);
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    if (coupe(request.url, request.method)) throw const SocketException('Connexion coupée (essai)');
+    return interne.send(request);
   }
 }

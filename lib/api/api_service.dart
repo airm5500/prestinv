@@ -57,6 +57,9 @@ class ApiService implements SaisieServeur {
 
   Future<http.Response> _httpGet(Uri url) => _client != null ? _client!.get(url, headers: _getHeaders()) : http.get(url, headers: _getHeaders());
 
+  Future<http.Response> _httpPost(Uri url, String body) =>
+      _client != null ? _client!.post(url, headers: _getHeaders(), body: body) : http.post(url, headers: _getHeaders(), body: body);
+
   Future<http.Response> _httpPut(Uri url, String body) =>
       _client != null ? _client!.put(url, headers: _getHeaders(), body: body) : http.put(url, headers: _getHeaders(), body: body);
 
@@ -75,6 +78,54 @@ class ApiService implements SaisieServeur {
       if (code == 401 || code == 403) return ReponseEnvoi(ResultatEnvoi.session, 'Session expirée ou accès refusé (code $code).');
       if (code >= 400 && code < 500) return ReponseEnvoi(ResultatEnvoi.refus, 'Le serveur a refusé la quantité (code $code).');
       return ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Erreur du serveur (code $code).');
+    } on TimeoutException {
+      return const ReponseEnvoi(ResultatEnvoi.reseau, 'Le serveur met trop de temps à répondre.');
+    } catch (e) {
+      if (_estErreurReseau(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, 'Serveur injoignable.');
+      return ReponseEnvoi(ResultatEnvoi.reseau, 'Envoi impossible : $e');
+    }
+  }
+
+  /// Serveurs (adresse de base) sans la route `POST /inventaire/ligne/quantite` (anciennes versions de
+  /// Prestige) : la route habituelle est utilisée directement.
+  static final Set<String> _sansRouteSession = {};
+
+  /// Tests : oublie les serveurs mémorisés sans route « avec auteur ».
+  static void oublierRoutesAbsentes() => _sansRouteSession.clear();
+
+  /// Pose la quantité TOTALE par `POST /inventaire/ligne/quantite` {lg_INVENTAIRE_FAMILLE_ID, int_NUMBER} :
+  /// session exigée, AUTEUR enregistré par le serveur (str_UPDATED_ID). Réponses du serveur :
+  /// {"success":1,"int_NUMBER":q} ; refus {"success":0,"errors":"…"} (ligne inexistante, quantité
+  /// invalide) ; 401 sans session. Route absente (404/405, serveur plus ancien) : route habituelle
+  /// (PUT /ws/inventaires/details). Ne lève jamais.
+  @override
+  Future<ReponseEnvoi> poserQuantiteSession(int ligneId, int quantite) async {
+    if (_sansRouteSession.contains(baseUrl)) return poserQuantite(ligneId, quantite);
+    final url = Uri.parse('$baseUrl/api/v1/inventaire/ligne/quantite');
+    try {
+      final response = await _httpPost(url, jsonEncode({'lg_INVENTAIRE_FAMILLE_ID': '$ligneId', 'int_NUMBER': quantite}))
+          .timeout(const Duration(seconds: 15));
+      final code = response.statusCode;
+      if (code == 404 || code == 405) {
+        _sansRouteSession.add(baseUrl);
+        return poserQuantite(ligneId, quantite);
+      }
+      if (code == 401 || code == 403) return ReponseEnvoi(ResultatEnvoi.session, 'Session expirée ou accès refusé (code $code).');
+      if (code >= 500) return ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Erreur du serveur (code $code).');
+      if (code >= 400) return ReponseEnvoi(ResultatEnvoi.refus, 'Le serveur a refusé la quantité (code $code).');
+      final dynamic data;
+      try {
+        data = json.decode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        return const ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Réponse illisible du serveur.');
+      }
+      if (data is! Map) return const ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Réponse inattendue du serveur.');
+      final succes = data['success'];
+      if (succes == 1 || succes == true) return ReponseEnvoi.ok;
+      final message = '${data['errors'] ?? data['message'] ?? data['msg'] ?? 'Quantité refusée.'}';
+      // Session perdue côté serveur (réponse « Veuillez vous connecter »).
+      if (message.toLowerCase().contains('connecter')) return ReponseEnvoi(ResultatEnvoi.session, message);
+      return ReponseEnvoi(ResultatEnvoi.refus, message);
     } on TimeoutException {
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Le serveur met trop de temps à répondre.');
     } catch (e) {
@@ -150,6 +201,51 @@ class ApiService implements SaisieServeur {
 
   Future<List<Inventory>> fetchInventories({int maxResult = 3}) =>
       _loadList('inventaires', _uri('', {'maxResult': '$maxResult'}), Inventory.fromJson);
+
+  /// TOUS les inventaires ouverts, du plus récent au plus ancien (choix de l'inventaire d'un versement,
+  /// contrôle des doublons à la création).
+  Future<List<Inventory>> fetchTousInventairesOuverts() => _loadList('inventaires', _uri('', {}), Inventory.fromJson);
+
+  /// Création d'un inventaire : `POST /inventaire/creation` {str_NAME, str_TYPE_TRANSACTION}.
+  ///
+  /// Comportement du serveur (InventaireRessource.creerInventaire, vérifié) : session exigée (401
+  /// sinon) ; libellé et type obligatoires (refus lisible {"success":0,"message":…}) ; types
+  /// reconnus : Emplacement, Famille, Grossiste. Sans valeurs choisies, l'inventaire est PRÉ-REMPLI
+  /// avec TOUS les produits actifs de l'officine (une ligne par produit, stock théorique = stock
+  /// disponible, non comptée) ; aucun produit → aucun inventaire. Réponse : {"success":1,"lignes":N}.
+  /// La réponse ne donne pas l'identifiant : il est relu dans la liste des inventaires ouverts.
+  Future<ResultatCreationServeur> creerInventaire(String libelle, String type) async {
+    final url = Uri.parse('$baseUrl/api/v1/inventaire/creation');
+    final http.Response response;
+    try {
+      response = await _httpPost(url, jsonEncode({'str_NAME': libelle, 'str_TYPE_TRANSACTION': type}))
+          // Plusieurs milliers de produits : la création peut prendre du temps.
+          .timeout(const Duration(seconds: 180));
+    } on TimeoutException {
+      return const ResultatCreationServeur.incertain('Le serveur met trop de temps à répondre.');
+    } catch (e) {
+      // La demande a pu partir avant la coupure : on ne sait pas si l'inventaire existe.
+      return ResultatCreationServeur.incertain(_estErreurReseau(e) ? 'Serveur injoignable.' : 'Création impossible : $e');
+    }
+    final code = response.statusCode;
+    if (code == 401 || code == 403) return const ResultatCreationServeur.session();
+    dynamic data;
+    try {
+      data = json.decode(utf8.decode(response.bodyBytes));
+    } catch (_) {
+      data = null;
+    }
+    final m = data is Map ? data : const {};
+    final message = '${m['message'] ?? m['nombre'] ?? m['msg'] ?? ''}'.trim();
+    if (code >= 500) {
+      return ResultatCreationServeur.refus(message.isEmpty ? 'Erreur du serveur (code $code).' : 'Erreur du serveur : $message');
+    }
+    if (code != 200 || data is! Map) return ResultatCreationServeur.refus('Le serveur a refusé la création (code $code).');
+    final succes = m['success'];
+    if (succes == 1 || succes == true) return ResultatCreationServeur.ok((m['lignes'] as num?)?.toInt());
+    if (message.toLowerCase().contains('connecter')) return const ResultatCreationServeur.session();
+    return ResultatCreationServeur.refus(message.isEmpty ? 'Création refusée par le serveur.' : message);
+  }
 
   // --- CUMUL / VERIFICATION ---
 
@@ -307,4 +403,41 @@ class ApiService implements SaisieServeur {
       throw const ApiLoadException('Aucune licence enregistrée sur le serveur.', TypeErreurChargement.donnees);
     }
   }
+}
+
+/// Réponse du serveur à une demande de création d'inventaire.
+class ResultatCreationServeur {
+  final bool succes;
+
+  /// Lignes créées (produits mis dans l'inventaire).
+  final int? lignes;
+
+  /// Session expirée / non connecté.
+  final bool session;
+
+  /// Pas de réponse (réseau, délai) : l'inventaire a PEUT-ÊTRE été créé.
+  final bool incertain;
+  final String message;
+
+  const ResultatCreationServeur.ok(this.lignes)
+      : succes = true,
+        session = false,
+        incertain = false,
+        message = '';
+  const ResultatCreationServeur.refus(this.message)
+      : succes = false,
+        lignes = null,
+        session = false,
+        incertain = false;
+  const ResultatCreationServeur.session()
+      : succes = false,
+        lignes = null,
+        session = true,
+        incertain = false,
+        message = 'Session expirée : reconnectez-vous.';
+  const ResultatCreationServeur.incertain(this.message)
+      : succes = false,
+        lignes = null,
+        session = false,
+        incertain = true;
 }
