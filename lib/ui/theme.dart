@@ -185,6 +185,10 @@ ThemeData themeNouveau(Brightness b) {
     outline: c.ligne,
   );
   final rond = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
+  // Styles des boutons construits sur la typographie Material (police Roboto du système).
+  final typo = ThemeData(useMaterial3: true, brightness: b).textTheme;
+  final bouton = typo.labelLarge!.copyWith(fontWeight: FontWeight.w600, fontSize: 15);
+  final boutonFort = typo.labelLarge!.copyWith(fontWeight: FontWeight.bold, fontSize: 15);
   return ThemeData(
     useMaterial3: true,
     brightness: b,
@@ -209,7 +213,7 @@ ThemeData themeNouveau(Brightness b) {
         foregroundColor: Colors.white,
         minimumSize: const Size(48, 48),
         shape: rond,
-        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+        textStyle: bouton,
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
@@ -218,7 +222,7 @@ ThemeData themeNouveau(Brightness b) {
         foregroundColor: Pal.onAmber,
         minimumSize: const Size(48, 48),
         shape: rond,
-        textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        textStyle: boutonFort,
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -227,11 +231,11 @@ ThemeData themeNouveau(Brightness b) {
         minimumSize: const Size(48, 48),
         side: BorderSide(color: c.action, width: 1.5),
         shape: rond,
-        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+        textStyle: bouton,
       ),
     ),
     textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(foregroundColor: c.action, minimumSize: const Size(48, 48), textStyle: const TextStyle(fontWeight: FontWeight.w600)),
+      style: TextButton.styleFrom(foregroundColor: c.action, minimumSize: const Size(48, 48), textStyle: bouton),
     ),
     iconButtonTheme: IconButtonThemeData(style: IconButton.styleFrom(minimumSize: const Size(48, 48))),
     inputDecorationTheme: InputDecorationTheme(

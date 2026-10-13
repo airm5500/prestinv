@@ -6,18 +6,33 @@ import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/screens/config_screen.dart';
 import 'package:prestinv/interface_version.dart';
+import 'package:prestinv/ui/ecrans/connexion_screen.dart';
+import 'package:prestinv/ui/theme.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:prestinv/services/identifiants_securises.dart';
 
-class LoginScreen extends StatefulWidget {
+/// Connexion : aiguillage selon l'interrupteur « Nouvelle interface » (InterfaceVersion) — nouvel écran
+/// (lib/ui/ecrans/connexion_screen.dart) ou écran d'origine ([AncienLoginScreen], inchangé).
+class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+        valueListenable: InterfaceVersion.useNew,
+        builder: (context, nouvelle, _) => nouvelle ? const NvTheme(child: NvConnexionScreen()) : const AncienLoginScreen(),
+      );
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+/// Écran de connexion d'origine (logique et présentation inchangées).
+class AncienLoginScreen extends StatefulWidget {
+  const AncienLoginScreen({super.key});
+
+  @override
+  State<AncienLoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<AncienLoginScreen> {
   final _loginController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isPasswordVisible = false;

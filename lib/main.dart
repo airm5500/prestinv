@@ -9,7 +9,7 @@ import 'package:provider/provider.dart';
 
 // --- IMPORTS CONFIG & API ---
 import 'package:prestinv/config/app_config.dart';
-import 'package:prestinv/config/app_colors.dart';
+import 'package:prestinv/config/theme_origine.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
@@ -25,8 +25,6 @@ import 'package:prestinv/providers/license_provider.dart';
 // --- IMPORTS ÉCRANS ---
 import 'package:prestinv/interface_version.dart';
 import 'package:prestinv/screens/login_screen.dart';
-import 'package:prestinv/screens/license_register_screen.dart';
-import 'package:prestinv/screens/serveur_injoignable_screen.dart';
 
 void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -224,16 +222,14 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
           Widget homeWidget;
 
           if (license.status == LicenseStatus.loading) {
-            homeWidget = const Scaffold(
-                body: Center(child: CircularProgressIndicator())
-            );
+            homeWidget = InterfaceVersion.lancement();
           }
           else if (license.status == LicenseStatus.unreachable) {
             // Serveur injoignable ≠ « Application non activée » : réessai automatique toutes les 10 s.
-            homeWidget = ServeurInjoignableScreen(reessayer: () => _checkLicense());
+            homeWidget = InterfaceVersion.serveurInjoignable(() => _checkLicense());
           }
           else if (license.status == LicenseStatus.none || license.status == LicenseStatus.expired) {
-            homeWidget = const LicenseRegisterScreen();
+            homeWidget = InterfaceVersion.licence();
           }
           else if (auth.isLoggedIn) {
             homeWidget = InterfaceVersion.home();
@@ -246,52 +242,7 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
             navigatorKey: navigateurApp,
             title: 'Prestige Inventaire',
             debugShowCheckedModeBanner: false,
-            theme: ThemeData(
-                primaryColor: AppColors.primary,
-                scaffoldBackgroundColor: AppColors.background,
-                colorScheme: const ColorScheme.light(
-                  primary: AppColors.primary,
-                  secondary: AppColors.accent,
-                  onPrimary: AppColors.white,
-                  onSecondary: AppColors.white,
-                ),
-                appBarTheme: const AppBarTheme(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: AppColors.white,
-                  elevation: 2,
-                ),
-                elevatedButtonTheme: ElevatedButtonThemeData(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.accent,
-                    foregroundColor: AppColors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-                    textStyle: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                floatingActionButtonTheme: const FloatingActionButtonThemeData(
-                  backgroundColor: AppColors.accent,
-                  foregroundColor: AppColors.white,
-                ),
-                inputDecorationTheme: InputDecorationTheme(
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: Colors.grey.shade300),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.accent, width: 2),
-                  ),
-                  labelStyle: TextStyle(color: Colors.grey.shade600),
-                  filled: true,
-                  fillColor: Colors.white,
-                ),
-                cardTheme: CardThemeData(
-                  elevation: 1,
-                  shadowColor: Colors.grey.withOpacity(0.2),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                )
-            ),
+            theme: themeOrigine(),
             home: homeWidget,
           );
         },

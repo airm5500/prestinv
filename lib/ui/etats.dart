@@ -93,6 +93,29 @@ class NvVide extends StatelessWidget {
       );
 }
 
+/// Libère des contrôleurs quand le widget quitte l'écran (après l'animation de fermeture d'une fenêtre).
+class LibererApres extends StatefulWidget {
+  final List<ChangeNotifier> objets;
+  final Widget child;
+  const LibererApres({super.key, required this.objets, required this.child});
+
+  @override
+  State<LibererApres> createState() => _LibererApresState();
+}
+
+class _LibererApresState extends State<LibererApres> {
+  @override
+  void dispose() {
+    for (final o in widget.objets) {
+      o.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 /// Message court en bas d'écran (couleur d'état + libellé).
 void nvMessage(BuildContext context, String texte, {TonEtat? ton, SnackBarAction? action, Duration duree = const Duration(seconds: 3), Key? key}) {
   final m = ScaffoldMessenger.maybeOf(context);
@@ -103,6 +126,8 @@ void nvMessage(BuildContext context, String texte, {TonEtat? ton, SnackBarAction
     key: key,
     duration: duree,
     backgroundColor: t.bg,
+    elevation: 2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: t.fg.withValues(alpha: 0.35))),
     action: action,
     content: Text(texte, style: TextStyle(color: t.fg, fontWeight: FontWeight.w600)),
   ));

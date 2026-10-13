@@ -12,15 +12,31 @@ import 'package:prestinv/screens/analysis_screen.dart';
 import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/screens/collection_screen.dart';
 import 'package:prestinv/screens/a_envoyer_screen.dart';
+import 'package:prestinv/interface_version.dart';
+import 'package:prestinv/ui/ecrans/accueil_screen.dart';
+import 'package:prestinv/ui/theme.dart';
 
-class HomeScreen extends StatefulWidget {
+/// Accueil : aiguillage selon l'interrupteur « Nouvelle interface » (InterfaceVersion) — nouvel accueil
+/// (lib/ui/ecrans/accueil_screen.dart) ou accueil d'origine ([AncienHomeScreen], inchangé).
+class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+        valueListenable: InterfaceVersion.useNew,
+        builder: (context, nouvelle, _) => nouvelle ? const NvTheme(child: NvAccueilScreen()) : const AncienHomeScreen(),
+      );
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+/// Accueil d'origine (logique et présentation inchangées).
+class AncienHomeScreen extends StatefulWidget {
+  const AncienHomeScreen({super.key});
+
+  @override
+  State<AncienHomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<AncienHomeScreen> {
 
   // CORRECTION ICI : Variable statique pour mémoriser si l'alerte a déjà été montrée dans cette session
   static bool _alertShown = false;

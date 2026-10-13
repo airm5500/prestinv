@@ -297,7 +297,7 @@ class SectionTitre extends StatelessWidget {
                   style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: context.nv.gris)),
             ),
           ),
-          if (trailing != null) trailing!,
+          if (trailing != null) Flexible(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: trailing!)),
         ]),
       );
 }
@@ -398,7 +398,11 @@ class Chiffre extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(color: context.nv.page, borderRadius: BorderRadius.circular(12)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: context.nv.gris)),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(label, maxLines: 1, style: TextStyle(fontSize: 12.5, color: context.nv.gris)),
+            ),
             const SizedBox(height: 2),
             FittedBox(
               fit: BoxFit.scaleDown,

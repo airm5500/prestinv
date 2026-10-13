@@ -343,6 +343,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
               keyboardType: TextInputType.number,
               inputFormatters: SaisieInput.quantiteFormatters,
             ),
+            const Divider(height: 32),
+            // Interrupteur « Nouvelle interface » (proposé, désactivé par défaut ; code administrateur).
+            const InterfaceVersionTile(),
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
