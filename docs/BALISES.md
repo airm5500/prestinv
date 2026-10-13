@@ -9,12 +9,13 @@ sur le terrain, on peut reconstruire l'APK d'avant l'étape sans rien chercher d
 | `prestinv-avant-etape-1` | dernier commit de l'étape 0 | Socle : CI, test réparé, mot de passe retiré des tests, version unique 4.9.0+5, interrupteur `InterfaceVersion` (éteint). Aucun écran changé. |
 | `prestinv-avant-etape-2` | dernier commit de l'étape 1 | Fiabilité de la saisie (file locale persistante des saisies, envoi rejouable, « À envoyer », mode Direct par défaut pour les nouvelles installations). |
 | `prestinv-avant-etape-3` | dernier commit de l'étape 2 | Robustesse et sécurité (erreurs ≠ liste vide, session expirée, serveur injoignable ≠ licence, mot de passe chiffré, code administrateur, contrôles de saisie). |
+| `prestinv-avant-refonte` | `c8eaae3` (branche `claude/scan-et-collecte`, version 4.10.0+6) | Avant l'étape 4 « refonte visuelle » (nouvelle interface A / B / C derrière l'interrupteur, version 4.11.0+7, `docs/NOTE_VERSION_REFONTE.md`). |
 | `prestinv-avant-scan-collecte` | `b10e069` (branche `claude/fiabilite-saisie`, version 4.9.0+5) | Avant l'étape 3 « scan » (douchette toujours prête, bips, journal, quantité rapide) et le versement de la collecte / la création d'inventaire (version 4.10.0+6, `docs/NOTE_VERSION_SCAN_COLLECTE.md`). |
 
 Les balises sont créées **localement** ; les publier avec :
 
 ```bash
-git push origin prestinv-avant-etape-0 prestinv-avant-etape-1 prestinv-avant-etape-2 prestinv-avant-etape-3 prestinv-avant-scan-collecte
+git push origin prestinv-avant-etape-0 prestinv-avant-etape-1 prestinv-avant-etape-2 prestinv-avant-etape-3 prestinv-avant-scan-collecte prestinv-avant-refonte
 ```
 
 ## Revenir à une version précédente
@@ -35,10 +36,22 @@ reprises) sont dans `versements_v1`. Une version antérieure ignore simplement l
 
 ## Interrupteur « Nouvelle interface »
 
-`lib/interface_version.dart` (même principe que `prestige_vente_app`). Éteint par défaut ; tant que
-la nouvelle interface (étape 4) n'existe pas, les deux positions ouvrent les écrans d'origine et le
-réglage n'est pas affiché. À l'étape 4 il sera ajouté à la Configuration (`InterfaceVersionTile`) pour
-revenir aux écrans d'origine sans réinstaller.
+`lib/interface_version.dart` (même principe que `prestige_vente_app`). **Désactivé par défaut**
+(installations existantes comme nouvelles), proposé dans la Configuration d'origine et dans la nouvelle
+(« Nouvelle interface », code administrateur). Depuis la 4.11.0 :
+
+- désactivé : écrans d'origine (`lib/screens/…`), contenu inchangé ; seuls `HomeScreen` et
+  `LoginScreen` sont devenus des aiguillages (écrans d'origine renommés `AncienHomeScreen` /
+  `AncienLoginScreen`), et `main.dart` passe par `InterfaceVersion.lancement()`, `.licence()`,
+  `.serveurInjoignable()` ;
+- activé : nouveaux écrans (`lib/ui/ecrans/…`), mêmes données, même file des saisies.
+
+**Revenir en arrière** (trois niveaux, du plus simple au plus radical) :
+1. sur le terminal : Configuration → « Nouvelle interface » → désactiver (code administrateur). Effet
+   immédiat au retour à l'accueil ; rien à réinstaller, aucune donnée touchée ;
+2. pour tout le parc : préférence `interface_nouvelle_version_v1` à `false` (ou ne jamais l'activer) ;
+3. reconstruire l'APK d'avant l'étape 4 : `git checkout prestinv-avant-refonte` (4.10.0+6) — les
+   données (saisies, collecte, versements, réglages) gardent les mêmes clés : rien n'est perdu.
 
 ## Essais réels contre un serveur de test
 
@@ -47,6 +60,8 @@ défaut, inventaire de test par l'import CSV existant), versement de 3 codes don
 auteur relus, suppression de l'inventaire de test et comparaison de la base avant / après.
 
 Aperçus PNG des écrans : `flutter test test_apercus/apercus_test.dart --update-goldens` (hors CI).
+Nouvelle interface (étape 4) : `flutter test test_apercus/refonte_apercus_test.dart --update-goldens`
+(fichiers `docs/maquettes/apercus/refonte_*.png`, planche `refonte_0_avant_apres.png`).
 
 ### Fiabilité de la saisie
 
