@@ -21,6 +21,7 @@ import 'package:prestinv/scan/code_scan.dart';
 import 'package:prestinv/scan/douchette.dart';
 import 'package:prestinv/scan/retour_scan.dart';
 import 'package:prestinv/ui/clavier.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/exports.dart';
 import 'package:prestinv/ui/presentation_style.dart';
@@ -28,38 +29,46 @@ import 'package:prestinv/ui/theme.dart';
 import 'package:prestinv/utils/saisie_input.dart';
 
 /// Choix explicite pour un produit déjà compté : true = Ajouter, false = Remplacer, null = Annuler.
-Future<bool?> demanderRemplacerAjouter(BuildContext context, {required String nom, required int existant, required int saisie}) {
+/// [masquer] : réglage « Masquer la quantité déjà comptée » (la quantité et le total ne sont pas montrés).
+Future<bool?> demanderRemplacerAjouter(BuildContext context, {required String nom, required int existant, required int saisie, bool masquer = false}) {
   return showDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) {
       final nv = ctx.nv;
-      return AlertDialog(
+      return NvCadreDialogue(
         key: const ValueKey('nv-choix-deja-compte'),
-        title: const Text('Déjà compté'),
-        scrollable: true,
-        content: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          Text(nom, style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: nv.attente.bg, borderRadius: BorderRadius.circular(12)),
-            child: Text('Déjà compté : $existant. Vous saisissez $saisie.', style: TextStyle(color: nv.attente.fg, fontSize: 15)),
-          ),
-          const SizedBox(height: 14),
-          OutlinedButton(
-            key: const ValueKey('nv-remplacer'),
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: TexteFleche('Remplacer', '$saisie'),
-          ),
-          const SizedBox(height: 8),
-          ElevatedButton(
-            key: const ValueKey('nv-ajouter'),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: TexteFleche('Ajouter', '${existant + saisie}'),
-          ),
+        icone: Icons.priority_high,
+        titre: 'Déjà compté',
+        message: nom,
+        contenu: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: nv.attente.bg, borderRadius: BorderRadius.circular(12)),
+          child: Text(masquer ? 'Ce produit a déjà été compté. Vous saisissez $saisie.' : 'Déjà compté : $existant. Vous saisissez $saisie.',
+              textAlign: TextAlign.center, style: TextStyle(color: nv.attente.fg, fontSize: 15)),
+        ),
+        boutons: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                key: const ValueKey('nv-remplacer'),
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: FittedBox(fit: BoxFit.scaleDown, child: TexteFleche('Remplacer', '$saisie')),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton(
+                key: const ValueKey('nv-ajouter'),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: FittedBox(fit: BoxFit.scaleDown, child: masquer ? const Text('Ajouter') : TexteFleche('Ajouter', '${existant + saisie}')),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          nvBoutonFenetre(ctx, libelle: 'Annuler', genre: NvGenre.discret, onPressed: () => Navigator.of(ctx).pop(null)),
         ]),
-        actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(null), child: const Text('Annuler'))],
       );
     },
   );
@@ -67,37 +76,27 @@ Future<bool?> demanderRemplacerAjouter(BuildContext context, {required String no
 
 /// Seuil « grande quantité » : confirmation explicite.
 Future<bool> confirmerGrandeQuantite(BuildContext context, int total) async {
-  final r = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Grande quantité'),
-      content: Text('Total : $total. Confirmer ?'),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Non')),
-        FilledButton(key: const ValueKey('nv-confirmer-grande'), onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Oui')),
-      ],
-    ),
+  final r = await nvDialogue<bool>(
+    context,
+    icone: Icons.priority_high,
+    titre: 'Grande quantité',
+    message: 'Total : $total. Confirmer ?',
+    boutons: const [
+      NvBouton('Non', false, genre: NvGenre.secondaire),
+      NvBouton('Oui', true, genre: NvGenre.principal, key: ValueKey('nv-confirmer-grande')),
+    ],
   );
   return r == true;
 }
 
-/// Plusieurs produits pour un code : l'opérateur choisit.
-Future<Product?> choisirParmi(BuildContext context, String code, List<Product> produits) => showDialog<Product>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: Text('Code ${CodeScan.affichage(code)} : plusieurs produits', maxLines: 2, overflow: TextOverflow.ellipsis),
-        children: [
-          for (final p in produits.take(20))
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(ctx).pop(p),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 40),
-                child: Text('${p.produitCip} — ${p.produitName}', maxLines: 2, overflow: TextOverflow.ellipsis),
-              ),
-            ),
-          SimpleDialogOption(onPressed: () => Navigator.of(ctx).pop(), child: Text('Annuler', style: TextStyle(color: ctx.nv.erreur.fg))),
-        ],
-      ),
+/// Plusieurs produits pour un code : l'opérateur choisit (feuille du bas).
+Future<Product?> choisirParmi(BuildContext context, String code, List<Product> produits) => nvMenu<Product?>(
+      context,
+      titre: 'Code ${CodeScan.affichage(code)} : plusieurs produits',
+      entrees: [
+        for (final p in produits.take(20)) NvEntree(Icons.medication_outlined, p.produitName, p, detail: p.produitCip),
+        const NvEntree(Icons.close, 'Annuler', null, danger: true),
+      ],
     );
 
 /// Le produit est-il déjà compté (cumul) ? Saisie en attente sur l'appareil, sinon serveur ; en cas
@@ -116,19 +115,19 @@ Future<({bool ok, int? quantite})> verifierDejaCompte(
     } on ApiLoadException catch (e) {
       if (ctx.mounted) Navigator.of(ctx).pop();
       if (!ctx.mounted) return (ok: false, quantite: null);
-      final reessayer = await showDialog<bool>(
-        context: ctx,
-        barrierDismissible: false,
-        builder: (d) => AlertDialog(
-          title: const Text('Vérification impossible'),
-          content: Text('${e.message}\n\n'
-              'On ne peut pas savoir si ce produit a déjà été compté : la quantité n\'est PAS enregistrée. '
-              'Réessayez (ou annulez et rescannez plus tard).'),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(d).pop(false), child: const Text('Annuler')),
-            FilledButton(onPressed: () => Navigator.of(d).pop(true), child: const Text('Réessayer')),
-          ],
-        ),
+      final reessayer = await nvDialogue<bool>(
+        ctx,
+        fermable: false,
+        icone: Icons.cloud_off,
+        ton: ctx.nv.erreur,
+        titre: 'Vérification impossible',
+        message: '${e.message}\n\n'
+            'On ne peut pas savoir si ce produit a déjà été compté : la quantité n\'est PAS enregistrée. '
+            'Réessayez (ou annulez et rescannez plus tard).',
+        boutons: const [
+          NvBouton('Annuler', false, genre: NvGenre.secondaire),
+          NvBouton('Réessayer', true, genre: NvGenre.principal),
+        ],
       );
       if (reessayer != true) return (ok: false, quantite: null);
     }
@@ -202,7 +201,7 @@ Future<void> ouvrirFeuilleQuantite(BuildContext context, ContexteFeuille c, Prod
           // Choix fait sur la feuille, valable seulement si la quantité vérifiée est celle affichée.
           final choix = ajouter != null && existant == dejaCompte
               ? ajouter
-              : await demanderRemplacerAjouter(ctx, nom: product.produitName, existant: existant, saisie: saisie);
+              : await demanderRemplacerAjouter(ctx, nom: product.produitName, existant: existant, saisie: saisie, masquer: c.config.masquerDejaCompte);
           if (choix == null) return;
           if (choix) {
             total = existant + saisie;
@@ -379,9 +378,11 @@ class _FeuilleQuantite extends StatelessWidget {
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(color: nv.attente.bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: nv.attente.fg.withValues(alpha: 0.3))),
                     child: Text(
-                      config.isCumulEnabled
-                          ? 'Déjà compté : $dejaCompte. Vous saisissez ${v.isEmpty ? '…' : v}.'
-                          : 'Déjà compté : $dejaCompte — votre saisie le remplacera.',
+                      config.masquerDejaCompte
+                          ? (config.isCumulEnabled ? 'Déjà compté. Vous saisissez ${v.isEmpty ? '…' : v}.' : 'Déjà compté — votre saisie remplacera la quantité.')
+                          : config.isCumulEnabled
+                              ? 'Déjà compté : $dejaCompte. Vous saisissez ${v.isEmpty ? '…' : v}.'
+                              : 'Déjà compté : $dejaCompte — votre saisie le remplacera.',
                       style: TextStyle(color: nv.attente.fg, fontSize: 15),
                     ),
                   ),
@@ -406,7 +407,9 @@ class _FeuilleQuantite extends StatelessWidget {
                         child: ElevatedButton(
                           key: const ValueKey('nv-feuille-ajouter'),
                           onPressed: n == null ? null : () => onKey('OK', ajouter: true),
-                          child: FittedBox(fit: BoxFit.scaleDown, child: TexteFleche('Ajouter', n == null ? '…' : '${n + dejaCompte!}')),
+                          child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: config.masquerDejaCompte ? const Text('Ajouter') : TexteFleche('Ajouter', n == null ? '…' : '${n + dejaCompte!}')),
                         ),
                       ),
                     ]);

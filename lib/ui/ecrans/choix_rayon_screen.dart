@@ -55,7 +55,7 @@ class _NvChoixRayonScreenState extends State<NvChoixRayonScreen> {
   }
 
   Future<void> _ouvrir(Rayon r) async {
-    await Navigator.of(context).push(nvRoute(NvSaisieGuideeScreen(inventaire: widget.inventaire, rayonId: r.id)));
+    await Navigator.of(context).push(nvRoute(NvSaisieGuideeScreen(inventaire: widget.inventaire, rayonId: r.id, depuisChoixRayon: true)));
     if (!mounted) return;
     context.read<EntryProvider>().loadRayonStatuses(_api, widget.inventaire.id);
   }

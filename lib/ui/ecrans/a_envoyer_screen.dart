@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:prestinv/saisie/saisie.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/presentation_style.dart';
 import 'package:prestinv/ui/responsive.dart';
@@ -41,16 +42,16 @@ class _NvAEnvoyerScreenState extends State<NvAEnvoyerScreen> {
   }
 
   Future<void> _supprimer(SaisieQueue q, SaisieLigne s) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Supprimer cette saisie ?'),
-        content: Text('${s.nom.isEmpty ? 'Ligne ${s.ligneId}' : s.nom}\nQuantité : ${s.quantite}\n\nElle ne sera jamais envoyée au serveur.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),
-          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text('Supprimer', style: TextStyle(color: ctx.nv.erreur.fg))),
-        ],
-      ),
+    final ok = await nvDialogue<bool>(
+      context,
+      icone: Icons.delete_outline,
+      ton: context.nv.erreur,
+      titre: 'Supprimer cette saisie ?',
+      message: '${s.nom.isEmpty ? 'Ligne ${s.ligneId}' : s.nom}\nQuantité : ${s.quantite}\n\nElle ne sera jamais envoyée au serveur.',
+      boutons: const [
+        NvBouton('Annuler', false, genre: NvGenre.secondaire),
+        NvBouton('Supprimer', true, genre: NvGenre.danger),
+      ],
     );
     if (ok == true) await q.abandonner(s.cle);
   }
@@ -138,16 +139,17 @@ class _NvAEnvoyerScreenState extends State<NvAEnvoyerScreen> {
         ),
         Text('${s.quantite}', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900, color: nv.encre)),
         if (s.refusee)
-          PopupMenuButton<String>(
+          IconButton(
             tooltip: 'Actions',
-            onSelected: (v) {
+            icon: const Icon(Icons.more_vert),
+            onPressed: () async {
+              final v = await nvMenu<String>(context, titre: s.nom.isEmpty ? 'Ligne ${s.ligneId}' : s.nom, entrees: const [
+                NvEntree(Icons.replay, 'Remettre en attente', 'renvoyer'),
+                NvEntree(Icons.delete_outline, 'Supprimer', 'supprimer', danger: true),
+              ]);
               if (v == 'renvoyer') q.renvoyer(s.cle);
               if (v == 'supprimer') _supprimer(q, s);
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'renvoyer', child: Text('Remettre en attente')),
-              PopupMenuItem(value: 'supprimer', child: Text('Supprimer')),
-            ],
           )
         else
           const SizedBox(width: 10),

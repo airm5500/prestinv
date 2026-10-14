@@ -1,6 +1,9 @@
 // lib/ui/ecrans/recap_screen.dart
-// Nouvelle interface — récapitulatif d'un rayon : totaux achat / vente / écart valorisé, détail par
-// produit (cartes sur téléphone, tableau sur tablette), CSV (copie ou fichier partagé) et PDF.
+// Nouvelle interface — récapitulatif d'un rayon (maquette « Recap », 4.13) : filtre Tous / Déjà comptés
+// / Pas comptés (avec compteurs ; « compté » = compté sur le serveur OU saisi sur ce téléphone), totaux
+// achat / vente / écart valorisé, détail par produit numéroté (cartes sur téléphone, tableau sur
+// tablette), CSV (copie ou fichier partagé) et PDF. Ouvert depuis la saisie guidée : toucher une ligne
+// y revient sur ce produit. Réglage « Afficher le stock théorique » appliqué à l'écran et au PDF.
 // Même logique et mêmes documents que RecapScreen.
 import 'dart:io';
 
@@ -12,6 +15,8 @@ import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/providers/auth_provider.dart';
+import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/exports.dart';
 import 'package:prestinv/ui/presentation_style.dart';
@@ -25,16 +30,35 @@ class NvRecapScreen extends StatefulWidget {
   final String rayonId;
   final String rayonName;
   final List<Product>? produits;
-  const NvRecapScreen({super.key, required this.inventoryId, required this.rayonId, required this.rayonName, this.produits});
+
+  /// Ouvert depuis la saisie guidée : toucher une ligne y revient sur ce produit (renvoyé par pop).
+  final bool retourSaisie;
+  const NvRecapScreen({super.key, required this.inventoryId, required this.rayonId, required this.rayonName, this.produits, this.retourSaisie = false});
 
   @override
   State<NvRecapScreen> createState() => _NvRecapScreenState();
 }
 
+/// Filtre du récapitulatif.
+enum FiltreRecap { tous, comptes, pasComptes }
+
 class _NvRecapScreenState extends State<NvRecapScreen> {
   List<Product>? _produits;
   Object? _erreur;
   bool _impression = false;
+  FiltreRecap _filtre = FiltreRecap.tous;
+
+  /// Compté sur le serveur, ou saisi sur ce téléphone (même non envoyé).
+  bool _compte(Product p, SaisieQueue? q) => p.dtUpdated != null || q?.ligne(widget.inventoryId, p.id) != null;
+
+  List<Product> _filtres(SaisieQueue? q) {
+    final ps = _produits ?? const <Product>[];
+    return switch (_filtre) {
+      FiltreRecap.tous => ps,
+      FiltreRecap.comptes => ps.where((p) => _compte(p, q)).toList(),
+      FiltreRecap.pasComptes => ps.where((p) => !_compte(p, q)).toList(),
+    };
+  }
 
   @override
   void initState() {
@@ -73,7 +97,9 @@ class _NvRecapScreenState extends State<NvRecapScreen> {
     setState(() => _impression = true);
     final t = _totaux;
     try {
-      await NvExports.imprimer(() => NvExports.pdfRecap(widget.rayonName, ps, achat: t.achat, vente: t.vente, ecart: t.ecart), 'Recap_${NvExports.nomPropre(widget.rayonName)}');
+      final theo = context.read<AppConfig>().showTheoreticalStock;
+      await NvExports.imprimer(() => NvExports.pdfRecap(widget.rayonName, ps, achat: t.achat, vente: t.vente, ecart: t.ecart, theoVisible: theo),
+          'Recap_${NvExports.nomPropre(widget.rayonName)}');
     } catch (e) {
       if (mounted) nvMessage(context, 'Erreur lors de l\'impression : $e', ton: context.nv.erreur);
     } finally {
@@ -85,16 +111,16 @@ class _NvRecapScreenState extends State<NvRecapScreen> {
     final ps = _produits;
     if (ps == null || ps.isEmpty) return;
     final contenu = NvExports.csvRecap(ps);
-    final choix = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Exporter les données CSV'),
-        content: const Text('Générer le fichier CSV à partir des données affichées ?'),
-        actions: [
-          TextButton.icon(onPressed: () => Navigator.pop(ctx, 'copier'), icon: const Icon(Icons.copy), label: const Text('Copier le texte')),
-          FilledButton.icon(onPressed: () => Navigator.pop(ctx, 'fichier'), icon: const Icon(Icons.file_download), label: const Text('Générer et partager')),
-        ],
-      ),
+    final choix = await nvDialogue<String>(
+      context,
+      icone: Icons.upload_file,
+      ton: context.nv.info,
+      titre: 'Exporter les données CSV',
+      message: 'Générer le fichier CSV à partir des données affichées ?',
+      boutons: const [
+        NvBouton('Copier le texte', 'copier', genre: NvGenre.secondaire),
+        NvBouton('Générer et partager', 'fichier', genre: NvGenre.principal),
+      ],
     );
     if (!mounted || choix == null) return;
     if (choix == 'copier') {
@@ -117,15 +143,26 @@ class _NvRecapScreenState extends State<NvRecapScreen> {
   @override
   Widget build(BuildContext context) {
     final nv = context.nv;
-    final ps = _produits;
+    SaisieQueue? q;
+    try {
+      q = context.watch<SaisieQueue>();
+    } catch (_) {}
+    final theoVisible = context.watch<AppConfig>().showTheoreticalStock;
+    final tous = _produits;
+    final ps = tous == null ? null : _filtres(q);
+    final nbComptes = tous?.where((p) => _compte(p, q)).length ?? 0;
     final t = _totaux;
+    final numeros = {for (var i = 0; i < (tous?.length ?? 0); i++) tous![i].id: i + 1};
+    String theo(Product p) => theoVisible ? '${p.quantiteInitiale}' : '***';
     Widget corps;
     if (_erreur != null) {
       corps = NvErreur(_erreur!, onRetry: _charger);
     } else if (ps == null) {
       corps = const NvChargement();
     } else if (ps.isEmpty) {
-      corps = const NvVide(icon: Icons.inventory_2_outlined, titre: 'Aucun produit à afficher.');
+      corps = NvVide(
+          icon: Icons.inventory_2_outlined,
+          titre: tous!.isEmpty ? 'Aucun produit à afficher.' : (_filtre == FiltreRecap.comptes ? 'Aucun produit compté.' : 'Tout est compté dans ce rayon.'));
     } else if (Responsive.isExpanded(context)) {
       corps = Padding(
         padding: const EdgeInsets.all(20),
@@ -136,8 +173,10 @@ class _NvRecapScreenState extends State<NvRecapScreen> {
               width: double.infinity,
               child: DataTable(
                 headingTextStyle: TextStyle(color: nv.gris, fontWeight: FontWeight.bold),
-                dataTextStyle: TextStyle(color: nv.encre),
+                dataTextStyle: TextStyle(color: nv.encre, fontWeight: FontWeight.w600),
+                showCheckboxColumn: false,
                 columns: const [
+                  DataColumn(label: Text('N°'), numeric: true),
                   DataColumn(label: Text('Désignation')),
                   DataColumn(label: Text('Écart'), numeric: true),
                   DataColumn(label: Text('Compté'), numeric: true),
@@ -146,11 +185,12 @@ class _NvRecapScreenState extends State<NvRecapScreen> {
                 ],
                 rows: [
                   for (final p in ps)
-                    DataRow(cells: [
+                    DataRow(onSelectChanged: widget.retourSaisie ? (_) => Navigator.of(context).pop(p) : null, cells: [
+                      DataCell(Text('${numeros[p.id]}')),
                       DataCell(ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: Text(p.produitName, overflow: TextOverflow.ellipsis))),
                       DataCell(Text(signe(p.quantiteSaisie - p.quantiteInitiale), style: TextStyle(color: _couleur(context, p), fontWeight: FontWeight.bold))),
                       DataCell(Text('${p.quantiteSaisie}')),
-                      DataCell(Text('${p.quantiteInitiale}')),
+                      DataCell(Text(theo(p))),
                       DataCell(Text(francs((p.quantiteSaisie - p.quantiteInitiale) * p.produitPrixAchat, signeExplicite: true),
                           style: TextStyle(color: _couleur(context, p), fontWeight: FontWeight.bold))),
                     ]),
@@ -163,16 +203,22 @@ class _NvRecapScreenState extends State<NvRecapScreen> {
     } else {
       final cols = Responsive.columns(context, compact: 1, medium: 2, expanded: 2);
       corps = ListView(padding: const EdgeInsets.fromLTRB(16, 14, 16, 24), children: [
+        if (widget.retourSaisie) const Aide('Toucher une ligne : retour à la saisie sur ce produit.'),
         ...cardColumn([
           for (final p in ps)
             SoftCard(
+              key: ValueKey('nv-recap-${p.id}'),
               bande: p.quantiteSaisie < p.quantiteInitiale ? Pal.red : (p.quantiteSaisie > p.quantiteInitiale ? Pal.green : null),
+              onTap: widget.retourSaisie ? () => Navigator.of(context).pop(p) : null,
+              semantique: '${numeros[p.id]}. ${p.produitName}',
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
               child: Row(children: [
+                SizedBox(width: 34, child: Text('${numeros[p.id]}', style: TextStyle(color: nv.gris, fontSize: 13))),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(p.produitName, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, color: nv.encre)),
-                    Text('Théo ${p.quantiteInitiale} · compté ${p.quantiteSaisie}', style: TextStyle(color: nv.gris, fontSize: 13.5)),
+                    Text(_compte(p, q) ? 'Théo ${theo(p)} · compté ${q?.ligne(widget.inventoryId, p.id)?.quantite ?? p.quantiteSaisie}' : 'Théo ${theo(p)} · pas compté',
+                        style: TextStyle(color: nv.gris, fontSize: 13.5)),
                   ]),
                 ),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -184,15 +230,26 @@ class _NvRecapScreenState extends State<NvRecapScreen> {
         ], cols, spacing: 8),
       ]);
     }
+    final filtres = tous == null
+        ? const <Widget>[]
+        : [
+            _SegmentsRecap(
+              selection: _filtre,
+              libelles: ['Tous (${tous.length})', 'Déjà comptés ($nbComptes)', 'Pas comptés (${tous.length - nbComptes})'],
+              onChoisir: (f) => setState(() => _filtre = f),
+            ),
+            const SizedBox(height: 10),
+          ];
     return NvScaffold(
-      title: 'Récapitulatif',
-      subtitle: widget.rayonName,
+      title: 'Récapitulatif du rayon',
+      subtitle: tous == null ? widget.rayonName : '${widget.rayonName} · $nbComptes / ${tous.length}',
       wide: true,
       actions: [
         ActionEntete(icon: Icons.upload_file, tooltip: 'Exporter en CSV', onPressed: ps == null || ps.isEmpty ? null : _csv),
         ActionEntete(icon: Icons.print_outlined, tooltip: 'Imprimer le récapitulatif', onPressed: ps == null || ps.isEmpty || _impression ? null : _imprimer),
       ],
       header: [
+        ...filtres,
         Row(children: [
           Expanded(child: KpiTile(francs(t.achat), 'Total achat')),
           const SizedBox(width: 8),
@@ -208,5 +265,57 @@ class _NvRecapScreenState extends State<NvRecapScreen> {
   Color _couleur(BuildContext context, Product p) {
     final e = p.quantiteSaisie - p.quantiteInitiale;
     return e < 0 ? context.nv.manquant : (e > 0 ? context.nv.surplus : context.nv.gris);
+  }
+}
+
+/// Sélecteur Tous / Déjà comptés / Pas comptés (dans l'en-tête bleu, maquette Recap).
+class _SegmentsRecap extends StatelessWidget {
+  final FiltreRecap selection;
+  final List<String> libelles;
+  final ValueChanged<FiltreRecap> onChoisir;
+  const _SegmentsRecap({required this.selection, required this.libelles, required this.onChoisir});
+
+  @override
+  Widget build(BuildContext context) {
+    const cles = ['nv-recap-tous', 'nv-recap-comptes', 'nv-recap-pas-comptes'];
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14)),
+      child: Row(children: [
+        for (final f in FiltreRecap.values) ...[
+          if (f.index > 0) const SizedBox(width: 4),
+          Expanded(
+            child: Semantics(
+              selected: f == selection,
+              button: true,
+              child: Material(
+                color: f == selection ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  key: ValueKey(cles[f.index]),
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => onChoisir(f),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                        child: Text(libelles[f.index],
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: f == selection ? FontWeight.bold : FontWeight.w500,
+                                color: f == selection ? Pal.navy : Colors.white)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ]),
+    );
   }
 }

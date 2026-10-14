@@ -111,18 +111,43 @@ class NvExports {
   }
 
   /// Écarts (nouveau : export du tableau tablette) : « code_cip;designation;theorique;compte;ecart;valeur ».
-  static String csvEcarts(List<Product> ps) {
-    final b = StringBuffer()..writeln('code_cip;designation;theorique;compte;ecart;valeur');
+  /// Réglages appliqués (4.13) : stock théorique masqué ([theoVisible] faux) → colonne « theorique »
+  /// retirée ; quantité déjà comptée masquée ([compteVisible] faux) → colonne « compte » retirée.
+  static String csvEcarts(List<Product> ps, {bool theoVisible = true, bool compteVisible = true}) {
+    final b = StringBuffer()..writeln(['code_cip', 'designation', if (theoVisible) 'theorique', if (compteVisible) 'compte', 'ecart', 'valeur'].join(';'));
     for (final p in ps) {
       final e = p.quantiteSaisie - p.quantiteInitiale;
-      b.writeln('${p.produitCip};${p.produitName.replaceAll(';', ',')};${p.quantiteInitiale};${p.quantiteSaisie};$e;${(e * p.produitPrixAchat).round()}');
+      b.writeln([
+        p.produitCip,
+        p.produitName.replaceAll(';', ','),
+        if (theoVisible) '${p.quantiteInitiale}',
+        if (compteVisible) '${p.quantiteSaisie}',
+        '$e',
+        '${(e * p.produitPrixAchat).round()}',
+      ].join(';'));
     }
     return b.toString();
   }
 
   // ---------- Documents PDF (mêmes tableaux que les écrans d'origine) ----------
 
-  static Future<Uint8List> pdfEcarts(String titre, List<Product> ps) {
+  /// Lignes du tableau des écarts (en-tête compris), réglages de masquage appliqués : sans les colonnes
+  /// « Stock Théo. » ([theoVisible] faux) et « Stock Corrigé » ([compteVisible] faux).
+  static List<List<String>> tableauEcarts(List<Product> ps, {bool theoVisible = true, bool compteVisible = true}) => [
+        ['CIP', 'Désignation', if (theoVisible) 'Stock Théo.', if (compteVisible) 'Stock Corrigé', 'Écart'],
+        ...ps.map((p) => [
+              p.produitCip,
+              p.produitName,
+              if (theoVisible) '${p.quantiteInitiale}',
+              if (compteVisible) '${p.quantiteSaisie}',
+              '${p.quantiteSaisie - p.quantiteInitiale}',
+            ]),
+      ];
+
+  static Future<Uint8List> pdfEcarts(String titre, List<Product> ps, {bool theoVisible = true, bool compteVisible = true}) {
+    final data = tableauEcarts(ps, theoVisible: theoVisible, compteVisible: compteVisible);
+    final n = data.first.length;
+    final largeurs = [2.0, 5.0, if (theoVisible) 1.5, if (compteVisible) 1.5, 1.0];
     final doc = pw.Document();
     doc.addPage(pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
@@ -130,27 +155,29 @@ class NvExports {
       build: (ctx) => [
         pw.TableHelper.fromTextArray(
           context: ctx,
-          data: [
-            ['CIP', 'Désignation', 'Stock Théo.', 'Stock Corrigé', 'Écart'],
-            ...ps.map((p) => [p.produitCip, p.produitName, '${p.quantiteInitiale}', '${p.quantiteSaisie}', '${p.quantiteSaisie - p.quantiteInitiale}']),
-          ],
+          data: data,
           headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
           cellStyle: const pw.TextStyle(fontSize: 9),
-          cellAlignments: {0: pw.Alignment.centerLeft, 1: pw.Alignment.centerLeft, 2: pw.Alignment.centerRight, 3: pw.Alignment.centerRight, 4: pw.Alignment.centerRight},
-          columnWidths: {
-            0: const pw.FlexColumnWidth(2),
-            1: const pw.FlexColumnWidth(5),
-            2: const pw.FlexColumnWidth(1.5),
-            3: const pw.FlexColumnWidth(1.5),
-            4: const pw.FlexColumnWidth(1),
-          },
+          cellAlignments: {for (var i = 0; i < n; i++) i: i < 2 ? pw.Alignment.centerLeft : pw.Alignment.centerRight},
+          columnWidths: {for (var i = 0; i < n; i++) i: pw.FlexColumnWidth(largeurs[i])},
         ),
       ],
     ));
     return doc.save();
   }
 
-  static Future<Uint8List> pdfRecap(String rayon, List<Product> ps, {required double achat, required double vente, required double ecart}) {
+  /// Lignes du tableau du récapitulatif (en-tête compris) ; « Théo » remplacé par *** si le stock
+  /// théorique est masqué (réglage « Afficher le stock théorique »).
+  static List<List<String>> tableauRecap(List<Product> ps, {bool theoVisible = true}) => [
+        ['CIP', 'Désignation', 'Ecart', 'Rayon', 'Théo', 'Valorisation'],
+        ...ps.map((p) {
+          final e = p.quantiteSaisie - p.quantiteInitiale;
+          return [p.produitCip, p.produitName, '$e', '${p.quantiteSaisie}', theoVisible ? '${p.quantiteInitiale}' : '***', _monnaie.format(e * p.produitPrixAchat)];
+        }),
+      ];
+
+  static Future<Uint8List> pdfRecap(String rayon, List<Product> ps,
+      {required double achat, required double vente, required double ecart, bool theoVisible = true}) {
     final doc = pw.Document();
     doc.addPage(pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
@@ -162,13 +189,7 @@ class NvExports {
       ),
       build: (_) => [
         pw.TableHelper.fromTextArray(
-          data: [
-            ['CIP', 'Désignation', 'Ecart', 'Rayon', 'Théo', 'Valorisation'],
-            ...ps.map((p) {
-              final e = p.quantiteSaisie - p.quantiteInitiale;
-              return [p.produitCip, p.produitName, '$e', '${p.quantiteSaisie}', '${p.quantiteInitiale}', _monnaie.format(e * p.produitPrixAchat)];
-            }),
-          ],
+          data: tableauRecap(ps, theoVisible: theoVisible),
           headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
           cellStyle: const pw.TextStyle(fontSize: 9),
           cellAlignments: {
@@ -271,6 +292,7 @@ class NvExports {
     required int negatifs,
     required int corrects,
     Uint8List? graphique,
+    bool avantVisible = true,
   }) {
     final total = positifs + negatifs + corrects;
     String pct(int n) => '${(total > 0 ? n / total * 100 : 0).toStringAsFixed(1)}%';
@@ -285,7 +307,7 @@ class NvExports {
         pw.Text('Emplacement: $emplacement'),
         pw.Divider(height: 20, thickness: 1),
         pw.Header(level: 1, text: 'Valorisation de l\'inventaire'),
-        pw.Text('Valeur Avant: ${_monnaie.format(avant)}'),
+        pw.Text('Valeur Avant: ${avantVisible ? _monnaie.format(avant) : '***'}'),
         pw.Text('Valeur Après: ${_monnaie.format(apres)}'),
         pw.Text('Écart Total: ${_monnaie.format(ecart)}', style: pw.TextStyle(color: ecart >= 0 ? PdfColors.green : PdfColors.red, fontWeight: pw.FontWeight.bold)),
         pw.SizedBox(height: 20),

@@ -2,8 +2,11 @@
 
 import 'dart:convert';
 
-// Énumération pour les types de filtres
-enum FilterType { none, numeric, alphabetic }
+// Énumération pour les types de filtres.
+// [oublis] (4.13, nouvelle interface) : produits pas encore comptés — un VRAI filtre, distinct du
+// filtre par numéro (avant : filtre « numérique » détourné avec « Rattrapage / Oublis », gardé pour les
+// écrans d'origine). Ajouté en fin d'énumération : les index enregistrés ne changent pas.
+enum FilterType { none, numeric, alphabetic, oublis }
 
 class ProductFilter {
   final FilterType type;
@@ -18,6 +21,10 @@ class ProductFilter {
 
   /// Indique si un filtre est actuellement appliqué.
   bool get isActive => type != FilterType.none;
+
+  /// Filtre « oublis » (produits pas encore comptés) : nouveau type, ou ancienne forme des écrans
+  /// d'origine (numérique « Rattrapage » / « Oublis »).
+  bool get estOublis => type == FilterType.oublis || from == 'Rattrapage';
 
   /// Crée une copie de l'objet (utile pour la mise à jour de l'état).
   ProductFilter copyWith({
@@ -46,7 +53,7 @@ class ProductFilter {
   /// Crée un objet filtre à partir d'une Map (JSON décodé).
   factory ProductFilter.fromJson(Map<String, dynamic> json) {
     return ProductFilter(
-      type: FilterType.values[json['type'] ?? 0], // Récupère l'énumération par son index
+      type: FilterType.values[json['type'] ?? 0], // Récupère l'énumération par son index (index inconnu : erreur → aucun filtre)
       from: json['from'] ?? '',
       to: json['to'] ?? '',
     );

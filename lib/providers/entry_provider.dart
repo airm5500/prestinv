@@ -194,6 +194,16 @@ class EntryProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Nouvelle interface : VRAI filtre « oublis » (produits pas encore comptés), distinct du filtre par
+  /// numéro. Comme [filterToUncounted] (gardé tel quel pour les écrans d'origine), il n'est pas
+  /// enregistré : le filtre choisi auparavant revient à la prochaine ouverture du rayon.
+  void filtrerOublis() {
+    _activeFilter = ProductFilter(type: FilterType.oublis);
+    _runFilterLogic();
+    _currentProductIndex = 0;
+    notifyListeners();
+  }
+
   // --- PERSISTANCE ET SYNC ---
 
   Future<void> _saveCurrentIndex(String inventoryId) async {
@@ -273,6 +283,9 @@ class EntryProvider with ChangeNotifier {
             return name.compareTo(from) >= 0 && name.compareTo(to) <= 0;
           }).toList();
         } catch (e) { _filteredProducts = []; }
+        break;
+      case FilterType.oublis:
+        _filteredProducts = _allProducts.where((p) => p.dtUpdated == null && !_locallyTouchedProductIds.contains(p.id)).toList();
         break;
       default:
         _filteredProducts = List.from(_allProducts);

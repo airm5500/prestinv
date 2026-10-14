@@ -19,6 +19,7 @@ import 'package:prestinv/saisie/saisie_correction.dart';
 import 'package:prestinv/scan/champ_douchette.dart';
 import 'package:prestinv/scan/douchette.dart';
 import 'package:prestinv/ui/clavier.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/exports.dart';
 import 'package:prestinv/ui/presentation_style.dart';
@@ -220,26 +221,26 @@ class _NvRestantsScreenState extends State<NvRestantsScreen> {
       builder: (ctx) => LibererApres(
         objets: [ctrl],
         child: StatefulBuilder(
-        builder: (ctx, setD) => AlertDialog(
-          title: const Text('Filtrer par stock théorique'),
-          scrollable: true,
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            for (final f in FiltreStock.values)
-              RadioListTile<FiltreStock>(contentPadding: EdgeInsets.zero, dense: true, value: f, groupValue: type, title: Text(f.libelle), onChanged: (v) => setD(() => type = v!)),
-            if (type != FiltreStock.aucun)
-              TextField(
-                controller: ctrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(labelText: 'Valeur de référence', hintText: 'Ex : 0'),
-              ),
-          ]),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Appliquer')),
-          ],
+          builder: (ctx, setD) => NvCadreDialogue(
+            titre: 'Filtrer par stock théorique',
+            centre: false,
+            contenu: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (final f in FiltreStock.values)
+                RadioListTile<FiltreStock>(contentPadding: EdgeInsets.zero, dense: true, value: f, groupValue: type, title: Text(f.libelle), onChanged: (v) => setD(() => type = v!)),
+              if (type != FiltreStock.aucun)
+                TextField(
+                  controller: ctrl,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(labelText: 'Valeur de référence', hintText: 'Ex : 0'),
+                ),
+            ]),
+            boutons: nvRangeeBoutons(ctx, [
+              nvBoutonFenetre(ctx, libelle: 'Annuler', genre: NvGenre.secondaire, onPressed: () => Navigator.pop(ctx, false)),
+              nvBoutonFenetre(ctx, libelle: 'Appliquer', genre: NvGenre.principal, onPressed: () => Navigator.pop(ctx, true)),
+            ], const []),
+          ),
         ),
-      ),
       ),
     );
     final v = int.tryParse(ctrl.text) ?? 0;

@@ -22,6 +22,7 @@ import 'package:prestinv/scan/douchette.dart';
 import 'package:prestinv/scan/file_scans.dart';
 import 'package:prestinv/scan/journal_scans.dart';
 import 'package:prestinv/scan/retour_scan.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/ecrans/feuille_quantite.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/theme.dart';
@@ -307,41 +308,14 @@ mixin SaisieCommune<T extends StatefulWidget> on State<T>, DouchetteCibleMixin<T
       nvMessage(context, 'Aucune donnée en attente d\'envoi.', ton: context.nv.attente);
       return true;
     }
-    final progression = ValueNotifier<String>('Connexion au serveur…');
-    final fini = ValueNotifier<bool>(false);
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => LibererApres(
-        objets: [progression, fini],
-        child: AlertDialog(
-        content: AnimatedBuilder(
-          animation: Listenable.merge([progression, fini]),
-          builder: (_, __) => Row(children: [
-            if (fini.value) Icon(Icons.info_outline, color: ctx.nv.action, size: 28) else const CircularProgressIndicator(),
-            const SizedBox(width: 18),
-            Expanded(child: Text(progression.value)),
-          ]),
-        ),
-      ),
-      ),
+    // Progression modernisée (maquette « Envoi ») : l'envoi continue si l'on ferme la fenêtre.
+    final bilan = await nvEnvoiSaisies(
+      context,
+      envoyer: (p) => provider.envoyerInventaire(inventoryId, (a, b) => p(a, b)),
+      demandees: enAttente,
+      sousTitre: [inventaire.libelle, if (provider.selectedRayon != null) provider.selectedRayon!.libelle].join(' · '),
     );
-    final bilan = await provider.envoyerInventaire(inventoryId, (a, b) => progression.value = 'Envoi… ($a/$b)');
-    if (bilan.complet && bilan.refusees == 0) {
-      progression.value = '${bilan.envoyees} article(s) traité(s) avec succès.';
-    } else if (bilan.sessionExpiree) {
-      progression.value = SaisieQueue.messageSessionExpiree;
-    } else if (bilan.envoyees > 0) {
-      progression.value = 'Réseau instable : ${bilan.envoyees}/$enAttente envoyé(s). Le reste est gardé sur l\'appareil (« À envoyer »).';
-    } else if (bilan.refusees > 0 && bilan.interruption == null) {
-      progression.value = '${bilan.refusees} saisie(s) refusée(s) par le serveur (voir « À envoyer »).';
-    } else {
-      progression.value = 'Échec : ${bilan.interruption ?? 'Vérifiez votre connexion au serveur.'} Les saisies restent sur l\'appareil.';
-    }
-    fini.value = true;
     _rappel?.cancel();
-    await Future<void>.delayed(const Duration(milliseconds: 2500));
-    if (mounted) Navigator.of(context).pop();
     if (bilan.sessionExpiree && mounted) proposerReconnexion();
     return bilan.complet;
   }
@@ -356,18 +330,10 @@ mixin SaisieCommune<T extends StatefulWidget> on State<T>, DouchetteCibleMixin<T
         action: SnackBarAction(label: 'Se reconnecter', onPressed: () => demanderReconnexion(context)));
   }
 
-  /// Rappel d'envoi (mode Collecte), comme l'écran d'origine.
-  void relancerRappel() {
-    _rappel?.cancel();
-    if (config.sendMode == SendMode.collect && config.sendReminderMinutes > 0) {
-      final provider = entry;
-      _rappel = Timer(Duration(minutes: config.sendReminderMinutes), () {
-        if (provider.hasUnsyncedData && mounted) {
-          nvMessage(context, 'Rappel : vous avez des données non envoyées !', ton: context.nv.info, duree: const Duration(seconds: 5));
-        }
-      });
-    }
-  }
+  /// Rappel d'envoi (mode Collecte) : depuis la 4.13, la nouvelle interface a un rappel GLOBAL et
+  /// bloquant (« Veuillez sauvegarder vos saisies », lib/saisie/rappel_envoi.dart, branché dans
+  /// main.dart) qui remplace l'ancien message de l'écran : plus de minuterie ici.
+  void relancerRappel() => _rappel?.cancel();
 
   void arreterRappel() => _rappel?.cancel();
 
@@ -379,43 +345,34 @@ mixin SaisieCommune<T extends StatefulWidget> on State<T>, DouchetteCibleMixin<T
     final nonEnvoye = provider.hasUnsyncedData;
     if (reste == 0 && !nonEnvoye) return true;
     if (config.sendMode == SendMode.direct && reste == 0) return true;
-    final r = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        final nv = ctx.nv;
-        final direct = config.sendMode == SendMode.direct;
-        return AlertDialog(
-          key: const ValueKey('nv-quitter'),
-          title: const Text('Quitter ?'),
-          scrollable: true,
-          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            if (nonEnvoye && !direct)
-              Text('Des saisies ne sont pas encore envoyées au serveur (elles restent sur l\'appareil).',
-                  style: TextStyle(fontWeight: FontWeight.bold, color: nv.erreur.fg)),
-            if (reste > 0) ...[
-              const SizedBox(height: 8),
-              Text('Il reste encore $reste produit(s) jamais touchés dans ce rayon.'),
-            ],
-          ]),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop('rester'), child: const Text('Rester')),
-            if (reste > 0) OutlinedButton(onPressed: () => Navigator.of(ctx).pop('oublis'), child: const Text('Voir les oublis')),
-            TextButton(
-                key: const ValueKey('nv-quitter-ignorer'),
-                onPressed: () => Navigator.of(ctx).pop('quitter'),
-                child: Text('Ignorer et quitter', style: TextStyle(color: nv.erreur.fg))),
-            if (nonEnvoye && !direct)
-              FilledButton(key: const ValueKey('nv-envoyer-quitter'), onPressed: () => Navigator.of(ctx).pop('envoyer'), child: const Text('Envoyer et quitter')),
-          ],
-        );
-      },
+    final direct = config.sendMode == SendMode.direct;
+    final nonEnvoyees = provider.pendingCountInventory;
+    final message = [
+      if (nonEnvoye && !direct)
+        '${nonEnvoyees > 0 ? '$nonEnvoyees saisie(s) ne sont' : 'Des saisies ne sont'} pas encore envoyées. Elles restent sur ce téléphone et partiront au prochain envoi.',
+      if (reste > 0) 'Il reste encore $reste produit(s) jamais touchés dans ce rayon.',
+    ].join('\n\n');
+    final r = await nvDialogue<String>(
+      context,
+      key: const ValueKey('nv-quitter'),
+      fermable: false,
+      icone: Icons.priority_high,
+      titre: 'Quitter la saisie ?',
+      message: message,
+      boutons: [
+        const NvBouton('Rester', 'rester', genre: NvGenre.secondaire),
+        if (nonEnvoye && !direct) const NvBouton('Envoyer et quitter', 'envoyer', genre: NvGenre.principal, key: ValueKey('nv-envoyer-quitter')),
+        if (reste > 0 && !(nonEnvoye && !direct)) const NvBouton('Voir les oublis', 'oublis', genre: NvGenre.principal),
+        if (reste > 0 && nonEnvoye && !direct) const NvBouton('Voir les oublis', 'oublis', genre: NvGenre.discret),
+        NvBouton(nonEnvoye && !direct ? 'Quitter sans envoyer' : 'Ignorer et quitter', 'quitter',
+            genre: NvGenre.danger, key: const ValueKey('nv-quitter-ignorer')),
+      ],
     );
     switch (r) {
       case 'quitter':
         return true;
       case 'oublis':
-        provider.filterToUncounted();
+        provider.filtrerOublis();
         return false;
       case 'envoyer':
         final tout = await envoyerInventaire();

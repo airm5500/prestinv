@@ -11,6 +11,7 @@ import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
 import 'package:prestinv/scan/douchette.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/ecrans/cumuls_screen.dart';
 import 'package:prestinv/ui/ecrans/saisie_commune.dart';
 import 'package:prestinv/ui/ecrans/widgets_saisie.dart';
@@ -193,17 +194,25 @@ class _NvScanContinuScreenState extends State<NvScanContinuScreen> with Douchett
             ),
           ),
           ActionEntete(icon: Icons.file_download_outlined, tooltip: 'Exporter la session (CSV)', onPressed: _exporter),
-          PopupMenuButton<String>(
-            tooltip: 'Plus',
+          IconButton(
+            key: const ValueKey('nv-menu-scan'),
+            tooltip: 'Plus d\'actions',
             icon: const Icon(Icons.more_vert, color: Colors.white),
-            onSelected: (v) {
+            onPressed: () async {
+              final v = await nvMenu<String>(context, entrees: const [
+                NvEntree(Icons.cloud_upload_outlined, 'Envoyer les saisies maintenant', 'envoyer'),
+                NvEntree(Icons.history, 'Historique des cumuls', 'cumuls'),
+                NvEntree(Icons.close, 'Quitter le scan', 'quitter', danger: true),
+              ]);
+              if (!context.mounted) return;
               if (v == 'envoyer') envoyerInventaire();
               if (v == 'cumuls') Navigator.of(context).push(nvRoute(const NvCumulsScreen()));
+              if (v == 'quitter') {
+                final nav = Navigator.of(context);
+                if (await securiteSortie() && mounted) nav.pop();
+              }
+              reprendreFocusScan();
             },
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'envoyer', child: Text('Envoyer les données')),
-              const PopupMenuItem(value: 'cumuls', child: Text('Historique des cumuls')),
-            ],
           ),
         ],
         body: Stack(children: [

@@ -9,6 +9,9 @@
 //   « vérifié » seulement après confirmation du serveur, obligation de tout traiter (Forcer la sortie) ;
 // - avec rayon (saisie guidée) = VarianceScreen : produits du rayon dont compté ≠ théorique, impression.
 // Corrections : corrigerQuantite (file des saisies puis envoi immédiat), messageEchecCorrection.
+// Réglages (4.13) : « Masquer la quantité déjà comptée » → « compté » masqué (•••), quantité recomptée
+// non pré-remplie, colonnes retirées du PDF / CSV ; « Afficher le stock théorique » désactivé →
+// théorique masqué à l'écran ET dans le PDF / CSV.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -23,6 +26,7 @@ import 'package:prestinv/saisie/saisie_correction.dart';
 import 'package:prestinv/scan/champ_douchette.dart';
 import 'package:prestinv/scan/douchette.dart';
 import 'package:prestinv/ui/clavier.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/exports.dart';
 import 'package:prestinv/ui/navigation.dart';
@@ -230,10 +234,13 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
     _majFeuille?.call(() {});
   }
 
+  bool get _compteMasque => context.read<AppConfig>().masquerDejaCompte;
+
   void _selectionner(int i) => _maj(() {
         _index = i;
-        _saisie = '${_affiches[i].quantiteSaisie}';
-        _preRempli = true;
+        // Quantité déjà comptée masquée : rien n'est pré-rempli (sinon elle se lirait dans le champ).
+        _saisie = _compteMasque ? '' : '${_affiches[i].quantiteSaisie}';
+        _preRempli = !_compteMasque;
         _erreurCorr = null;
       });
 
@@ -340,20 +347,16 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
     if (!_global || _affiches.isEmpty) return true;
     final reste = _affiches.where((p) => !_verifies.contains(p.id)).length;
     if (reste == 0) return true;
-    final r = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Quitter la correction ?'),
-        content: Text('Il reste encore $reste écart(s) à vérifier dans cette liste.\n\nVous avez l\'obligation de tous les traiter.'),
-        actions: [
-          FilledButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Rester et corriger')),
-          TextButton(
-              key: const ValueKey('nv-forcer-sortie'),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text('Forcer la sortie', style: TextStyle(color: ctx.nv.erreur.fg))),
-        ],
-      ),
+    final r = await nvDialogue<bool>(
+      context,
+      fermable: false,
+      icone: Icons.priority_high,
+      titre: 'Quitter la correction ?',
+      message: 'Il reste encore $reste écart(s) à vérifier dans cette liste.\n\nVous avez l\'obligation de tous les traiter.',
+      boutons: const [
+        NvBouton('Rester et corriger', false, genre: NvGenre.principal),
+        NvBouton('Forcer la sortie', true, genre: NvGenre.danger, key: ValueKey('nv-forcer-sortie')),
+      ],
     );
     return r == true;
   }
@@ -365,7 +368,9 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
     setState(() => _impression = true);
     try {
       final ps = List<Product>.of(_affiches);
-      await NvExports.imprimer(() => NvExports.pdfEcarts(_titreDoc, ps), 'Ecarts_${NvExports.nomPropre(_titreDoc)}');
+      final c = context.read<AppConfig>();
+      await NvExports.imprimer(() => NvExports.pdfEcarts(_titreDoc, ps, theoVisible: c.showTheoreticalStock, compteVisible: !c.masquerDejaCompte),
+          'Ecarts_${NvExports.nomPropre(_titreDoc)}');
     } catch (e) {
       if (mounted) nvMessage(context, 'Erreur lors de l\'impression : $e', ton: context.nv.erreur);
     } finally {
@@ -376,7 +381,9 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
   Future<void> _csv() async {
     if (_affiches.isEmpty) return;
     try {
-      final r = await NvExports.ecrireCsv(NvExports.csvEcarts(_affiches), 'Ecarts_${NvExports.nomPropre(_titreDoc)}_${NvExports.horodatage()}.csv', 'Écarts $_titreDoc');
+      final c = context.read<AppConfig>();
+      final r = await NvExports.ecrireCsv(NvExports.csvEcarts(_affiches, theoVisible: c.showTheoreticalStock, compteVisible: !c.masquerDejaCompte),
+          'Ecarts_${NvExports.nomPropre(_titreDoc)}_${NvExports.horodatage()}.csv', 'Écarts $_titreDoc');
       if (mounted && r.cheminTelechargements != null) nvMessage(context, 'Export réussi dans Téléchargements.', ton: context.nv.ok);
     } catch (e) {
       if (mounted) nvMessage(context, 'Erreur export : $e', ton: context.nv.erreur);
@@ -384,15 +391,10 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
   }
 
   Future<void> _choisirRayon() async {
-    final r = await showModalBottomSheet<({Rayon? r})>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          ListTile(title: const Text('Tous les emplacements', style: TextStyle(fontWeight: FontWeight.bold)), onTap: () => Navigator.pop(ctx, (r: null))),
-          for (final x in _rayons) ListTile(title: Text(x.libelle), selected: x.id == _filtreRayon?.id, onTap: () => Navigator.pop(ctx, (r: x))),
-        ]),
-      ),
-    );
+    final r = await nvMenu<({Rayon? r})>(context, titre: 'Emplacement', entrees: [
+      const NvEntree(Icons.select_all, 'Tous les emplacements', (r: null)),
+      for (final x in _rayons) NvEntree(x.id == _filtreRayon?.id ? Icons.radio_button_checked : Icons.place_outlined, x.libelle, (r: x)),
+    ]);
     if (r != null && mounted && r.r?.id != _filtreRayon?.id) _changerRayon(r.r);
   }
 
@@ -423,6 +425,7 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
     final ecartApres = nouveau == null ? null : nouveau - p.quantiteInitiale;
     final ecart = p.quantiteSaisie - p.quantiteInitiale;
     final theo = config.showTheoreticalStock ? '${p.quantiteInitiale}' : '***';
+    final compte = config.masquerDejaCompte ? '•••' : '${p.quantiteSaisie}';
     final couleurEcart = ecartApres == null ? nv.gris : (ecartApres < 0 ? nv.manquant : (ecartApres > 0 ? nv.surplus : nv.ok.fg));
     return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
@@ -454,14 +457,14 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
             // Tablette (maquette C) : chiffres en une ligne, le tableau montre déjà le détail.
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text('Théo $theo · compté ${p.quantiteSaisie}', style: TextStyle(color: nv.encre, fontSize: 15)),
+              child: Text('Théo $theo · compté $compte', style: TextStyle(color: nv.encre, fontSize: 15)),
             )
           else ...[
           const SizedBox(height: 10),
           Row(children: [
             Expanded(child: Chiffre('Théorique', theo)),
             const SizedBox(width: 6),
-            Expanded(child: Chiffre('Compté', '${p.quantiteSaisie}')),
+            Expanded(child: Chiffre('Compté', compte)),
             const SizedBox(width: 6),
             Expanded(child: Chiffre('Nouveau', nouveau == null ? '—' : '$nouveau')),
             const SizedBox(width: 6),
@@ -493,7 +496,7 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
               child: OutlinedButton(
                 key: const ValueKey('nv-garder'),
                 onPressed: _envoi ? null : () => _corriger(garder: p.quantiteSaisie),
-                child: FittedBox(fit: BoxFit.scaleDown, child: Text('Garder ${p.quantiteSaisie}')),
+                child: FittedBox(fit: BoxFit.scaleDown, child: Text(config.masquerDejaCompte ? 'Garder' : 'Garder ${p.quantiteSaisie}')),
               ),
             ),
             const SizedBox(width: 8),
@@ -527,7 +530,9 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
     final e = p.quantiteSaisie - p.quantiteInitiale;
     final v = valeurEcart(p);
     final ok = _verifies.contains(p.id);
-    final theo = context.read<AppConfig>().showTheoreticalStock ? '${p.quantiteInitiale}' : '***';
+    final config = context.read<AppConfig>();
+    final theo = config.showTheoreticalStock ? '${p.quantiteInitiale}' : '***';
+    final compte = config.masquerDejaCompte ? '•••' : '${p.quantiteSaisie}';
     final couleur = e < 0 ? nv.manquant : (e > 0 ? nv.surplus : nv.gris);
     return Opacity(
       opacity: ok ? 0.75 : 1,
@@ -543,7 +548,7 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
               Text(p.produitName, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5, color: nv.encre)),
               Text.rich(
                 TextSpan(children: [
-                  TextSpan(text: 'Théo $theo · compté ${p.quantiteSaisie}${p.locationLabel != null ? ' · ${p.locationLabel}' : ''}'),
+                  TextSpan(text: 'Théo $theo · compté $compte${p.locationLabel != null ? ' · ${p.locationLabel}' : ''}'),
                   if (ok) TextSpan(text: ' · vérifié ✓', style: TextStyle(color: nv.ok.fg, fontWeight: FontWeight.bold)),
                 ]),
                 maxLines: 2,
@@ -565,6 +570,7 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
   Widget _tableau(BuildContext context) {
     final nv = context.nv;
     final theoVisible = context.read<AppConfig>().showTheoreticalStock;
+    final compteVisible = !context.read<AppConfig>().masquerDejaCompte;
     TextStyle entete = TextStyle(color: nv.gris, fontWeight: FontWeight.bold, fontSize: 14);
     Widget cellule(String t, {TextAlign a = TextAlign.right, TextStyle? s, double? w}) {
       final texte = Text(t, textAlign: a, maxLines: w == null ? 2 : 1, overflow: TextOverflow.ellipsis, style: s);
@@ -610,7 +616,7 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
                       child: Row(children: [
                         cellule(p.produitName, a: TextAlign.left, s: TextStyle(fontWeight: FontWeight.w800, color: nv.encre)),
                         cellule(theoVisible ? '${p.quantiteInitiale}' : '***', s: TextStyle(color: nv.encre), w: 44),
-                        cellule('${p.quantiteSaisie}', s: TextStyle(color: nv.encre), w: 62),
+                        cellule(compteVisible ? '${p.quantiteSaisie}' : '•••', s: TextStyle(color: nv.encre), w: 62),
                         cellule(signe(e), s: TextStyle(color: couleur, fontWeight: FontWeight.w900), w: 50),
                         cellule(francs(valeurEcart(p), signeExplicite: true), s: TextStyle(color: nv.encre), w: 98),
                         const SizedBox(width: 12),

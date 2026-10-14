@@ -9,9 +9,11 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/interface_version.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/ecrans/reglages_scan_screen.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/presentation_style.dart';
+import 'package:prestinv/ui/taille_ecran.dart';
 import 'package:prestinv/ui/theme.dart';
 import 'package:prestinv/utils/saisie_input.dart';
 import 'package:prestinv/widgets/pin_admin.dart';
@@ -70,6 +72,43 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<bool> _pin(String motif) => widget.verifierPin != null ? widget.verifierPin!(context) : demanderPinAdmin(context, motif: motif);
+
+  /// Réglage protégé (4.13) : changé seulement après le code administrateur, enregistré tout de suite.
+  Future<void> _reglageProtege({bool? masquer, bool? creation}) async {
+    if (!await _pin('Ce réglage ne peut être modifié que par l\'administrateur.') || !mounted) return;
+    await context.read<AppConfig>().setReglagesProteges(masquerDejaCompte: masquer, creationAutresComptes: creation);
+  }
+
+  /// Taille de l'écran : code administrateur, enregistrée pour le prochain lancement ; « Relancer
+  /// maintenant » l'applique tout de suite (l'interface est reconstruite).
+  Future<void> _changerTaille(TailleEcran t) async {
+    if (t == TailleEcranReglage.enregistree) return;
+    if (!await _pin('La taille de l\'écran ne peut être modifiée que par l\'administrateur.') || !mounted) return;
+    await TailleEcranReglage.enregistrer(t);
+    if (!mounted) return;
+    setState(() {});
+    final maintenant = await nvDialogue<bool>(
+      context,
+      key: const ValueKey('nv-taille-relancer'),
+      icone: Icons.aspect_ratio,
+      ton: context.nv.info,
+      titre: 'Taille de l\'écran : ${t.libelle}',
+      message: 'Appliquée au prochain lancement de l\'application. Vous pouvez aussi relancer l\'affichage maintenant '
+          '(retour à l\'accueil ; la session et les saisies sont gardées).',
+      boutons: const [
+        NvBouton('Plus tard', false, genre: NvGenre.secondaire),
+        NvBouton('Relancer maintenant', true, genre: NvGenre.principal, key: ValueKey('nv-relancer-maintenant')),
+      ],
+    );
+    if (maintenant == true && mounted) {
+      // Retour à l'accueil puis interface reconstruite à la nouvelle taille (le navigateur, à clé
+      // globale, est conservé : session, saisies et accueil restent).
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      TailleEcranReglage.appliquerMaintenant();
+    }
   }
 
   Future<void> _deverrouiller() async {
@@ -251,6 +290,7 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Afficher le stock théorique'),
+              subtitle: const Text('Saisie, écarts, récapitulatif et analyse, à l\'écran comme dans les PDF / CSV'),
               value: _stock,
               onChanged: (v) => setState(() => _stock = v),
             ),
@@ -262,6 +302,46 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
               onChanged: (v) => setState(() => _cumul = v),
             ),
           ]),
+          _rubrique('Réglages protégés', Icons.admin_panel_settings_outlined, [
+            Text('Protégés par le code administrateur ; enregistrés dès le changement.', style: TextStyle(color: nv.gris, fontSize: 13)),
+            SwitchListTile(
+              key: const ValueKey('nv-masquer-deja-compte'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Masquer la quantité déjà comptée'),
+              subtitle: const Text('Saisie et écarts ; masquée aussi dans les PDF / CSV des écarts'),
+              value: config.masquerDejaCompte,
+              onChanged: (v) => _reglageProtege(masquer: v),
+            ),
+            SwitchListTile(
+              key: const ValueKey('nv-creation-autres'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Autoriser la création d\'inventaire aux autres comptes'),
+              subtitle: const Text('Administrateur et pharmacien : toujours. Désactivé par défaut pour les autres comptes.'),
+              value: config.creationAutresComptes,
+              onChanged: (v) => _reglageProtege(creation: v),
+            ),
+            const SizedBox(height: 8),
+            Text('Taille de l\'écran', style: TextStyle(color: nv.encre, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            SegmentedButton<TailleEcran>(
+              key: const ValueKey('nv-taille-ecran'),
+              segments: [
+                for (final t in TailleEcran.values)
+                  ButtonSegment(value: t, label: FittedBox(fit: BoxFit.scaleDown, child: Text(t.libelle, key: ValueKey('nv-taille-${t.name}')))),
+              ],
+              selected: {TailleEcranReglage.enregistree},
+              showSelectedIcon: false,
+              onSelectionChanged: (s) => _changerTaille(s.first),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              TailleEcranReglage.enAttente
+                  ? 'Choix enregistré : appliqué au prochain lancement.'
+                  : 'Pour les petits écrans (Sunmi V2s 5,45″) : Compact et Très compact réduisent toute l\'interface.',
+              key: const ValueKey('nv-taille-aide'),
+              style: TextStyle(color: TailleEcranReglage.enAttente ? nv.attente.fg : nv.gris, fontSize: 13),
+            ),
+          ]),
           _rubrique('Envoi au serveur', Icons.cloud_upload_outlined, [
             SwitchListTile(
               key: const ValueKey('nv-mode-envoi'),
@@ -271,7 +351,9 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
               value: config.sendMode == SendMode.direct,
               onChanged: (v) => config.setSendMode(v ? SendMode.direct : SendMode.collect),
             ),
-            _nombre(_rappel, 'Rappel d\'envoi (minutes, 0 = désactivé)', (v) => SaisieInput.erreurEntier(v, 0, 600, 'Rappel')),
+            _nombre(_rappel, 'Rappel d\'envoi (minutes ; 0 = envoi automatique toutes les 15 min)', (v) => SaisieInput.erreurEntier(v, 0, 600, 'Rappel')),
+            Text('Envoi manuel (Collecte) : bouton d\'envoi à droite du nuage en saisie ; après ce délai, message bloquant '
+                '« Veuillez sauvegarder vos saisies » jusqu\'à l\'envoi.', style: TextStyle(color: nv.gris, fontSize: 13)),
           ]),
           _rubrique('Session et exports', Icons.timer_outlined, [
             _nombre(_deconnexion, 'Déconnexion automatique (minutes, 0 = désactivée)', (v) => SaisieInput.erreurEntier(v, 0, 600, 'Délai')),
