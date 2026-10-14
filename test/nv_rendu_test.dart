@@ -149,6 +149,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('nv-reessayer')));
     await tester.pumpAndSettle();
     expect(find.text('Chargement impossible'), findsNothing);
+    // 4.13 : la liste des inventaires de l'accueil se déroule à la demande (flèche ▼).
+    await deroulerInventaires(tester);
     await tester.scrollUntilVisible(find.byKey(const ValueKey('nv-inv-INV1')), 200, scrollable: find.byType(Scrollable).first);
     expect(find.byKey(const ValueKey('nv-inv-INV1')), findsOneWidget);
     await demonter(tester);

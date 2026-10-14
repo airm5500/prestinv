@@ -16,7 +16,14 @@ import 'package:prestinv/screens/license_register_screen.dart';
 import 'package:prestinv/screens/login_screen.dart';
 import 'package:prestinv/screens/serveur_injoignable_screen.dart';
 import 'package:prestinv/screens/uncounted_screen.dart';
+import 'package:prestinv/models/product_filter.dart';
 import 'package:prestinv/ui/ecrans/a_envoyer_screen.dart';
+import 'package:prestinv/ui/ecrans/analyse_screen.dart';
+import 'package:prestinv/ui/ecrans/feuille_scanner.dart';
+import 'package:prestinv/ui/ecrans/inventaire_screen.dart';
+import 'package:prestinv/ui/ecrans/recap_screen.dart';
+import 'package:prestinv/ui/filtre_rayon.dart';
+import 'package:prestinv/ui/taille_ecran.dart';
 import 'package:prestinv/ui/ecrans/accueil_screen.dart';
 import 'package:prestinv/ui/ecrans/choix_rayon_screen.dart';
 import 'package:prestinv/ui/ecrans/collecte_screen.dart';
@@ -61,10 +68,11 @@ class EcranControle {
   const EcranControle(this.nom,
       {required this.nouvelle, required this.construire, this.apres, this.champQuantite, this.anime = false, this.exemptions = const {}});
 
-  /// Monte l'écran avec les providers de l'application (session ouverte, faux serveur réaliste).
-  Widget monterAvec(Banc b) {
+  /// Monte l'écran avec les providers de l'application (session ouverte, faux serveur réaliste), à la
+  /// taille d'écran [taille] (réglage 4.13, comme main()).
+  Widget monterAvec(Banc b, {TailleEcran taille = TailleEcran.automatique}) {
     InterfaceVersion.useNew.value = nouvelle;
-    return nouvelle ? monterNv(b, construire()) : monter(b, construire());
+    return aLaTaille(taille, nouvelle ? monterNv(b, construire()) : monter(b, construire()));
   }
 }
 
@@ -94,7 +102,38 @@ final ecransNouvelleInterface = <EcranControle>[
   EcranControle('À envoyer', nouvelle: true, construire: () => const NvAEnvoyerScreen()),
   EcranControle('Création d\'inventaire', nouvelle: true, construire: () => const NvCreationInventaireScreen()),
   EcranControle('Réglages', nouvelle: true, construire: () => const NvConfigScreen()),
+  // 4.13 (maquette validée) :
+  EcranControle('Inventaire choisi', nouvelle: true, construire: () => NvInventaireScreen(inventaire: inventaireEssai), apres: actualiserAvancement),
+  EcranControle('Accueil, liste déroulée', nouvelle: true, construire: () => const NvAccueilScreen(), apres: deroulerInventaires),
+  EcranControle('Feuille Scanner pour…', nouvelle: true, construire: () => Scaffold(body: Align(alignment: Alignment.bottomCenter, child: Material(child: FeuilleScanner(inventaires: [inventaireEssai, inventaireEssai2], courantId: 'INV1'))))),
+  EcranControle('Saisie guidée, filtre appliqué', nouvelle: true,
+      construire: () => NvSaisieGuideeScreen(inventaire: inventaireEssai, rayonId: 'S2B2'), apres: appliquerFiltre, champQuantite: quantiteNv),
+  EcranControle('Filtre du rayon', nouvelle: true,
+      construire: () => Scaffold(
+          body: Center(child: FenetreFiltre(actuel: ProductFilter(type: FilterType.numeric, from: '2', to: '3'), total: 4, rayon: 'S2B2 – ANTIBIOTIQUES', oublis: 1)))),
+  EcranControle('Récapitulatif du rayon', nouvelle: true,
+      construire: () => const NvRecapScreen(inventoryId: 'INV1', rayonId: 'S1A0T2', rayonName: 'S1A0T2 – CANNES', retourSaisie: true)),
+  EcranControle('Analyse, tous les emplacements', nouvelle: true, construire: () => NvAnalyseScreen(inventaireInitial: inventaireEssai)),
 ];
+
+final inventaireEssai2 = Inventory(id: 'INV2', libelle: 'Réserve S3 — octobre');
+
+Future<void> actualiserAvancement(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('nv-actualiser-avancement')));
+  await tester.pumpAndSettle();
+}
+
+/// Filtre n° 2 à 3 appliqué par la fenêtre du filtre (ligne réservée remplie, bouton bleu plein).
+Future<void> appliquerFiltre(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('nv-filtre')));
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byKey(const ValueKey('nv-filtre-num-de')), '2');
+  await tester.enterText(find.byKey(const ValueKey('nv-filtre-num-a')), '3');
+  await tester.tap(find.byKey(const ValueKey('nv-appliquer-filtre')));
+  await tester.pumpAndSettle();
+  FocusManager.instance.primaryFocus?.unfocus();
+  await tester.pumpAndSettle();
+}
 
 /// Anomalie connue A2 (test/README.md) : textes gris clair des écrans d'origine sous le seuil de
 /// contraste WCAG. Les écrans d'origine restent STRICTEMENT inchangés (choix de l'officine) : la règle

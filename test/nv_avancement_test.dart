@@ -1,16 +1,23 @@
-// Nouvelle interface — accueil : « Actualiser l'avancement » calcule l'état des rayons À LA DEMANDE
-// (mêmes requêtes que « Choisir un rayon »), jamais automatiquement ; progression « Rayon i/n »,
-// annulation, anti double appui, motif d'échec affiché, résultat gardé avec son heure.
+// Nouvelle interface — carte « Inventaire en cours » : « Actualiser » calcule l'avancement À LA DEMANDE
+// (mêmes requêtes que « Choisir un rayon »), jamais automatiquement à l'affichage ; progression
+// « Rayon i/n », annulation, anti double appui, motif d'échec affiché, résultat gardé avec son heure.
+// 4.13 : la carte « Inventaire en cours » a quitté l'accueil (revue du pharmacien) pour l'écran de
+// l'inventaire choisi (NvInventaireScreen, maquette Hub) : mêmes attentes, montées sur cet écran. Le
+// bouton s'appelle « Actualiser » (maquette) ; le pourcentage est désormais compté en produits — sur ce
+// jeu d'essai, 8 produits comptés sur 12 = 67 %, comme le calcul par rayons (1 + 2 × ½) / 3.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/ui/avancement.dart';
-import 'package:prestinv/ui/ecrans/accueil_screen.dart';
+import 'package:prestinv/models/inventory.dart';
+import 'package:prestinv/ui/ecrans/inventaire_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'helpers/banc_essai.dart';
 import 'helpers/douchette_essai.dart';
 import 'helpers/faux_prestige_http.dart';
 import 'helpers/nouvelle_interface.dart';
+
+final _inv = Inventory(id: 'INV1', libelle: 'Inventaire annuel 2026');
 
 /// Requêtes d'état des rayons (celles que le calcul envoie).
 int requetesEtat(FauxPrestige s) => s.appels.where((a) => a.endsWith('TouchedRayon') || a.endsWith('UntouchedRayon') || a == 'GET rayons').length;
@@ -48,10 +55,10 @@ void main() {
     tailleEcran(tester, telephone360);
     final b = await banc();
     b.serveur.delais['detailsTouchedRayon'] = const Duration(milliseconds: 300);
-    await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
+    await tester.pumpWidget(monterNv(b, NvInventaireScreen(inventaire: _inv)));
     await tester.pumpAndSettle();
     expect(requetesEtat(b.serveur), 0, reason: 'pas de calcul à l\'affichage de l\'accueil');
-    expect(find.text('Actualiser l\'avancement'), findsOneWidget);
+    expect(find.text('Actualiser'), findsOneWidget);
     expect(find.byKey(const ValueKey('nv-avancement-pct')), findsNothing);
 
     await tester.tap(bouton);
@@ -64,9 +71,10 @@ void main() {
     await finir(tester);
 
     expect(find.byKey(const ValueKey('nv-avancement-progression')), findsNothing);
-    expect(find.textContaining('1 rayon(s) terminé(s) sur 3'), findsOneWidget);
+    expect(find.textContaining('Rayons : 1 terminé(s) sur 3'), findsOneWidget);
     expect(find.textContaining('2 commencé(s)'), findsOneWidget);
-    expect(find.text('67 %'), findsOneWidget, reason: '(1 + 2 × ½) / 3');
+    expect(find.text('67 %'), findsOneWidget, reason: '8 produits comptés sur 12 (= (1 + 2 × ½) / 3 rayons)');
+    expect(find.text('8 / 12'), findsOneWidget, reason: 'compte sur la ligne de la barre');
     final heure = tester.widget<Text>(find.byKey(const ValueKey('nv-avancement-heure'))).data!;
     expect(heure, matches(RegExp(r'^Avancement à \d\d:\d\d$')));
     // 1 liste des rayons + 3 « comptés » + 3 « restants » (les trois rayons sont entamés).
@@ -77,7 +85,7 @@ void main() {
     // Retour sur l'accueil (nouvel affichage, cache mémoire vidé = redémarrage) : avancement relu, sans requête.
     AvancementCalcul.viderCache();
     await tester.pumpWidget(const SizedBox());
-    await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
+    await tester.pumpWidget(monterNv(b, NvInventaireScreen(inventaire: _inv)));
     await tester.pumpAndSettle();
     expect(find.text(heure), findsOneWidget);
     expect(find.text('67 %'), findsOneWidget);
@@ -89,7 +97,7 @@ void main() {
     tailleEcran(tester, telephone360);
     final b = await banc();
     b.serveur.delais['rayons'] = const Duration(milliseconds: 200);
-    await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
+    await tester.pumpWidget(monterNv(b, NvInventaireScreen(inventaire: _inv)));
     await tester.pumpAndSettle();
     await tester.tap(bouton);
     await tester.tap(bouton, warnIfMissed: false); // même endroit : n'annule pas, ne relance pas
@@ -105,7 +113,7 @@ void main() {
   testWidgets('annulation : arrêt immédiat, réponse en vol ignorée, ancien résultat gardé', (tester) async {
     tailleEcran(tester, telephone360);
     final b = await banc();
-    await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
+    await tester.pumpWidget(monterNv(b, NvInventaireScreen(inventaire: _inv)));
     await tester.pumpAndSettle();
     await tester.tap(bouton);
     await tester.pumpAndSettle();
@@ -136,7 +144,7 @@ void main() {
   testWidgets('erreur réseau : motif affiché, arrêt rapide, dernier avancement gardé ; Réessayer = Actualiser', (tester) async {
     tailleEcran(tester, telephone360);
     final b = await banc();
-    await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
+    await tester.pumpWidget(monterNv(b, NvInventaireScreen(inventaire: _inv)));
     await tester.pumpAndSettle();
 
     // Liste des rayons injoignable.
@@ -169,7 +177,7 @@ void main() {
     tailleEcran(tester, telephone360);
     final b = await banc();
     b.serveur.codes['detailsTouchedRayon'] = 401;
-    await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
+    await tester.pumpWidget(monterNv(b, NvInventaireScreen(inventaire: _inv)));
     await tester.pumpAndSettle();
     await tester.tap(bouton);
     await tester.pumpAndSettle();
@@ -184,7 +192,7 @@ void main() {
       tailleEcran(tester, taille);
       final b = await banc();
       b.serveur.delais['detailsTouchedRayon'] = const Duration(milliseconds: 300);
-      await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
+      await tester.pumpWidget(monterNv(b, NvInventaireScreen(inventaire: _inv)));
       await tester.pumpAndSettle();
       await tester.tap(bouton);
       await tester.pump(const Duration(milliseconds: 50));

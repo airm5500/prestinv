@@ -17,6 +17,7 @@ import 'package:prestinv/ui/ecrans/collecte_screen.dart';
 import 'package:prestinv/ui/ecrans/connexion_screen.dart';
 import 'package:prestinv/ui/ecrans/creation_inventaire_screen.dart';
 import 'package:prestinv/ui/ecrans/ecarts_screen.dart';
+import 'package:prestinv/ui/ecrans/inventaire_screen.dart';
 import 'package:prestinv/ui/ecrans/rapport_versement_screen.dart';
 import 'package:prestinv/ui/ecrans/saisie_guidee_screen.dart';
 import 'package:prestinv/ui/ecrans/scan_continu_screen.dart';
@@ -56,6 +57,12 @@ void main() {
     await seConnecter(tester);
     expect(find.byType(NvAccueilScreen), findsOneWidget);
     expect(app.auth.sessionCookie, 'JSESSIONID=essai-1');
+    // 4.13 : accueil de la maquette (« Prestige Inventaire », pharmacie, bienvenue) ; liste à dérouler.
+    expect(find.text('PRESTIGE INVENTAIRE'), findsOneWidget);
+    expect(find.text(CompteFictif.officine), findsOneWidget);
+    expect(find.text('Bienvenu(e), ${CompteFictif.prenom} ${CompteFictif.nom}'), findsOneWidget);
+    expect(find.text('Voir les inventaires (2)'), findsOneWidget);
+    await deroulerInventaires(tester);
     expect(find.text('Inventaire annuel 2026'), findsWidgets);
     // Toutes les requêtes après la connexion portent le cookie de la session.
     final derniereConnexion = app.serveur.requetes.lastIndexWhere((r) => r.route == 'user/auth');
@@ -70,12 +77,12 @@ void main() {
     final app = await lancerApplication(tester);
     await seConnecter(tester);
 
-    // Choix de l'inventaire en cours (mémorisé).
-    await toucher(tester, find.byKey(const ValueKey('nv-inv-INV2')));
-    await tester.pumpAndSettle();
+    // Choix de l'inventaire (mémorisé) : obligatoire avant toute saisie (4.13 : liste déroulée de l'accueil).
+    await choisirInventaire(tester, 'INV2');
+    expect(find.byType(NvInventaireScreen), findsOneWidget);
     expect((await SharedPreferences.getInstance()).getString(InventaireCourant.cle), 'INV2');
-    await toucher(tester, find.byKey(const ValueKey('nv-inv-INV1')));
-    await tester.pumpAndSettle();
+    await revenirAccueil(tester);
+    await choisirInventaire(tester, 'INV1');
     expect((await SharedPreferences.getInstance()).getString(InventaireCourant.cle), 'INV1');
 
     await toucherCle(tester, 'nv-saisie-guidee');
@@ -106,7 +113,10 @@ void main() {
     tailleEcran(tester, telephone360);
     final app = await lancerApplication(tester, mode: SendMode.direct);
     await seConnecter(tester);
-    await toucherCle(tester, 'nv-scan-continu');
+    // 4.13 : onglet Scanner → « Scanner pour… » → scan continu dans l'inventaire présélectionné.
+    await toucher(tester, find.text('Scanner'));
+    await tester.pumpAndSettle();
+    await toucherCle(tester, 'nv-scanner-commencer');
     await tester.pumpAndSettle();
     expect(find.byType(NvScanContinuScreen), findsOneWidget);
     expect(champScanAFocus(tester), isTrue, reason: 'douchette prête dès l\'ouverture');
@@ -130,11 +140,14 @@ void main() {
     await fermerApplication(tester);
   });
 
-  testWidgets('écarts et « Actualiser l\'avancement » depuis l\'accueil', (tester) async {
+  testWidgets('écarts et « Actualiser » de l\'inventaire choisi', (tester) async {
     tailleEcran(tester, telephone360);
     final app = await lancerApplication(tester);
     await seConnecter(tester);
-    expect(find.byKey(const ValueKey('nv-avancement-pct')), findsNothing, reason: 'jamais calculé automatiquement');
+    expect(app.serveur.recues('detailsTouchedRayon'), isEmpty, reason: 'rien n\'est calculé au lancement');
+    // 4.13 : l'avancement est calculé au déroulé de la liste (ligne par ligne), puis sur demande.
+    await choisirInventaire(tester, 'INV1');
+    expect(find.byKey(const ValueKey('nv-avancement-pct')), findsOneWidget, reason: 'calculé au déroulé de la liste');
     final avant = app.serveur.recues('detailsTouchedRayon').length;
     await toucherCle(tester, 'nv-actualiser-avancement');
     await laisserFinir(tester);
@@ -182,7 +195,7 @@ void main() {
     await fermerApplication(tester);
   });
 
-  testWidgets('création d\'un inventaire depuis l\'accueil → il devient choisissable', (tester) async {
+  testWidgets('création d\'un inventaire depuis l\'accueil → sélectionné, puis visible et choisissable (guidée, scan)', (tester) async {
     tailleEcran(tester, telephone360);
     final app = await lancerApplication(tester);
     await seConnecter(tester);
@@ -195,8 +208,19 @@ void main() {
     await toucherCle(tester, 'confirmer-creation');
     await tester.pumpAndSettle();
     expect(app.serveur.catalogue.creations.single.$1, 'Réserve novembre');
-    expect(find.byType(NvAccueilScreen), findsOneWidget);
+    // Bug corrigé (4.13) : l'inventaire créé est relu (InventoryProvider) et sélectionné.
+    expect(find.byType(NvInventaireScreen), findsOneWidget);
     expect(find.text('Réserve novembre'), findsWidgets);
+    await toucherCle(tester, 'nv-saisie-guidee');
+    await tester.pumpAndSettle();
+    expect(find.byType(NvChoixRayonScreen), findsOneWidget, reason: 'saisie guidée ouverte sur le nouvel inventaire');
+    await revenirAccueil(tester);
+    await deroulerInventaires(tester);
+    expect(find.text('Réserve novembre'), findsWidgets);
+    // Visible aussi dans l'onglet Scanner (scan continu), présélectionné.
+    await toucher(tester, find.text('Scanner'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Réserve novembre'), findsWidgets);
     await fermerApplication(tester);
   });
 

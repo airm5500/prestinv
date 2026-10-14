@@ -18,9 +18,12 @@ class CompteFictif {
 /// serveur répond en mémoire).
 const adresseServeurFictive = 'serveur-essai.invalid';
 
-/// Réponse de /user/auth pour [login].
-Map<String, dynamic> utilisateurFictif(String login) => {
+/// Réponse de /user/auth pour [login] (même forme que AccountResource.auth : « xtypeuser » vaut
+/// « dashboard » pour l'administrateur / le pharmacien, « mainmenumanager » pour les autres profils).
+/// [typeAccueil] null : serveur plus ancien qui n'envoie pas « xtypeuser » (profil inconnu).
+Map<String, dynamic> utilisateurFictif(String login, {String? typeAccueil = 'dashboard'}) => {
       'success': true,
+      if (typeAccueil != null) 'xtypeuser': typeAccueil,
       'str_USER_ID': 'U-ESSAI-1',
       'str_LOGIN': login,
       'str_FIRST_NAME': CompteFictif.prenom,

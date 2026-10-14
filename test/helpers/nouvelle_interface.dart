@@ -112,3 +112,27 @@ void activerNouvelleInterface() {
   InterfaceVersion.useNew.value = true;
   addTearDown(() => InterfaceVersion.useNew.value = false);
 }
+
+/// Accueil de la nouvelle interface (4.13) : déroule « Voir les inventaires » s'il est replié, puis
+/// laisse finir le calcul de l'avancement des lignes.
+Future<void> deroulerInventaires(WidgetTester tester) async {
+  if (find.byKey(const ValueKey('nv-fleche-bas')).evaluate().isNotEmpty) {
+    await tester.ensureVisible(find.byKey(const ValueKey('nv-voir-inventaires')));
+    await tester.tap(find.byKey(const ValueKey('nv-voir-inventaires')));
+  }
+  for (var i = 0; i < 5; i++) {
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+  await tester.pumpAndSettle();
+}
+
+/// Choisit l'inventaire [id] sur l'accueil (sélection obligatoire avant toute saisie, comme l'ancienne
+/// version) : son écran (« Inventaire en cours ») s'ouvre.
+Future<void> choisirInventaire(WidgetTester tester, String id) async {
+  await deroulerInventaires(tester);
+  final f = find.byKey(ValueKey('nv-ouvrir-$id'));
+  await tester.ensureVisible(f);
+  await tester.pumpAndSettle();
+  await tester.tap(f);
+  await tester.pumpAndSettle();
+}

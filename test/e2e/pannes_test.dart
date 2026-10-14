@@ -105,6 +105,8 @@ void main() {
       await seConnecter(tester);
       expect(find.byType(NvAccueilScreen), findsOneWidget);
       app.serveur.expirerSessions();
+      // 4.13 : sélection obligatoire de l'inventaire avant toute saisie (écran de l'inventaire).
+      await choisirInventaire(tester, 'INV1');
       await toucher(tester, find.byKey(const ValueKey('nv-saisie-guidee')));
       await tester.pumpAndSettle();
       expect(find.byType(NvChoixRayonScreen), findsOneWidget);
@@ -141,6 +143,8 @@ void main() {
       tailleEcran(tester, telephone360);
       final app = await lancerApplication(tester);
       await seConnecter(tester);
+      // 4.13 : sélection obligatoire de l'inventaire avant toute saisie (écran de l'inventaire).
+      await choisirInventaire(tester, 'INV1');
       await toucher(tester, find.byKey(const ValueKey('nv-saisie-guidee')));
       await tester.pumpAndSettle();
       await toucher(tester, find.text('S2B2 – ANTIBIOTIQUES'));
@@ -154,7 +158,8 @@ void main() {
       app.serveur.expirerSessions();
       await tester.tap(find.byKey(const ValueKey('nv-menu-guidee')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Envoyer les données'));
+      // 4.13 : menu ⋮ en feuille du bas (maquette) ; « Envoyer les données » → « Envoyer les saisies maintenant ».
+      await tester.tap(find.byKey(const ValueKey('nv-menu-envoyer')));
       await tester.pump(const Duration(milliseconds: 500));
       expect(find.textContaining('Session expirée — reconnectez-vous'), findsWidgets);
       expect(find.textContaining('injoignable'), findsNothing);
@@ -183,6 +188,8 @@ void main() {
       final app = await lancerApplication(tester);
       await seConnecter(tester);
       app.serveur.couper();
+      // 4.13 : sélection obligatoire de l'inventaire avant toute saisie (écran de l'inventaire).
+      await choisirInventaire(tester, 'INV1');
       await toucher(tester, find.byKey(const ValueKey('nv-saisie-guidee')));
       await tester.pumpAndSettle();
       expect(find.text('Chargement impossible'), findsOneWidget);
@@ -216,6 +223,8 @@ void main() {
       tailleEcran(tester, telephone360);
       final app = await lancerApplication(tester, mode: SendMode.direct);
       await seConnecter(tester);
+      // 4.13 : sélection obligatoire de l'inventaire avant toute saisie (écran de l'inventaire).
+      await choisirInventaire(tester, 'INV1');
       await toucher(tester, find.byKey(const ValueKey('nv-saisie-guidee')));
       await tester.pumpAndSettle();
       await toucher(tester, find.text('S2B2 – ANTIBIOTIQUES'));

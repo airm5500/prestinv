@@ -1,6 +1,7 @@
 // ERGONOMIE / COHÉRENCE D'AFFICHAGE — chaque écran principal (catalogue_ecrans.dart), dans les deux
 // interfaces, rendu sur tout le parc (Sunmi V2s 720×1440, Sunmi V3/V3H/V3mix 1080×1920, téléphone
-// 360×640 dp, tablette 1920×1200) aux échelles de texte 1,0 et 1,3 :
+// 360×640 dp, tablette 1920×1200) aux échelles de texte 1,0 et 1,3 et aux trois tailles d'écran
+// (réglage 4.13 : Automatique, Compact, Très compact — la règle des cibles tactiles suit le facteur) :
 //  - aucun débordement ni exception de rendu ;
 //  - cibles tactiles ≥ 48 dp (androidTapTargetGuideline) et contraste du texte (textContrastGuideline).
 // Variable PRESTINV_RELEVE=1 : relève tous les manquements sans faire échouer (diagnostic).
@@ -35,11 +36,12 @@ void main() {
     group(ecran.nom, () {
       for (final appareil in appareils) {
         for (final echelle in echellesTexte) {
-          testWidgets('$appareil, texte ×$echelle', (tester) async {
+          for (final taille in taillesEcran) {
+          testWidgets('$appareil, texte ×$echelle${suffixeTaille(taille)}', (tester) async {
             configurer(tester, appareil, echelle);
             final b = await banc();
             final rendu = await releverErreursRendu(tester, () async {
-              await tester.pumpWidget(ecran.monterAvec(b));
+              await tester.pumpWidget(ecran.monterAvec(b, taille: taille));
               if (ecran.anime) {
                 await tester.pump(const Duration(milliseconds: 800));
               } else {
@@ -48,7 +50,7 @@ void main() {
               if (ecran.apres != null) await ecran.apres!(tester);
             });
             final semantique = tester.ensureSemantics();
-            final acces = await manquementsAccessibilite(tester, ignorer: ecran.exemptions.keys.toSet());
+            final acces = await manquementsAccessibilite(tester, ignorer: ecran.exemptions.keys.toSet(), taille: taille);
             semantique.dispose();
             final tout = [...rendu.map((e) => 'rendu : $e'), ...acces];
             if (releve && tout.isNotEmpty) {
@@ -60,6 +62,7 @@ void main() {
             await demonter(tester);
             reinitialiserVue(tester);
           });
+          }
         }
       }
     });

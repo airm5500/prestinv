@@ -26,6 +26,9 @@ import 'package:prestinv/ui/ecrans/connexion_screen.dart';
 import 'package:prestinv/ui/ecrans/creation_inventaire_screen.dart';
 import 'package:prestinv/ui/ecrans/cumuls_screen.dart';
 import 'package:prestinv/ui/ecrans/ecarts_screen.dart';
+import 'package:prestinv/ui/ecrans/inventaire_screen.dart';
+import 'package:prestinv/ui/ecrans/analyse_screen.dart';
+import 'package:prestinv/ui/ecrans/restants_screen.dart';
 import 'package:prestinv/ui/ecrans/rapport_versement_screen.dart';
 import 'package:prestinv/ui/ecrans/recap_screen.dart';
 import 'package:prestinv/ui/ecrans/reglages_scan_screen.dart';
@@ -58,22 +61,27 @@ void main() {
   });
 
   group('Accueil', () {
-    testWidgets('inventaires ouverts, inventaire en cours, À envoyer → Envoyer, Reprendre au dernier rayon', (tester) async {
+    // 4.13 (revue du pharmacien) : la carte « Inventaire en cours », la liste « Inventaires ouverts » et
+    // les tuiles ont quitté l'accueil. Mêmes vérifications, à leur nouvelle place : bandeau « à envoyer »
+    // sur l'accueil, carte en cours et « Reprendre » sur l'écran de l'inventaire choisi.
+    testWidgets('À envoyer → Envoyer (accueil) ; inventaire choisi : carte en cours, Reprendre au dernier rayon', (tester) async {
       tailleEcran(tester, telephone360);
       final b = await banc();
       await b.queue.enregistrer(inventaireId: 'INV1', ligneId: 10, quantite: 8, nom: 'BILAN BIOLOGIQUE TOTAL', rayonId: 'S1A0T2', rayonLibelle: 'CANNES');
       await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('nv-en-cours')), findsOneWidget);
-      expect(find.text('Inventaire annuel 2026'), findsWidgets);
+      expect(find.byKey(const ValueKey('nv-en-cours')), findsNothing, reason: 'retirée de l\'accueil');
       expect(find.textContaining('1 saisie(s) sur le téléphone'), findsOneWidget);
-      expect(find.text('Reprendre : rayon CANNES'), findsOneWidget);
-
       await tester.tap(find.byKey(const ValueKey('nv-envoyer-tout')));
       await tester.pumpAndSettle();
       expect(b.serveur.puts, [(10, 8)], reason: 'même envoi que « À envoyer » (SaisieQueue.envoyer)');
       expect(find.byKey(const ValueKey('nv-bandeau-a-envoyer')), findsNothing);
 
+      await choisirInventaire(tester, 'INV1');
+      expect(find.byType(NvInventaireScreen), findsOneWidget);
+      expect(find.byKey(const ValueKey('nv-en-cours')), findsOneWidget);
+      expect(find.text('Inventaire annuel 2026'), findsWidgets);
+      expect(find.text('Reprendre : rayon CANNES'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('nv-reprendre')));
       await tester.pumpAndSettle();
       expect(find.byType(NvSaisieGuideeScreen), findsOneWidget);
@@ -81,7 +89,7 @@ void main() {
       await demonter(tester);
     });
 
-    testWidgets('modes : Saisie guidée → choix du rayon ; Scan continu ; Écarts ; Restants ; Collecte ; barre du bas', (tester) async {
+    testWidgets('modes : inventaire choisi → Saisie guidée, Scan continu, Écarts, Restants ; accueil → Collecte, Scanner, Analyse, Réglages', (tester) async {
       tailleEcran(tester, telephone360);
       final b = await banc();
       await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
@@ -91,34 +99,61 @@ void main() {
         await tester.tap(f);
         await tester.pumpAndSettle();
         expect(find.byType(ecran), findsOneWidget);
-        final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
-        nav.popUntil((r) => r.isFirst);
+        tester.state<NavigatorState>(find.byType(Navigator).first).popUntil((r) => r.isFirst);
         await tester.pumpAndSettle();
       }
 
-      await ouvrirPuisRevenir(find.byKey(const ValueKey('nv-saisie-guidee')), NvChoixRayonScreen);
-      await ouvrirPuisRevenir(find.byKey(const ValueKey('nv-scan-continu')), NvScanContinuScreen);
-      await ouvrirPuisRevenir(find.byKey(const ValueKey('nv-tuile-ecarts')), NvEcartsScreen);
+      await choisirInventaire(tester, 'INV1');
+      final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
+      for (final (cle, ecran) in [
+        ('nv-saisie-guidee', NvChoixRayonScreen),
+        ('nv-scan-continu', NvScanContinuScreen),
+        ('nv-tuile-ecarts', NvEcartsScreen),
+        ('nv-tuile-restants', NvRestantsScreen),
+      ]) {
+        await tester.tap(find.byKey(ValueKey(cle)));
+        await tester.pumpAndSettle();
+        expect(find.byType(ecran), findsOneWidget, reason: cle);
+        nav.pop();
+        await tester.pumpAndSettle();
+        // Sortie protégée (saisie / écarts) : on force la sortie.
+        for (final k in ['nv-quitter-ignorer', 'nv-forcer-sortie']) {
+          if (find.byKey(ValueKey(k)).evaluate().isNotEmpty) {
+            await tester.tap(find.byKey(ValueKey(k)));
+            await tester.pumpAndSettle();
+          }
+        }
+        expect(find.byType(NvInventaireScreen), findsOneWidget);
+      }
+      nav.popUntil((r) => r.isFirst);
+      await tester.pumpAndSettle();
+
       await ouvrirPuisRevenir(find.byKey(const ValueKey('nv-tuile-collecte')), NvCollecteScreen);
-      await ouvrirPuisRevenir(find.text('Scanner'), NvScanContinuScreen);
+      await ouvrirPuisRevenir(find.text('Analyse'), NvAnalyseScreen);
       await ouvrirPuisRevenir(find.text('Réglages'), NvConfigScreen);
+      // Scanner : feuille « Scanner pour… » → Scan continu dans l'inventaire présélectionné.
+      await tester.tap(find.text('Scanner'));
+      await tester.pumpAndSettle();
+      expect(find.text('Scanner pour…'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('nv-scanner-commencer')));
+      await tester.pumpAndSettle();
+      expect(find.byType(NvScanContinuScreen), findsOneWidget);
       await demonter(tester);
     });
 
-    testWidgets('choix de l\'inventaire en cours (mémorisé) et nouvel inventaire (créé, puis choisi)', (tester) async {
+    testWidgets('liste déroulée : inventaire choisi mémorisé ; nouvel inventaire créé puis sélectionné', (tester) async {
       tailleEcran(tester, telephone360);
       final b = await banc();
       await tester.pumpWidget(monterNv(b, const NvAccueilScreen()));
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('nv-inv-INV2')), 200, scrollable: find.byType(Scrollable).first);
-      // scrollUntilVisible s'arrête dès que la ligne est construite (marge de la liste paresseuse) :
-      // on l'amène réellement à l'écran avant de la toucher.
-      await tester.ensureVisible(find.byKey(const ValueKey('nv-inv-INV2')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('nv-inv-INV2')));
-      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('nv-inv-INV2')), findsNothing, reason: 'liste repliée au départ');
+      await choisirInventaire(tester, 'INV2');
+      expect(find.byType(NvInventaireScreen), findsOneWidget);
       expect((await SharedPreferences.getInstance()).getString(InventaireCourant.cle), 'INV2');
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('nouvel-inventaire')), -200, scrollable: find.byType(Scrollable).first);
+      tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const ValueKey('nouvel-inventaire')));
       await tester.tap(find.byKey(const ValueKey('nouvel-inventaire')));
       await tester.pumpAndSettle();
       expect(find.byType(NvCreationInventaireScreen), findsOneWidget);
@@ -128,9 +163,15 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('confirmer-creation')));
       await tester.pumpAndSettle();
       expect(b.serveur.creations.single.$1, 'Réserve novembre');
-      expect(find.byType(NvAccueilScreen), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('Nouveau — créé depuis ce terminal'), 200, scrollable: find.byType(Scrollable).first);
-      expect(find.text('Nouveau — créé depuis ce terminal'), findsOneWidget);
+      // Bug corrigé (4.13) : l'inventaire créé est relu dans la liste et sélectionné.
+      expect(find.byType(NvInventaireScreen), findsOneWidget);
+      expect(find.text('Réserve novembre'), findsWidgets);
+      expect((await SharedPreferences.getInstance()).getString(InventaireCourant.cle), 'NEW1');
+      tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+      await tester.pumpAndSettle();
+      await deroulerInventaires(tester);
+      await tester.scrollUntilVisible(find.textContaining('Nouveau — créé depuis ce terminal'), 200, scrollable: find.byType(Scrollable).first);
+      expect(find.textContaining('Nouveau — créé depuis ce terminal'), findsOneWidget);
       await demonter(tester);
     });
 

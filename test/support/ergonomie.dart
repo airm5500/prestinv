@@ -4,6 +4,7 @@
 // simulé (viewInsets). Pas d'images de référence (« goldens ») : uniquement des règles mesurables.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:prestinv/ui/taille_ecran.dart';
 
 /// Appareil cible : taille physique (px) et densité (px par dp).
 class Appareil {
@@ -30,6 +31,15 @@ const appareils = <Appareil>[
 
 /// Échelles de texte (réglage « Taille de police » d'Android).
 const echellesTexte = <double>[1.0, 1.3];
+
+/// Tailles de l'écran (réglage « Taille de l'écran », 4.13) : Automatique, Compact, Très compact.
+const taillesEcran = TailleEcran.values;
+
+/// Monte [app] (une MaterialApp) à la taille d'écran [t], comme main() (EchelleInterface au-dessus).
+Widget aLaTaille(TailleEcran t, Widget app) => EchelleInterface(facteur: t.facteur, child: app);
+
+/// Suffixe des noms de tests (rien pour Automatique : noms d'origine conservés).
+String suffixeTaille(TailleEcran t) => t == TailleEcran.automatique ? '' : ', taille ${t.libelle}';
 
 /// Place la vue de test dans la configuration [a] / [echelle].
 /// La vue est remise par défaut à la fin du test, même en cas d'échec (sinon un clavier simulé ou une
@@ -75,11 +85,21 @@ final reglesAccessibilite = <String, AccessibilityGuideline>{
 };
 
 /// Évalue les règles d'accessibilité ; renvoie les manquements (vide = conforme).
-Future<List<String>> manquementsAccessibilite(WidgetTester tester, {Set<String> ignorer = const {}}) async {
+/// [taille] : taille de l'écran choisie. En Compact / Très compact, l'interface entière est réduite
+/// VOLONTAIREMENT (réglage protégé de l'administrateur) : les cibles tactiles doivent alors faire
+/// 48 dp DE L'INTERFACE, soit 48 × facteur dp réels (43,2 / 38,4 dp) ; règle inchangée en Automatique.
+Future<List<String>> manquementsAccessibilite(WidgetTester tester, {Set<String> ignorer = const {}, TailleEcran taille = TailleEcran.automatique}) async {
   final manquements = <String>[];
   for (final e in reglesAccessibilite.entries) {
     if (ignorer.contains(e.key)) continue;
-    final r = await e.value.evaluate(tester);
+    // Contraste : couleurs identiques à toutes les tailles, contrôlées en Automatique. En Compact / Très
+    // compact, la règle de Flutter mesure une capture à 1 px par dp où le texte réduit est flouté par
+    // le lissage : elle mesurerait le flou, pas les couleurs (sur l'appareil, rendu en pleine résolution).
+    if (e.key == contraste && taille.facteur != 1.0) continue;
+    final regle = e.key == ciblesTactiles && taille.facteur != 1.0
+        ? MinimumTapTargetGuideline(size: Size.square(48 * taille.facteur), link: 'https://support.google.com/accessibility/android/answer/7101858')
+        : e.value;
+    final r = await regle.evaluate(tester);
     if (!r.passed) manquements.add('${e.key} : ${r.reason?.trim()}');
   }
   return manquements;

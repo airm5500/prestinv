@@ -13,6 +13,7 @@ import 'package:prestinv/saisie/saisie_queue.dart';
 import 'package:prestinv/services/identifiants_securises.dart';
 import 'package:prestinv/services/pin_securise.dart';
 import 'package:prestinv/ui/avancement.dart';
+import 'package:prestinv/ui/taille_ecran.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../helpers/banc_essai.dart';
@@ -45,6 +46,7 @@ Future<AppEssai> lancerApplication(
   DisqueMemoire? disque,
   Map<String, Object> prefs = const {},
   bool attendre = true,
+  DateTime Function()? horloge,
 }) async {
   SharedPreferences.setMockInitialValues({
     'localApiAddress': adresseServeurFictive,
@@ -67,9 +69,10 @@ Future<AppEssai> lancerApplication(
   final config = AppConfig();
   await config.load();
   await InterfaceVersion.load();
+  await TailleEcranReglage.charger();
   final auth = AuthProvider();
   final d = disque ?? DisqueMemoire();
-  final queue = SaisieQueue(store: d);
+  final queue = SaisieQueue(store: d, clock: horloge);
   SaisieQueue.instance = queue;
   await queue.load();
 
@@ -91,6 +94,7 @@ Future<void> fermerApplication(WidgetTester tester) async {
   IdentifiantsSecurises.instance = IdentifiantsSecurises();
   CodeAdmin.instance = CodeAdmin();
   InterfaceVersion.useNew.value = false;
+  TailleEcranReglage.reinitialiser();
 }
 
 /// Connexion par l'écran affiché (nouvelle ou ancienne interface).

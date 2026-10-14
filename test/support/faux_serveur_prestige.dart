@@ -94,6 +94,10 @@ class FauxServeurPrestige {
   /// Comptes acceptés par /user/auth (login → mot de passe). Fictifs.
   final Map<String, String> comptes = {CompteFictif.login: CompteFictif.motDePasse};
 
+  /// Profil renvoyé par /user/auth (« xtypeuser ») : 'dashboard' (administrateur / pharmacien) par
+  /// défaut ; 'mainmenumanager' (autre profil) ; null : champ absent (serveur plus ancien).
+  String? typeAccueil = 'dashboard';
+
   /// Si vrai, toute route protégée exige un cookie JSESSIONID délivré par /user/auth (401 sinon).
   bool exigerSession;
 
@@ -276,6 +280,6 @@ class FauxServeurPrestige {
     }
     final session = 'JSESSIONID=essai-${++_numeroSession}';
     _sessions.add(session);
-    return _json(utilisateurFictif(login), entetes: {'set-cookie': '$session; Path=/prestige; HttpOnly'});
+    return _json(utilisateurFictif(login, typeAccueil: typeAccueil), entetes: {'set-cookie': '$session; Path=/prestige; HttpOnly'});
   }
 }

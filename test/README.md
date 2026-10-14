@@ -16,11 +16,11 @@ PRESTINV_RELEVE=1 flutter test test/ergonomie/affichage_ecrans_test.dart   # rel
 | Dossier | Catégorie | Ce qui est vérifié |
 |---|---|---|
 | `test/*_test.dart` | **Non-régression** (historique), unitaires et widgets | Tous les correctifs passés : file des saisies, scan Sunmi, cumul, versement, licence, session expirée, nouvelle interface écran par écran… Ces tests ne doivent jamais être affaiblis. |
-| `test/unitaires/` | **Unitaires** | Outils de test eux-mêmes (faux serveur : deux transports identiques, scénarios, cookie). |
+| `test/unitaires/` | **Unitaires** | Outils de test eux-mêmes (faux serveur : deux transports identiques, scénarios, cookie) ; règles de la 4.13 sans écran (`regles_4_13_test.dart` : filtre du rayon, boutons Commencer / Poursuivre / Revérifier, rappel bloquant et envoi automatique avec horloge simulée, droit de création, masquages PDF / CSV, taille de l'écran). |
 | `test/non_regression/` | **Non-régression** (garde-fous) | Aucun secret réel dans le dépôt (empreinte du mot de passe retiré), aucun identifiant par défaut. |
 | `test/integration/` | **Intégration** | Services réels (`ApiService`, `AuthProvider`, `LicenseProvider`, `SaisieQueue`, `MoteurVersement`) contre le faux serveur servi en **vrai HTTP** sur 127.0.0.1 : codes 200 / `success:false` / 401 / 403 / 404 / 5xx, délai, connexion coupée ou refusée, cookie `JSESSIONID`. |
 | `test/e2e/` | **Bout en bout** | Application entière (`racineApplication`, comme `main()`), nouvelle interface (par défaut) **et** ancienne (choisie dans les paramètres), parcours complets, pannes, saisie hors ligne puis reprise. Joue aussi les parcours de `integration_test/` pour les garder à jour. |
-| `test/ergonomie/` | **Ergonomie / cohérence d'affichage** | Chaque écran principal sur Sunmi V2s (720×1440 px, ×2), Sunmi V3 / V3H / V3mix (1080×1920 px, ×3), téléphone 360×640 dp, tablette 1920×1200 px (×1,5), texte ×1,0 et ×1,3 : aucun débordement ni exception de rendu, cibles tactiles ≥ 48 dp (`androidTapTargetGuideline`), contraste (`textContrastGuideline`), champ de quantité visible au-dessus du pavé et du clavier système (`viewInsets` simulés). Pas d'images de référence (« goldens ») : uniquement des règles mesurables. |
+| `test/ergonomie/` | **Ergonomie / cohérence d'affichage** | Chaque écran principal sur Sunmi V2s (720×1440 px, ×2), Sunmi V3 / V3H / V3mix (1080×1920 px, ×3), téléphone 360×640 dp, tablette 1920×1200 px (×1,5), texte ×1,0 et ×1,3, et (4.13) aux trois **tailles d'écran** Automatique / Compact / Très compact ; saisie guidée qui **ne bouge pas** (nom court / long, filtre posé / retiré : `stabilite_saisie_test.dart`) : aucun débordement ni exception de rendu, cibles tactiles ≥ 48 dp (`androidTapTargetGuideline`), contraste (`textContrastGuideline`), champ de quantité visible au-dessus du pavé et du clavier système (`viewInsets` simulés). Pas d'images de référence (« goldens ») : uniquement des règles mesurables. |
 | `integration_test/` | Sur appareil | Mêmes parcours que `test/e2e/integration_test_coherence_test.dart`, mais sur un terminal et contre un **vrai** serveur. Identifiants fournis au lancement (`--dart-define=PRESTINV_TEST_LOGIN=… PRESTINV_TEST_PASSWORD=… PRESTINV_TEST_HOST=…`), jamais dans le code. |
 
 La CI (`.github/workflows/ci.yml`) lance chaque catégorie dans une étape séparée, après `flutter analyze`,
@@ -40,6 +40,13 @@ et refuse tout fichier `*_test.dart` rangé hors de ces dossiers.
 | Écarts | `e2e/…`, `nv_ecarts_restants_test` | `e2e/…`, `ecarts_restants_test` |
 | « Actualiser l'avancement » | `e2e/…`, `nv_avancement_test` | — |
 | Changer d'interface dans les paramètres (code administrateur) | `e2e/…`, `nv_interrupteur_test` | `e2e/…`, `nv_interrupteur_test` |
+| 4.13 : accueil → « Voir les inventaires » déroulé → inventaire choisi → saisie guidée → filtre (paire obligatoire, Annuler, Retirer) → menu ⋮ → Quitter | `e2e/parcours_4_13_test` | — |
+| 4.13 : onglet Scanner → « Scanner pour… » → Collecte / scan continu (présélection) | `e2e/parcours_4_13_test` | — |
+| 4.13 : envoi manuel → message BLOQUANT après le délai, « Envoyer maintenant » ; délai 0 → envoi automatique toutes les 15 min | `e2e/parcours_4_13_test`, `unitaires/regles_4_13_test` | — |
+| 4.13 : création réservée (profil « xtypeuser », réglage protégé, code administrateur si profil inconnu), créé → sélectionné, visible ; création depuis la collecte | `e2e/parcours_4_13_test`, `integration/regles_4_13_test`, `nv_accueil_ecrans_test` | — |
+| 4.13 : analyse « Tous les emplacements » (progression, annulation, ligne → aperçu sans requête) | `nv_4_13_test`, `integration/regles_4_13_test` | — |
+| 4.13 : récapitulatif Tous / Déjà comptés / Pas comptés ; masquer la quantité déjà comptée ; stock théorique masqué (écran, PDF / CSV) | `nv_4_13_test`, `unitaires/regles_4_13_test` | — |
+| 4.13 : taille de l'écran (réglage protégé, « Relancer maintenant ») | `e2e/parcours_4_13_test`, `nv_4_13_test`, `ergonomie/*` | `ergonomie/affichage_ecrans_test` |
 | Session expirée → reconnexion sans quitter l'écran | `e2e/pannes_test` | `e2e/pannes_test`, `session_expiree_test` |
 | Session expirée avant le premier envoi → « Session expirée — reconnectez-vous », envoi repris après reconnexion | `e2e/pannes_test`, `integration/services_serveur_test` | `integration/…` |
 | Serveur coupé en cours de travail → message réseau, Réessayer | `e2e/pannes_test` | `e2e/pannes_test` |
@@ -65,7 +72,10 @@ Les tests de widgets tournent en **temps simulé** : n'y utilisez pas de vrai fi
 
 1. **Ergonomie (obligatoire)** : ajoutez une entrée `EcranControle('Nom', nouvelle: true, construire: () => const MonEcran())`
    dans `test/ergonomie/catalogue_ecrans.dart`. L'écran est alors contrôlé automatiquement sur les 4 appareils × 2 échelles
-   (débordements, cibles tactiles, contraste). S'il contient une saisie de quantité, ajoutez une `SituationSaisie`
+   × 3 tailles d'écran (débordements, cibles tactiles, contraste). Aux tailles Compact / Très compact (réduction voulue
+   par l'administrateur), la cible tactile exigée est de 48 dp de l'interface (48 × facteur dp réels) et la règle de
+   contraste n'est pas appliquée : elle mesure une capture à 1 px par dp où le texte réduit est flouté par le lissage
+   (couleurs identiques à toutes les tailles, contrôlées en Automatique). S'il contient une saisie de quantité, ajoutez une `SituationSaisie`
    dans `test/ergonomie/clavier_quantite_test.dart`. Indicateur animé sans fin : `anime: true`.
 2. **Bout en bout** : si l'écran ouvre un nouveau parcours, ajoutez un `testWidgets` dans
    `test/e2e/parcours_nouvelle_interface_test.dart` (et dans `parcours_ancienne_interface_test.dart` si l'écran
@@ -98,8 +108,20 @@ règle est exigée. Corriger l'anomalie = retirer le saut.
 | A4 (nouvelle) | Saisie guidée de la nouvelle interface : pendant la recherche par nom, la quantité sortait de l'écran. | Quantité épinglée hors de la liste (voir A5) : elle reste juste au-dessus du clavier système. | `ergonomie/clavier_quantite_test.dart` (C bis, nouvelle) |
 | A5 (nouvelle) | Saisie guidée de la nouvelle interface : quantité cachée derrière le pavé sur 640 dp de haut / texte ×1,3. | Affichage de la quantité tapée **et** rappel compact du produit (`nv-zone-quantite`, `nv-produit-compact`) épinglés juste au-dessus du pavé, hors de la liste qui défile : toujours visibles sans défilement. Même enchaînement, mêmes touches, même douchette. Le scan continu n'était pas concerné (feuille de quantité). | `ergonomie/clavier_quantite_test.dart` (A et C, nouvelle) |
 | A6 | Fenêtres de quantité d'origine (« Saisie Rapide », « Ajout Collecte ») qui débordaient en texte ×1,3 (pavé de hauteur fixe 280 dp). | Pavé d'**au moins** 280 dp (aspect identique en ×1,0, plus haut si le texte est agrandi), fenêtre défilante. | `ergonomie/clavier_quantite_test.dart` (A et B, origine) |
+| 4.13 | Icône mini-clavier du champ de scan : le clavier du téléphone ne s'ouvrait pas (le champ avait déjà le focus et passer du clavier « aucun » au clavier texte ne l'affiche pas). | `ChampDouchette.basculerClavier` demande l'affichage (`TextInput.show`) après la reconstruction. | `nv_4_13_test.dart` (guidée, scan continu, collecte, écarts, restants) |
+| 4.13 | Inventaire créé depuis le terminal absent de la saisie guidée / du scan continu. | Après création : liste relue par `InventoryProvider` (seule source), inventaire retrouvé par son libellé si le serveur ne donne pas l'identifiant, sélectionné ; liste relue à chaque retour sur l'accueil. | `nv_accueil_ecrans_test`, `e2e/parcours_nouvelle_interface_test`, `integration/regles_4_13_test` |
+| 4.13 | Feuille de quantité de la collecte cachée par le clavier du téléphone s'il était ouvert (vu aux tailles réduites). | La feuille remonte au-dessus du clavier (`viewInsets`). | `ergonomie/clavier_quantite_test.dart` (B, collecte) |
 
 Corrigés lors de la mise en place du socle : pastilles de filtre de la nouvelle interface à 44 dp → 48 dp (règle des
 cibles tactiles) ; date de fin de licence du faux serveur figée au 31/12/2027 (les tests seraient devenus rouges à cette
 date) → relative à aujourd'hui ; `integration_test/app_test.dart` obsolète (sans file des saisies : plantage au
 lancement ; bouton « COMMENCER L'INVENTAIRE » disparu ; identifiant par défaut) → réécrit et vérifié à chaque `flutter test`.
+
+## Tests adaptés en 4.13 (éléments volontairement déplacés)
+
+La revue du pharmacien retire de l'accueil la carte « Inventaire en cours », la liste « Inventaires ouverts » et
+les tuiles ; la sélection d'un inventaire redevient obligatoire avant toute saisie. Les tests qui les visaient
+gardent **les mêmes vérifications**, à la nouvelle place : `nv_avancement_test` (carte et « Actualiser » sur
+l'écran de l'inventaire choisi ; pourcentage compté en produits, 67 % sur le jeu d'essai comme avant),
+`nv_accueil_ecrans_test` (Accueil), `e2e/parcours_nouvelle_interface_test`, `e2e/pannes_test` (passage par
+`choisirInventaire` ; menu ⋮ « Envoyer les saisies maintenant »), `nv_rendu_test` (liste à dérouler).

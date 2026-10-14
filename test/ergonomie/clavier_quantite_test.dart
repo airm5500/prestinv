@@ -14,6 +14,7 @@ import 'package:prestinv/screens/inventory_entry_screen.dart';
 import 'package:prestinv/ui/ecrans/collecte_screen.dart';
 import 'package:prestinv/ui/ecrans/saisie_guidee_screen.dart';
 import 'package:prestinv/ui/ecrans/scan_continu_screen.dart';
+import 'package:prestinv/ui/taille_ecran.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
 
 import '../helpers/banc_essai.dart';
@@ -123,11 +124,11 @@ double? hautDuPave(WidgetTester tester) {
   return null;
 }
 
-Future<Banc> monterSituation(WidgetTester tester, SituationSaisie s) async {
+Future<Banc> monterSituation(WidgetTester tester, SituationSaisie s, {TailleEcran taille = TailleEcran.automatique}) async {
   final b = await preparerBanc(serveur: serveurRealiste());
   b.auth.connecterPourTest(login: 'Awa K.');
   InterfaceVersion.useNew.value = s.nouvelle;
-  await tester.pumpWidget(s.nouvelle ? monterNv(b, s.ecran()) : monter(b, s.ecran()));
+  await tester.pumpWidget(aLaTaille(taille, s.nouvelle ? monterNv(b, s.ecran()) : monter(b, s.ecran())));
   await tester.pumpAndSettle();
   return b;
 }
@@ -157,12 +158,14 @@ void main() {
     group(s.nom, () {
       for (final appareil in appareils) {
         for (final echelle in echellesTexte) {
-          final cas = '$appareil, texte ×$echelle';
+          // Nouvelle interface : aussi aux tailles Compact et Très compact (réglage 4.13).
+          for (final taille in s.nouvelle ? taillesEcran : const [TailleEcran.automatique]) {
+          final cas = '$appareil, texte ×$echelle${suffixeTaille(taille)}';
 
           group('', skip: s.anomalie('A', appareil, echelle), () => testWidgets('$cas — A : quantité à l\'écran, au-dessus du pavé', (tester) async {
             configurer(tester, appareil, echelle);
             final erreurs = await releverErreursRendu(tester, () async {
-              await monterSituation(tester, s);
+              await monterSituation(tester, s, taille: taille);
               await s.amener(tester);
             });
             expect(erreurs, isEmpty, reason: constats(erreurs));
@@ -178,7 +181,7 @@ void main() {
             group('', skip: s.anomalie('B', appareil, echelle), () => testWidgets('$cas — B : clavier système déjà ouvert, fenêtre de quantité lisible', (tester) async {
               configurer(tester, appareil, echelle);
               final erreurs = await releverErreursRendu(tester, () async {
-                await monterSituation(tester, s);
+                await monterSituation(tester, s, taille: taille);
                 ouvrirClavier(tester);
                 await tester.pumpAndSettle();
                 await s.amener(tester);
@@ -191,7 +194,7 @@ void main() {
             group('', skip: s.anomalie('C', appareil, echelle), () => testWidgets('$cas — C : recherche par nom (clavier système) sans débordement, quantité de retour ensuite', (tester) async {
               configurer(tester, appareil, echelle);
               final erreurs = await releverErreursRendu(tester, () async {
-                await monterSituation(tester, s);
+                await monterSituation(tester, s, taille: taille);
                 await s.amener(tester);
                 await basculerClavierTexte(tester);
                 ouvrirClavier(tester);
@@ -207,7 +210,7 @@ void main() {
 
             group('', skip: s.anomalie('Cbis', appareil, echelle), () => testWidgets('$cas — C bis : quantité visible PENDANT la recherche par nom', (tester) async {
               configurer(tester, appareil, echelle);
-              await monterSituation(tester, s);
+              await monterSituation(tester, s, taille: taille);
               await s.amener(tester);
               await basculerClavierTexte(tester);
               ouvrirClavier(tester);
@@ -215,6 +218,7 @@ void main() {
               expect(horsDeVueSousClavier(tester, s.champ(), quoi: 'champ de quantité'), isNull);
               await fin(tester);
             }));
+          }
           }
         }
       }
