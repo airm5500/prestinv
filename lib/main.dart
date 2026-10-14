@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/config/theme_origine.dart';
 import 'package:prestinv/api/api_service.dart';
+import 'package:prestinv/version_app.dart';
 import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/saisie/rappel_envoi.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
@@ -37,6 +38,8 @@ void main() async {
 
   final appConfig = AppConfig();
   await appConfig.load();
+  // Version du paquet installé (pubspec.yaml → Gradle), lue une fois pour l'affichage.
+  await VersionApp.charger();
   await InterfaceVersion.load();
   // Taille de l'écran (Automatique / Compact / Très compact), appliquée dès ce lancement.
   await TailleEcranReglage.charger();

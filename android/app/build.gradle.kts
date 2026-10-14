@@ -28,7 +28,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        // Version unique : celle de pubspec.yaml (« version: 4.11.0+7 » → versionName 4.11.0, versionCode 7).
+        // Version unique : celle de pubspec.yaml (« version: X.Y.Z+N » → versionName X.Y.Z, versionCode N).
+        // Aucun numéro en dur ici (test/non_regression/version_sunmi_test.dart, docs/VERSIONS_SUNMI.md).
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

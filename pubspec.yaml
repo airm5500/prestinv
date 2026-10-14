@@ -28,6 +28,9 @@ dependencies:
   # Mot de passe mémorisé (« Rester connecté ») et empreinte du code administrateur : stockage
   # sécurisé Android (Keystore), plus jamais en clair dans SharedPreferences.
   flutter_secure_storage: ^9.2.4
+  # Version installée (versionName+versionCode) lue à l'exécution : écran de connexion, Réglages.
+  # Version figée (minSdk 19, compileSdk Flutter) : compatible Android 11 / Sunmi.
+  package_info_plus: 9.0.1
 
 
   # CORRECTION : On déplace le package ici

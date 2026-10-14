@@ -65,6 +65,18 @@ jobs:
           set -o pipefail
           flutter build apk --release 2>&1 | tee build_apk.log
 
+      # La version de l'APK construit doit être celle de pubspec.yaml (docs/VERSIONS_SUNMI.md : source unique).
+      - name: Version de l'APK (= pubspec.yaml)
+        shell: bash
+        run: |
+          meta=$(find build/app/outputs -name output-metadata.json | head -1)
+          cat "$meta"
+          attendu=$(sed -n 's/^version: *//p' pubspec.yaml | tr -d '[:space:]')
+          apk=$(python3 -c "import json,sys; e=json.load(open(sys.argv[1]))['elements'][0]; print(f\"{e['versionName']}+{e['versionCode']}\")" "$meta")
+          echo "pubspec.yaml : $attendu · APK : $apk"
+          if [ "$attendu" != "$apk" ]; then echo "::error title=Version de l'APK::APK $apk ≠ pubspec.yaml $attendu"; exit 1; fi
+          echo "::notice title=Version de l'APK::$apk"
+
       # En cas d'échec : l'erreur Gradle est remontée en annotation (lisible sans télécharger le journal).
       - name: Résumé de l'erreur de build
         if: failure()

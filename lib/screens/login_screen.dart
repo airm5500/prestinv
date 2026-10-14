@@ -11,6 +11,7 @@ import 'package:prestinv/ui/theme.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:prestinv/services/identifiants_securises.dart';
+import 'package:prestinv/version_app.dart';
 
 /// Connexion : aiguillage selon l'interrupteur « Nouvelle interface » (InterfaceVersion) — nouvel écran
 /// (lib/ui/ecrans/connexion_screen.dart) ou écran d'origine ([AncienLoginScreen], inchangé).
@@ -95,6 +96,10 @@ class _LoginScreenState extends State<AncienLoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      // Version installée (pubspec.yaml → Gradle), lue à l'exécution, discrète en bas.
+      bottomNavigationBar: const SafeArea(
+        child: Padding(padding: EdgeInsets.only(bottom: 8, top: 4), child: VersionAffichee()),
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),

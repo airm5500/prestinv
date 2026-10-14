@@ -168,3 +168,16 @@ Mêmes routes du serveur, mêmes règles : un serveur injoignable n'est jamais p
 licence ; session expirée → « Se reconnecter » sans quitter l'écran ; toute saisie est gardée sur le
 terminal avant d'être envoyée. Écrans d'origine inchangés (fenêtres comprises), sauf le rappel d'envoi
 de la saisie guidée, remplacé par le rappel bloquant commun (4.13.1).
+
+## Numéro de version et magasin Sunmi (règle permanente)
+
+Dernière version publiée sur le magasin Sunmi : **4.8.5 (code 4)**. La 4.13.1 (code 10) est bien au-dessus.
+Désormais, à chaque livraison (détail dans `docs/VERSIONS_SUNMI.md`) :
+
+1. une seule source, `pubspec.yaml` (`version: X.Y.Z+N`), reprise par Gradle, aucun numéro en dur ;
+2. X.Y.Z jamais inférieur à la version publiée sur Sunmi, +N strictement supérieur à son code ;
+3. +N augmente d'au moins 1 à chaque livraison.
+
+Un test (`test/non_regression/version_sunmi_test.dart`) le vérifie à chaque envoi. La version installée
+(« Version 4.13.1+10 ») s'affiche discrètement en bas de l'écran de connexion et dans les Réglages /
+la Configuration, dans les deux interfaces ; elle est lue dans l'application installée.

@@ -17,6 +17,7 @@ import 'package:prestinv/ui/taille_ecran.dart';
 import 'package:prestinv/ui/theme.dart';
 import 'package:prestinv/utils/saisie_input.dart';
 import 'package:prestinv/widgets/pin_admin.dart';
+import 'package:prestinv/version_app.dart';
 import 'package:provider/provider.dart';
 
 class NvConfigScreen extends StatefulWidget {
@@ -400,6 +401,9 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
             ),
           ]),
           FilledButton(key: const ValueKey('nv-valider-config'), onPressed: _enregistrer, child: const Text('Valider la configuration')),
+          // Version installée (pubspec.yaml → Gradle), lue à l'exécution.
+          const SizedBox(height: 16),
+          VersionAffichee(key: const ValueKey('reglages-version'), couleur: nv.gris),
         ]),
         ),
       ),

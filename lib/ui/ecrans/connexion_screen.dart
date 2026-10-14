@@ -12,6 +12,7 @@ import 'package:prestinv/ui/ecrans/lancement_screen.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/presentation_style.dart';
 import 'package:prestinv/ui/theme.dart';
+import 'package:prestinv/version_app.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -73,6 +74,8 @@ class _NvConnexionScreenState extends State<NvConnexionScreen> {
     return CadreEntree(
       titre: 'Prestige Inventaire',
       sousTitre: 'Connexion',
+      // Version installée (pubspec.yaml → Gradle), lue à l'exécution, discrète en bas.
+      bas: const Padding(padding: EdgeInsets.only(bottom: 8, top: 4), child: VersionAffichee()),
       actions: [
         ActionEntete(
           icon: Icons.settings_outlined,

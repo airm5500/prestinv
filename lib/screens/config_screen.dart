@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:prestinv/widgets/pin_admin.dart';
 import 'package:prestinv/utils/saisie_input.dart';
 import 'package:prestinv/scan/retour_scan.dart';
+import 'package:prestinv/version_app.dart';
 
 class ConfigScreen extends StatefulWidget {
   const ConfigScreen({super.key});
@@ -351,6 +352,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
               width: double.infinity,
               child: ElevatedButton(onPressed: _saveConfiguration, child: const Text('VALIDER LA CONFIGURATION')),
             ),
+            // Version installée (pubspec.yaml → Gradle), lue à l'exécution.
+            const SizedBox(height: 16),
+            const Center(child: VersionAffichee(key: ValueKey('reglages-version'))),
           ],
         ),
         ),
