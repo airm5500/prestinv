@@ -12,7 +12,8 @@ import 'package:prestinv/models/collected_item.dart';
 import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
-import 'package:prestinv/ui/ecrans/creation_inventaire_screen.dart';
+import 'package:prestinv/ui/dialogues.dart';
+import 'package:prestinv/ui/ecrans/accueil_screen.dart' show creerInventaireNv;
 import 'package:prestinv/ui/ecrans/rapport_versement_screen.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/presentation_style.dart';
@@ -22,7 +23,11 @@ import 'package:provider/provider.dart';
 
 class NvVersementScreen extends StatefulWidget {
   final Versement? reprise;
-  const NvVersementScreen({super.key, this.reprise});
+
+  /// Inventaire tout juste créé avec la collecte (« Créer un inventaire avec ces produits ») : le
+  /// versement part directement (rien n'y est encore compté : Remplacer), puis le rapport s'affiche.
+  final Inventory? nouvelInventaire;
+  const NvVersementScreen({super.key, this.reprise, this.nouvelInventaire});
 
   @override
   State<NvVersementScreen> createState() => _NvVersementScreenState();
@@ -44,7 +49,9 @@ class _NvVersementScreenState extends State<NvVersementScreen> {
     final config = context.read<AppConfig>();
     final auth = context.read<AuthProvider>();
     _api = ApiService(baseUrl: config.currentApiUrl, cookie: () => auth.sessionCookie);
-    if (widget.reprise == null) {
+    if (widget.nouvelInventaire != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _verserDansNouveau(widget.nouvelInventaire!));
+    } else if (widget.reprise == null) {
       _charger();
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) => _confirmerReprise());
@@ -71,11 +78,26 @@ class _NvVersementScreenState extends State<NvVersementScreen> {
 
   List<CollectedItem> get _aVerser => _collecte.where((i) => !i.versee).toList();
 
+  Future<void> _verserDansNouveau(Inventory inv) async {
+    final collecte = await CollecteStore.lire();
+    if (!mounted) return;
+    final items = collecte.where((i) => !i.versee).toList();
+    if (items.isEmpty) {
+      Navigator.of(context).pop();
+      return;
+    }
+    await _executer(Versement.depuisCollecte(items, inventaireId: inv.id, inventaireLibelle: inv.libelle, mode: ModeDejaCompte.remplacer));
+  }
+
+  /// « Nouvel inventaire… » : droit de création, création, puis l'inventaire est retrouvé dans la liste
+  /// relue (par son identifiant, sinon par son libellé) et proposé au versement.
   Future<void> _nouvelInventaire() async {
-    final cree = await Navigator.of(context).push<Inventory>(nvRoute(const NvCreationInventaireScreen()));
-    if (!mounted || cree == null) return;
+    final cree = await creerInventaireNv(context);
+    if (!mounted) return;
     await _charger();
-    final trouve = _inventaires?.where((i) => i.id == cree.id).firstOrNull ?? (cree.id.isEmpty ? null : cree);
+    if (cree == null || !mounted) return;
+    final trouve = _inventaires?.where((i) => i.id == cree.id).firstOrNull ??
+        _inventaires?.where((i) => i.libelle.trim().toLowerCase() == cree.libelle.trim().toLowerCase()).firstOrNull;
     if (trouve != null && mounted) await _choisir(trouve);
   }
 
@@ -114,7 +136,7 @@ class _NvVersementScreenState extends State<NvVersementScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(m.libelle, style: TextStyle(fontWeight: FontWeight.bold, color: nv.encre)),
+                          Text(m == ModeDejaCompte.ajouter ? 'Additionner' : m.libelle, style: TextStyle(fontWeight: FontWeight.bold, color: nv.encre)),
                           Text(m.aide, style: TextStyle(color: nv.gris, fontSize: 13.5)),
                         ]),
                       ),
@@ -141,17 +163,17 @@ class _NvVersementScreenState extends State<NvVersementScreen> {
 
   Future<void> _confirmerReprise() async {
     final v = widget.reprise!;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Reprendre le versement'),
-        content: Text('« ${v.inventaireLibelle} » : ${v.aReprendre.length} ligne(s) à reprendre '
-            '(${v.versees.length} déjà versée(s), elles ne sont pas renvoyées). Déjà comptés : ${v.mode.libelle}.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Plus tard')),
-          FilledButton(key: const ValueKey('confirmer-reprise'), onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Reprendre')),
-        ],
-      ),
+    final ok = await nvDialogue<bool>(
+      context,
+      icone: Icons.replay,
+      ton: context.nv.info,
+      titre: 'Reprendre le versement',
+      message: '« ${v.inventaireLibelle} » : ${v.aReprendre.length} ligne(s) à reprendre '
+          '(${v.versees.length} déjà versée(s), elles ne sont pas renvoyées). Déjà comptés : ${v.mode.libelle}.',
+      boutons: const [
+        NvBouton('Plus tard', false, genre: NvGenre.secondaire),
+        NvBouton('Reprendre', true, genre: NvGenre.principal, key: ValueKey('confirmer-reprise')),
+      ],
     );
     if (!mounted) return;
     if (ok != true) {
@@ -184,16 +206,15 @@ class _NvVersementScreenState extends State<NvVersementScreen> {
   }
 
   Future<void> _annuler() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Arrêter le versement ?'),
-        content: const Text('Ce qui est déjà envoyé reste envoyé. Le reste pourra être repris plus tard depuis la collecte.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Continuer')),
-          FilledButton(key: const ValueKey('confirmer-arret'), onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Arrêter')),
-        ],
-      ),
+    final ok = await nvDialogue<bool>(
+      context,
+      icone: Icons.stop_circle_outlined,
+      titre: 'Arrêter le versement ?',
+      message: 'Ce qui est déjà envoyé reste envoyé. Le reste pourra être repris plus tard depuis la collecte.',
+      boutons: const [
+        NvBouton('Continuer', false, genre: NvGenre.secondaire),
+        NvBouton('Arrêter', true, genre: NvGenre.principal, key: ValueKey('confirmer-arret')),
+      ],
     );
     if (ok == true) {
       _moteur?.annuler();
@@ -287,9 +308,11 @@ class _NvVersementScreenState extends State<NvVersementScreen> {
         },
         child: NvScaffold(
           title: 'Verser la collecte',
-          subtitle: widget.reprise != null ? 'Reprise : ${widget.reprise!.inventaireLibelle}' : 'Dans un inventaire ouvert',
+          subtitle: widget.reprise != null
+              ? 'Reprise : ${widget.reprise!.inventaireLibelle}'
+              : (widget.nouvelInventaire != null ? 'Nouvel inventaire : ${widget.nouvelInventaire!.libelle}' : 'Dans un inventaire ouvert'),
           wide: true,
-          body: _enCours || widget.reprise != null ? _progression(context) : _choix(context),
+          body: _enCours || widget.reprise != null || widget.nouvelInventaire != null ? _progression(context) : _choix(context),
         ),
       );
 }

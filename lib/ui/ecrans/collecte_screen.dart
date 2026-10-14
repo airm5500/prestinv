@@ -3,14 +3,21 @@
 // pavé (additionnée si le code est déjà dans la liste et pas encore versé), liste locale, verser dans
 // un inventaire, rapports de versement, reprise d'un versement interrompu, CSV, impression, vider.
 // Même logique et même stockage que CollectionScreen (CollecteStore, clé « collection_data »).
+// 4.13 (maquette « Collecte ») : en bas, « Que faire de cette collecte ? » — « Verser dans un
+// inventaire » (choix de l'inventaire puis Remplacer / Additionner, comme avant) et « Créer un
+// inventaire avec ces produits » (droit de création vérifié ; versement puis rapport des codes non
+// reconnus).
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:prestinv/collecte/collecte_store.dart';
 import 'package:prestinv/collecte/versement.dart';
+import 'package:prestinv/inventaire/autorisation_creation.dart';
 import 'package:prestinv/models/collected_item.dart';
 import 'package:prestinv/scan/champ_douchette.dart';
 import 'package:prestinv/scan/douchette.dart';
 import 'package:prestinv/ui/clavier.dart';
+import 'package:prestinv/ui/dialogues.dart';
+import 'package:prestinv/ui/ecrans/accueil_screen.dart' show accesCreationDe, creerInventaireNv;
 import 'package:prestinv/ui/ecrans/rapport_versement_screen.dart';
 import 'package:prestinv/ui/ecrans/versement_screen.dart';
 import 'package:prestinv/ui/etats.dart';
@@ -76,6 +83,21 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
     if (mounted) await _charger();
   }
 
+  /// « Créer un inventaire avec ces produits » : droit de création, création (libellé proposé), puis
+  /// versement de la collecte dans ce nouvel inventaire et rapport (codes non reconnus listés).
+  Future<void> _creerAvecCollecte() async {
+    final libelle = 'Collecte du ${DateFormat('dd-MM-yyyy HH.mm').format(DateTime.now())}';
+    final inv = await creerInventaireNv(context, libelleInitial: libelle);
+    if (!mounted || inv == null) return;
+    if (inv.id.isEmpty) {
+      nvMessage(context, 'Inventaire créé mais introuvable dans la liste : versez la collecte depuis « Verser dans un inventaire ».',
+          ton: context.nv.attente);
+      return;
+    }
+    await Navigator.of(context).push(nvRoute(NvVersementScreen(nouvelInventaire: inv)));
+    if (mounted) await _charger();
+  }
+
   Future<void> _reprendre() async {
     final v = _aReprendre;
     if (v == null) return;
@@ -122,16 +144,16 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
   }
 
   Future<void> _vider() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Vider la liste ?'),
-        content: const Text('Attention, toutes les données collectées seront perdues.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),
-          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text('Vider', style: TextStyle(color: ctx.nv.erreur.fg))),
-        ],
-      ),
+    final ok = await nvDialogue<bool>(
+      context,
+      icone: Icons.delete_outline,
+      ton: context.nv.erreur,
+      titre: 'Vider la liste ?',
+      message: 'Attention, toutes les données collectées seront perdues.',
+      boutons: const [
+        NvBouton('Annuler', false, genre: NvGenre.secondaire),
+        NvBouton('Vider', true, genre: NvGenre.danger),
+      ],
     );
     if (ok != true) return;
     setState(() => _items.clear());
@@ -140,16 +162,16 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
   }
 
   Future<void> _supprimer(CollectedItem item) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Supprimer la ligne ?'),
-        content: Text('Code : ${item.code}\nQuantité : ${item.quantity}'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),
-          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text('Supprimer', style: TextStyle(color: ctx.nv.erreur.fg))),
-        ],
-      ),
+    final ok = await nvDialogue<bool>(
+      context,
+      icone: Icons.delete_outline,
+      ton: context.nv.erreur,
+      titre: 'Supprimer la ligne ?',
+      message: 'Code : ${item.code}\nQuantité : ${item.quantity}',
+      boutons: const [
+        NvBouton('Annuler', false, genre: NvGenre.secondaire),
+        NvBouton('Supprimer', true, genre: NvGenre.danger),
+      ],
     );
     if (ok != true || !mounted) return;
     setState(() => _items.remove(item));
@@ -213,7 +235,9 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
           return StatefulBuilder(builder: (ctx, set) {
             maj = set;
             final nv = ctx.nv;
+            // Clavier système ouvert (code tapé à la main) : la feuille remonte au-dessus de lui.
             return SingleChildScrollView(
+              padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
@@ -277,25 +301,64 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
     final nonVersees = _nonVersees;
     final unites = nonVersees.fold<int>(0, (s, i) => s + i.quantity);
     final cols = Responsive.columns(context, compact: 1, medium: 2, expanded: 3);
+    final acces = accesCreationDe(context);
+    final panneau = nonVersees.isEmpty
+        ? null
+        : Container(
+            key: const ValueKey('nv-collecte-actions'),
+            decoration: BoxDecoration(
+              color: nv.carte,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              boxShadow: context.nvSombre ? null : const [BoxShadow(color: Color(0x1414213D), blurRadius: 8, offset: Offset(0, -2))],
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: SafeArea(
+              top: false,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+                Text('Que faire de cette collecte ?', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: nv.action)),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const ValueKey('verser-collecte'),
+                  onPressed: _verser,
+                  icon: const Icon(Icons.upload),
+                  label: const Text('Verser dans un inventaire'),
+                ),
+                if (acces != AccesCreation.refuse) ...[
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    key: const ValueKey('creer-avec-collecte'),
+                    onPressed: _creerAvecCollecte,
+                    icon: Icon(acces == AccesCreation.codeAdmin ? Icons.lock_outline : Icons.add),
+                    label: const Text('Créer un inventaire avec ces produits'),
+                  ),
+                  const SizedBox(height: 4),
+                  Text('Les produits reconnus sont comptés dans le nouvel inventaire ; un rapport liste les codes non reconnus.',
+                      style: TextStyle(fontSize: 12, color: nv.gris)),
+                ],
+              ]),
+            ),
+          );
     return NvScaffold(
       title: 'Collecte hors ligne',
+      piedDeCorps: panneau,
       subtitle: 'Sans réseau · versement possible plus tard',
       wide: true,
       actions: [
         ActionEntete(icon: Icons.receipt_long, tooltip: 'Rapports de versement', onPressed: _rapports),
-        PopupMenuButton<String>(
-          tooltip: 'Plus',
+        IconButton(
+          key: const ValueKey('nv-menu-collecte'),
+          tooltip: 'Plus d\'actions',
           icon: const Icon(Icons.more_vert, color: Colors.white),
-          onSelected: (v) {
+          onPressed: () async {
+            final v = await nvMenu<String>(context, entrees: [
+              NvEntree(Icons.file_download_outlined, 'Générer le CSV (Téléchargements)', 'csv', actif: _items.isNotEmpty),
+              NvEntree(Icons.print_outlined, 'Imprimer la liste', 'pdf', actif: _items.isNotEmpty && !_impression),
+              NvEntree(Icons.delete_sweep_outlined, 'Vider la liste', 'vider', actif: _items.isNotEmpty, danger: true),
+            ]);
             if (v == 'csv') _csv();
             if (v == 'pdf') _imprimer();
             if (v == 'vider') _vider();
           },
-          itemBuilder: (_) => [
-            PopupMenuItem(value: 'csv', enabled: _items.isNotEmpty, child: const Text('Générer le CSV (Téléchargements)')),
-            PopupMenuItem(value: 'pdf', enabled: _items.isNotEmpty && !_impression, child: const Text('Imprimer la liste')),
-            PopupMenuItem(value: 'vider', enabled: _items.isNotEmpty, child: const Text('Vider la liste')),
-          ],
         ),
       ],
       header: [
@@ -336,12 +399,6 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
                 Bandeau(key: const ValueKey('bandeau-collecte-versee'), ton: nv.ok, icon: Icons.check_circle, texte: 'Collecte entièrement versée'),
                 const SizedBox(height: 12),
               ],
-              FilledButton.icon(
-                key: const ValueKey('verser-collecte'),
-                onPressed: nonVersees.isEmpty ? null : _verser,
-                icon: const Icon(Icons.upload),
-                label: const Text('Verser dans un inventaire'),
-              ),
               const SectionTitre('Codes collectés'),
               if (_items.isEmpty)
                 const SizedBox(height: 220, child: NvVide(icon: Icons.list_alt, titre: 'Aucune donnée collectée.', detail: 'Scannez des produits pour commencer.'))

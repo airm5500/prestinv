@@ -1,16 +1,20 @@
 // lib/ui/avancement.dart
-// Nouvelle interface — avancement de l'inventaire calculé À LA DEMANDE (bouton « Actualiser
-// l'avancement » de la carte « EN COURS » de l'accueil). Jamais de calcul automatique : le serveur
-// n'expose pas (encore) l'état des rayons en une requête, il faut aujourd'hui deux requêtes par rayon
-// (voir docs/DEMANDE_SERVEUR_COMPTAGE.md).
+// Nouvelle interface — avancement d'un inventaire calculé À LA DEMANDE : « Actualiser » de la carte
+// « Inventaire en cours » (écran de l'inventaire choisi) et déroulé de la liste « Voir les inventaires »
+// de l'accueil (une ligne après l'autre, résultat gardé). Jamais au lancement : le serveur n'expose pas
+// (encore) l'état des rayons en une requête (voir docs/DEMANDE_SERVEUR_COMPTAGE.md).
 //
-// Mêmes appels que l'écran « Choisir un rayon » (EntryProvider.fetchRayons + loadRayonStatuses) :
-//   GET …/rayons, puis pour chaque rayon GET …/detailsTouchedRayon et, s'il a été entamé,
-//   GET …/detailsUntouchedRayon. Même règle d'état : 0 pas commencé, 1 commencé, 2 terminé.
+// Mêmes appels que l'écran « Choisir un rayon » : GET …/rayons, puis pour chaque rayon
+// GET …/detailsTouchedRayon et GET …/detailsUntouchedRayon. Même règle d'état des rayons : 0 pas
+// commencé, 1 commencé, 2 terminé. Depuis la 4.13, les listes reçues servent aussi à compter les
+// PRODUITS (« 110 / 130 », pourcentage) et les écarts : la seconde requête est donc faite pour chaque
+// rayon (avant : seulement pour les rayons entamés).
 // En plus : progression « Rayon 3/12 », annulation, un seul calcul à la fois (anti double appui),
 // motif d'échec affiché (réseau, session expirée…), résultat gardé en mémoire et sur l'appareil avec
-// son heure (« Avancement à 10:42 »).
+// son heure (« Avancement à 10:42 »). Les saisies faites ensuite sur l'appareil sont ajoutées à
+// l'affichage sans nouvelle requête ([etatAvancement]).
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:prestinv/api/api_service.dart';
@@ -26,7 +30,27 @@ class AvancementRayons {
   final Map<String, int> statuts;
   final int total;
 
-  const AvancementRayons({required this.inventaireId, required this.calculeA, required this.statuts, required this.total});
+  /// Produits de l'inventaire (lignes) ; null : calcul d'une version précédente (rayons seulement).
+  final int? totalProduits;
+
+  /// Lignes comptées sur le serveur au moment du calcul.
+  final Set<int>? comptes;
+
+  /// Lignes comptées dont la quantité diffère du stock théorique (écarts) au moment du calcul.
+  final int? ecarts;
+
+  const AvancementRayons({
+    required this.inventaireId,
+    required this.calculeA,
+    required this.statuts,
+    required this.total,
+    this.totalProduits,
+    this.comptes,
+    this.ecarts,
+  });
+
+  /// Comptes en produits disponibles (calcul 4.13).
+  bool get produitsConnus => totalProduits != null && comptes != null;
 
   int get termines => statuts.values.where((s) => s == 2).length;
   int get commences => statuts.values.where((s) => s == 1).length;
@@ -35,8 +59,11 @@ class AvancementRayons {
   /// Rayons dont l'état n'a pas pu être lu (erreur isolée).
   int get inconnus => total - statuts.length;
 
-  /// Même calcul que la carte de l'accueil : terminé = 1, commencé = ½.
-  int get pourcentage => total == 0 ? 0 : ((termines + commences * 0.5) / total * 100).round();
+  /// Avancement arrondi : en produits comptés si connus, sinon par rayons (terminé = 1, commencé = ½).
+  int get pourcentage {
+    if (produitsConnus) return totalProduits == 0 ? 0 : (comptes!.length / totalProduits! * 100).round();
+    return total == 0 ? 0 : ((termines + commences * 0.5) / total * 100).round();
+  }
 
   /// « 10:42 », ou « 12/10 à 10:42 » si le calcul ne date pas d'aujourd'hui.
   String heure({DateTime? maintenant}) {
@@ -47,7 +74,15 @@ class AvancementRayons {
     return memeJour ? h : '${d2(calculeA.day)}/${d2(calculeA.month)} à $h';
   }
 
-  Map<String, dynamic> toJson() => {'inv': inventaireId, 'a': calculeA.toIso8601String(), 'total': total, 'statuts': statuts};
+  Map<String, dynamic> toJson() => {
+        'inv': inventaireId,
+        'a': calculeA.toIso8601String(),
+        'total': total,
+        'statuts': statuts,
+        if (totalProduits != null) 'produits': totalProduits,
+        if (comptes != null) 'comptes': comptes!.toList(),
+        if (ecarts != null) 'ecarts': ecarts,
+      };
 
   static AvancementRayons? fromJson(Map<String, dynamic> j) {
     try {
@@ -56,6 +91,9 @@ class AvancementRayons {
         calculeA: DateTime.parse(j['a'] as String),
         total: (j['total'] as num).toInt(),
         statuts: {for (final e in (j['statuts'] as Map).entries) e.key as String: (e.value as num).toInt()},
+        totalProduits: (j['produits'] as num?)?.toInt(),
+        comptes: j['comptes'] is List ? {for (final c in j['comptes'] as List) (c as num).toInt()} : null,
+        ecarts: (j['ecarts'] as num?)?.toInt(),
       );
     } catch (_) {
       return null;
@@ -102,6 +140,9 @@ class AvancementCalcul extends ChangeNotifier {
   Object? erreurPour(String inventaireId) => _erreurInventaireId == inventaireId ? _erreur : null;
 
   AvancementRayons? resultat(String inventaireId) => _cache[inventaireId];
+
+  /// Résultat gardé pour [inventaireId] (mémoire de la session), sans instance.
+  static AvancementRayons? enCache(String inventaireId) => _cache[inventaireId];
 
   /// Relit le résultat gardé sur l'appareil (sans requête).
   Future<AvancementRayons?> charger(String inventaireId) async {
@@ -163,6 +204,10 @@ class AvancementCalcul extends ChangeNotifier {
       if (annule()) return FinAvancement.annule;
       _rayons = rayons.length;
       final statuts = <String, int>{};
+      final comptes = <int>{};
+      var produits = 0;
+      var ecarts = 0;
+      var tousLus = true;
       var echecsReseau = 0;
       ApiLoadException? dernierEchec;
       for (var i = 0; i < rayons.length; i++) {
@@ -170,18 +215,22 @@ class AvancementCalcul extends ChangeNotifier {
         notifyListeners();
         final r = rayons[i];
         try {
-          final touche = await api.rayonAProduitsComptes(inventaireId, r.id);
+          final touches = await api.lignesCompteesRayon(inventaireId, r.id);
           if (annule()) return FinAvancement.annule;
-          var statut = 0;
-          if (touche) {
-            final restants = await api.rayonAProduitsRestants(inventaireId, r.id);
-            if (annule()) return FinAvancement.annule;
-            statut = restants ? 1 : 2;
+          final restants = await api.lignesRestantesRayon(inventaireId, r.id);
+          if (annule()) return FinAvancement.annule;
+          statuts[r.id] = touches.isEmpty ? 0 : (restants.isEmpty ? 2 : 1);
+          for (final l in touches) {
+            final id = l['id'];
+            if (id is num) comptes.add(id.toInt());
+            final q = l['quantiteSaisie'], t = l['quantiteInitiale'];
+            if (q is num && t is num && q != t) ecarts++;
           }
-          statuts[r.id] = statut;
+          produits += touches.length + restants.length;
           echecsReseau = 0;
         } on ApiLoadException catch (e) {
           if (annule()) return FinAvancement.annule;
+          tousLus = false;
           dernierEchec = e;
           if (e.sessionExpiree) return echec(e);
           if (e.reseau && ++echecsReseau >= echecsReseauMax) return echec(e);
@@ -194,6 +243,10 @@ class AvancementCalcul extends ChangeNotifier {
         calculeA: (horloge ?? DateTime.now)(),
         statuts: statuts,
         total: rayons.length,
+        // Comptes en produits seulement si tous les rayons ont été lus (sinon : par rayons).
+        totalProduits: tousLus ? produits : null,
+        comptes: tousLus ? comptes : null,
+        ecarts: tousLus ? ecarts : null,
       ));
       if (annule()) return FinAvancement.annule;
       _enCours = false;
@@ -209,3 +262,97 @@ class AvancementCalcul extends ChangeNotifier {
   /// Motif lisible d'un échec (même texte que les écrans de chargement).
   static String motif(Object e) => messageErreur(e);
 }
+
+
+/// Que proposer pour un inventaire (bouton de la liste de l'accueil) ?
+enum ActionInventaire {
+  /// Rien de compté : « Commencer » (bleu clair).
+  commencer,
+
+  /// Commencé (0,1 à 99,9 %) : « Poursuivre » (orange).
+  poursuivre,
+
+  /// Tout est compté (100 %) : « Revérifier » (vert).
+  reverifier,
+
+  /// Avancement pas encore connu (calcul en attente ou en échec) : « Ouvrir ».
+  inconnu,
+}
+
+extension ActionInventaireLibelle on ActionInventaire {
+  String get libelle => switch (this) {
+        ActionInventaire.commencer => 'Commencer',
+        ActionInventaire.poursuivre => 'Poursuivre',
+        ActionInventaire.reverifier => 'Revérifier',
+        ActionInventaire.inconnu => 'Ouvrir',
+      };
+}
+
+/// Avancement affiché d'un inventaire : résultat du dernier calcul ([r]) + saisies faites depuis sur
+/// l'appareil ([lignesLocales] : lignes d'inventaire saisies, envoyées ou non), sans requête.
+class EtatAvancement {
+  /// Produits comptés (serveur ∪ appareil) ; null si inconnu.
+  final int? comptes;
+
+  /// Produits de l'inventaire ; null si inconnu.
+  final int? total;
+
+  /// Pourcentage (0 à 100) ; null si inconnu.
+  final double? pourcentage;
+
+  /// Produits en écart au dernier calcul ; null si inconnu.
+  final int? ecarts;
+
+  final ActionInventaire action;
+  const EtatAvancement({this.comptes, this.total, this.pourcentage, this.ecarts, required this.action});
+
+  /// Produits restant à compter ; null si inconnu.
+  int? get restants => comptes == null || total == null ? null : (total! - comptes!).clamp(0, total!);
+}
+
+EtatAvancement etatAvancement(AvancementRayons? r, {Iterable<int> lignesLocales = const []}) {
+  final locales = lignesLocales.toSet();
+  if (r == null) {
+    return EtatAvancement(action: locales.isEmpty ? ActionInventaire.inconnu : ActionInventaire.poursuivre);
+  }
+  if (r.produitsConnus) {
+    final total = r.totalProduits!;
+    final comptes = math.min(total, r.comptes!.union(locales).length);
+    final pct = total == 0 ? 0.0 : comptes / total * 100;
+    final ActionInventaire action;
+    if (comptes == 0) {
+      action = ActionInventaire.commencer;
+    } else if (total > 0 && comptes >= total) {
+      action = ActionInventaire.reverifier;
+    } else {
+      action = ActionInventaire.poursuivre;
+    }
+    return EtatAvancement(comptes: comptes, total: total, pourcentage: pct, ecarts: r.ecarts, action: action);
+  }
+  // Ancien calcul (rayons seulement).
+  final pct = r.pourcentage.toDouble();
+  final ActionInventaire action;
+  if (r.termines + r.commences == 0 && locales.isEmpty) {
+    action = ActionInventaire.commencer;
+  } else if (r.total > 0 && r.termines == r.total) {
+    action = ActionInventaire.reverifier;
+  } else {
+    action = ActionInventaire.poursuivre;
+  }
+  return EtatAvancement(pourcentage: pct, action: action);
+}
+
+/// « 0 % », « 0,4 % », « 85 % », « 99,6 % », « 100 % » : une décimale près de 0 et de 100 pour ne
+/// jamais afficher 0 % (ou 100 %) quand l'inventaire est commencé (ou pas terminé).
+String formatPourcentage(double p, {bool commence = false, bool termine = false}) {
+  if (termine) return '100 %';
+  if (p <= 0 && !commence) return '0 %';
+  if (p < 1) return '${math.max(0.1, (p * 10).floor() / 10).toStringAsFixed(1).replaceAll('.', ',')} %';
+  if (p > 99) return '${math.min(99.9, (p * 10).floor() / 10).toStringAsFixed(1).replaceAll('.', ',')} %';
+  return '${p.round()} %';
+}
+
+/// Pourcentage de [e] mis en forme (« … » si inconnu).
+String pourcentageAffiche(EtatAvancement e) => e.pourcentage == null
+    ? '— %'
+    : formatPourcentage(e.pourcentage!, commence: e.action == ActionInventaire.poursuivre, termine: e.action == ActionInventaire.reverifier);

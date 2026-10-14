@@ -11,6 +11,7 @@ import 'package:prestinv/ui/ecrans/choix_rayon_screen.dart';
 import 'package:prestinv/ui/ecrans/collecte_screen.dart';
 import 'package:prestinv/ui/ecrans/config_screen.dart';
 import 'package:prestinv/ui/ecrans/ecarts_screen.dart';
+import 'package:prestinv/ui/ecrans/inventaire_screen.dart';
 import 'package:prestinv/ui/ecrans/restants_screen.dart';
 import 'package:prestinv/ui/ecrans/saisie_guidee_screen.dart';
 import 'package:prestinv/ui/ecrans/scan_continu_screen.dart';
@@ -46,6 +47,12 @@ class NvAller {
   static Future<T?> _push<T>(BuildContext context, Widget ecran) => Navigator.of(context).push<T>(nvRoute<T>(ecran));
 
   /// Saisie guidée : choix du rayon (ou directement le rayon [rayonId] : « Reprendre »).
+  /// Inventaire choisi (maquette Hub) : passage obligé avant toute saisie.
+  static Future<void> inventaire(BuildContext context, Inventory inv) {
+    InventaireCourant.ecrire(inv.id);
+    return _push(context, NvInventaireScreen(inventaire: inv));
+  }
+
   static Future<void> guidee(BuildContext context, Inventory inv, {String? rayonId}) {
     context.read<EntryProvider>().reset();
     return rayonId == null
@@ -62,7 +69,7 @@ class NvAller {
   static Future<void> restants(BuildContext context, Inventory inv) => _push(context, NvRestantsScreen(inventaire: inv));
   static Future<void> collecte(BuildContext context) => _push(context, const NvCollecteScreen());
   static Future<void> aEnvoyer(BuildContext context) => _push(context, const NvAEnvoyerScreen());
-  static Future<void> analyse(BuildContext context) => _push(context, const NvAnalyseScreen());
+  static Future<void> analyse(BuildContext context, {Inventory? inventaire}) => _push(context, NvAnalyseScreen(inventaireInitial: inventaire));
   static Future<void> reglages(BuildContext context) => _push(context, const NvConfigScreen());
 
   /// Ouvre [d] (sans inventaire : les écrans qui en demandent un ne s'ouvrent pas).
@@ -83,7 +90,7 @@ class NvAller {
       case Destination.aEnvoyer:
         await aEnvoyer(context);
       case Destination.analyse:
-        await analyse(context);
+        await analyse(context, inventaire: inv);
       case Destination.reglages:
         await reglages(context);
     }

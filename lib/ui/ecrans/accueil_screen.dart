@@ -1,27 +1,33 @@
 // lib/ui/ecrans/accueil_screen.dart
-// Nouvelle interface — accueil = tableau de bord de l'inventaire en cours (maquette A ; tablette :
-// menu latéral, maquette C). Remplace l'accueil d'origine ET la liste « Choisir un inventaire » :
-// - inventaire en cours en tête (avancement connu sur l'appareil, rayons terminés s'ils ont été lus),
-//   bouton « Actualiser l'avancement » (calcul À LA DEMANDE, lib/ui/avancement.dart — jamais
-//   automatique), « À envoyer » avec Envoyer, bouton « Reprendre » au dernier rayon ouvert ;
-// - Saisie guidée, Scan continu, Écarts, Restants, Collecte hors ligne ;
-// - autres inventaires ouverts (choix de l'inventaire en cours) et « Nouvel inventaire » ;
-// - barre du bas Accueil · Scanner · Écarts · Réglages.
-// Mêmes données et même logique que l'accueil d'origine (HomeScreen) et InventoryListScreen :
-// InventoryProvider.fetchInventories, SaisieQueue (À envoyer), rappels de licence, Local / Distant,
-// Analyse, Déconnexion (performLogout). Un échec du serveur n'est jamais une liste vide.
+// Nouvelle interface — ACCUEIL (maquette « Main » validée par le pharmacien, 4.13) :
+//  - en-tête : « PRESTIGE INVENTAIRE », nom de la pharmacie, « Bienvenu(e), Prénom Nom », puces
+//    Local ⇄ Distant et Licence, Déconnexion ;
+//  - « Créer un inventaire » (administrateur / pharmacien, les autres comptes si le réglage l'autorise ;
+//    profil inconnu : code administrateur — lib/inventaire/autorisation_creation.dart) ;
+//  - « Voir les inventaires (N) » : flèche ▼ qui déroule la liste par le bas (▲ pour replier). Chaque
+//    ligne : nom, détail, % d'avancement, bouton « Commencer → » (0 %), « Poursuivre → » (0,1 à 99,9 %),
+//    « Revérifier → » (100 %). Le % est calculé AU DÉROULÉ, une ligne après l'autre (indicateur par
+//    ligne, jamais de blocage), puis gardé (lib/ui/avancement.dart) ; rien n'est calculé au lancement ;
+//  - choisir un inventaire ouvre l'écran de l'inventaire (sélection obligatoire avant toute saisie) ;
+//  - « Collecte » (nombre de produits scannés) en bas ; barre du bas Accueil · Scanner · Analyse ·
+//    Réglages (Scanner : feuille « Scanner pour… »).
+// Mêmes données et même logique qu'avant : InventoryProvider.fetchInventories (rafraîchi à chaque retour
+// sur l'accueil), SaisieQueue (bandeau « à envoyer »), rappels de licence, performLogout. Un échec du
+// serveur n'est jamais une liste vide.
 import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
+import 'package:prestinv/collecte/collecte_store.dart';
 import 'package:prestinv/config/app_config.dart';
+import 'package:prestinv/inventaire/autorisation_creation.dart';
 import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/providers/auth_provider.dart';
-import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/providers/inventory_provider.dart';
 import 'package:prestinv/providers/license_provider.dart';
-import 'package:prestinv/saisie/saisie.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
 import 'package:prestinv/ui/avancement.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/ecrans/creation_inventaire_screen.dart';
+import 'package:prestinv/ui/ecrans/feuille_scanner.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/navigation.dart';
 import 'package:prestinv/ui/presentation_style.dart';
@@ -29,8 +35,131 @@ import 'package:prestinv/ui/responsive.dart';
 import 'package:prestinv/ui/theme.dart';
 import 'package:prestinv/utils/app_utils.dart';
 import 'package:prestinv/widgets/chargement_erreur.dart';
-import 'package:prestinv/widgets/reconnexion.dart';
+import 'package:prestinv/widgets/pin_admin.dart';
 import 'package:provider/provider.dart';
+
+/// Calculs d'avancement de la liste de l'accueil : un inventaire après l'autre, seulement ceux dont
+/// l'avancement n'est pas encore connu (ou tous si [forcer]). Une session expirée ou un serveur
+/// injoignable arrête la suite (inutile d'enchaîner les échecs).
+class CalculsListe extends ChangeNotifier {
+  final AvancementCalcul _calcul = AvancementCalcul();
+  final List<String> _file = [];
+  final Map<String, Object> _erreurs = {};
+  bool _boucle = false;
+  bool _ferme = false;
+
+  CalculsListe() {
+    _calcul.addListener(notifyListeners);
+  }
+
+  /// Inventaire en cours de calcul.
+  String? get enCours => _calcul.enCours ? _calcul.inventaireId : null;
+
+  /// En attente de calcul (indicateur sur la ligne).
+  bool attend(String id) => _file.contains(id) || enCours == id;
+
+  Object? erreur(String id) => _erreurs[id];
+
+  void demander(ApiService Function() api, Iterable<String> ids, {bool forcer = false}) {
+    for (final id in ids) {
+      if (_file.contains(id) || enCours == id) continue;
+      if (!forcer && AvancementCalcul.enCache(id) != null) continue;
+      _erreurs.remove(id);
+      _file.add(id);
+    }
+    notifyListeners();
+    if (!_boucle) _executer(api);
+  }
+
+  Future<void> _executer(ApiService Function() api) async {
+    _boucle = true;
+    while (_file.isNotEmpty && !_ferme) {
+      final id = _file.first;
+      final fin = await _calcul.actualiser(api(), id);
+      if (_ferme) break;
+      _file.remove(id);
+      if (fin == FinAvancement.erreur) {
+        final e = _calcul.erreurPour(id);
+        if (e != null) _erreurs[id] = e;
+        if (estSessionExpiree(e) || (e is ApiLoadException && e.reseau)) {
+          for (final x in _file) {
+            if (e != null) _erreurs[x] = e;
+          }
+          _file.clear();
+        }
+      }
+      if (!_ferme) notifyListeners();
+    }
+    _boucle = false;
+  }
+
+  /// Arrête tout (repli de la liste, sortie de l'écran) : la réponse attendue est ignorée.
+  void arreter() {
+    _file.clear();
+    _calcul.annuler();
+    if (!_ferme) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _ferme = true;
+    _file.clear();
+    _calcul.annuler();
+    _calcul.removeListener(notifyListeners);
+    _calcul.dispose();
+    super.dispose();
+  }
+}
+
+/// Crée un inventaire depuis la nouvelle interface : droit de création (profil, réglage, code
+/// administrateur), écran de création, puis relecture de la liste des inventaires (InventoryProvider)
+/// pour renvoyer l'inventaire avec son identifiant (retrouvé par son libellé si le serveur ne l'a pas
+/// donné). null : rien de créé.
+Future<Inventory?> creerInventaireNv(BuildContext context, {String libelleInitial = ''}) async {
+  if (!await verifierDroitCreation(context) || !context.mounted) return null;
+  final cree = await Navigator.of(context).push<Inventory>(nvRoute(NvCreationInventaireScreen(libelleInitial: libelleInitial)));
+  if (cree == null || !context.mounted) return null;
+  return retrouverInventaire(context, cree);
+}
+
+/// Relit les inventaires ouverts (InventoryProvider : SEULE source des listes de la nouvelle
+/// interface) et renvoie [cree] tel qu'il y figure (par identifiant, sinon par libellé).
+Future<Inventory?> retrouverInventaire(BuildContext context, Inventory cree) async {
+  final config = context.read<AppConfig>();
+  final auth = context.read<AuthProvider>();
+  final provider = context.read<InventoryProvider>();
+  final api = ApiService(baseUrl: config.currentApiUrl, cookie: () => auth.sessionCookie);
+  await provider.fetchInventories(api, maxResult: config.maxResult);
+  final liste = provider.inventories;
+  if (cree.id.isNotEmpty) return liste.where((i) => i.id == cree.id).firstOrNull ?? cree;
+  String cle(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+  return liste.where((i) => cle(i.libelle) == cle(cree.libelle)).firstOrNull;
+}
+
+/// Droit de créer un inventaire (voir lib/inventaire/autorisation_creation.dart) ; demande le code
+/// administrateur si le profil est inconnu. Renvoie vrai si la création peut continuer.
+Future<bool> verifierDroitCreation(BuildContext context) async {
+  final acces = accesCreationDe(context);
+  switch (acces) {
+    case AccesCreation.autorise:
+      return true;
+    case AccesCreation.codeAdmin:
+      return demanderPinAdmin(context, motif: 'Créer un inventaire : le profil de ce compte n\'est pas connu du terminal. Code administrateur demandé.');
+    case AccesCreation.refuse:
+      await nvDialogue<void>(context,
+          icone: Icons.lock_outline,
+          titre: 'Création réservée',
+          message: 'La création d\'un inventaire est réservée à l\'administrateur et au pharmacien '
+              '(réglage « Autoriser la création d\'inventaire aux autres comptes »).',
+          boutons: const [NvBouton('OK', null, genre: NvGenre.principal)]);
+      return false;
+  }
+}
+
+AccesCreation accesCreationDe(BuildContext context) => accesCreation(
+      adminOuPharmacien: context.read<AuthProvider>().user?.adminOuPharmacien,
+      autresComptesAutorises: context.read<AppConfig>().creationAutresComptes,
+    );
 
 class NvAccueilScreen extends StatefulWidget {
   const NvAccueilScreen({super.key});
@@ -46,10 +175,9 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
   String? _courantId;
   String? _nouveauId;
   bool _envoi = false;
-
-  /// Avancement calculé à la demande (résultat gardé avec son heure ; aucun calcul automatique).
-  final _avancement = AvancementCalcul();
-  String? _avancementLu;
+  bool _deroule = false;
+  int? _scannes;
+  final _calculs = CalculsListe();
 
   @override
   void initState() {
@@ -57,6 +185,7 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
     InventaireCourant.lire().then((id) {
       if (mounted && id != null) setState(() => _courantId = id);
     });
+    _lireCollecte();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _rafraichir();
@@ -66,8 +195,7 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
 
   @override
   void dispose() {
-    _avancement.annuler();
-    _avancement.dispose();
+    _calculs.dispose();
     super.dispose();
   }
 
@@ -77,10 +205,19 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
     return ApiService(baseUrl: config.currentApiUrl, cookie: () => auth.sessionCookie);
   }
 
-  Future<void> _rafraichir() async {
+  Future<void> _lireCollecte() async {
+    final items = await CollecteStore.lire();
+    if (mounted) setState(() => _scannes = items.where((i) => !i.versee).length);
+  }
+
+  /// Relit la liste des inventaires (au lancement, au retour sur l'accueil, en tirant la liste).
+  Future<void> _rafraichir({bool recalculer = false}) async {
     if (!mounted) return;
     final config = context.read<AppConfig>();
-    await context.read<InventoryProvider>().fetchInventories(_api(), maxResult: config.maxResult);
+    final provider = context.read<InventoryProvider>();
+    await provider.fetchInventories(_api(), maxResult: config.maxResult);
+    if (!mounted) return;
+    if (_deroule) _calculs.demander(_api, provider.inventories.map((i) => i.id), forcer: recalculer);
   }
 
   void _rappelLicence() {
@@ -100,18 +237,16 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
     }
     if (message == null) return;
     _alerteMontree = true;
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        icon: Icon(Icons.warning_amber_rounded, color: grave ? ctx.nv.erreur.fg : ctx.nv.attente.fg, size: 32),
-        title: const Text('Licence'),
-        content: Text(message!),
-        actions: [FilledButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))],
-      ),
-    );
+    nvDialogue<void>(context,
+        icone: Icons.warning_amber_rounded,
+        ton: grave ? context.nv.erreur : context.nv.attente,
+        titre: 'Licence',
+        message: message,
+        boutons: const [NvBouton('OK', null, genre: NvGenre.principal)]);
   }
 
-  /// Inventaire en cours : choisi sur l'appareil, sinon celui de la dernière saisie, sinon le premier.
+  /// Inventaire pour le menu latéral (tablette) et la présélection : choisi sur l'appareil, sinon celui
+  /// de la dernière saisie, sinon le premier.
   Inventory? _courant(List<Inventory> invs, SaisieQueue? q) {
     if (invs.isEmpty) return null;
     final choisi = invs.where((i) => i.id == _courantId).firstOrNull;
@@ -121,31 +256,62 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
     return invs.first;
   }
 
-  void _choisir(Inventory inv) {
-    if (_avancement.enCours && _avancement.inventaireId != inv.id) _avancement.annuler();
-    setState(() => _courantId = inv.id);
-    InventaireCourant.ecrire(inv.id);
+  void _basculer(List<Inventory> invs) {
+    setState(() => _deroule = !_deroule);
+    if (_deroule) {
+      _calculs.demander(_api, invs.map((i) => i.id));
+    } else {
+      _calculs.arreter();
+    }
   }
 
-  Future<void> _nouvelInventaire() async {
-    final cree = await Navigator.of(context).push<Inventory>(nvRoute(const NvCreationInventaireScreen()));
-    if (!mounted || cree == null) return;
-    setState(() => _nouveauId = cree.id);
-    if (cree.id.isNotEmpty) _choisir(cree);
+  /// Toute navigation depuis l'accueil : au retour, liste des inventaires et collecte relues.
+  Future<void> _apres(Future<void> Function() ouvrir) async {
+    await ouvrir();
+    if (!mounted) return;
+    final id = await InventaireCourant.lire();
+    if (!mounted) return;
+    setState(() => _courantId = id ?? _courantId);
+    _lireCollecte();
     await _rafraichir();
   }
 
-  /// « Actualiser l'avancement » : mêmes requêtes que « Choisir un rayon », sur demande seulement.
-  Future<void> _actualiserAvancement(Inventory inv) async {
-    if (_avancement.enCours) return; // anti double appui
-    await _avancement.actualiser(_api(), inv.id);
+  Future<void> _ouvrir(Inventory inv) => _apres(() {
+        setState(() => _courantId = inv.id);
+        return NvAller.inventaire(context, inv);
+      });
+
+  Future<void> _nouvelInventaire() async {
+    final cree = await creerInventaireNv(context);
+    if (!mounted || cree == null) {
+      if (mounted) await _rafraichir();
+      return;
+    }
+    setState(() {
+      _nouveauId = cree.id;
+      _deroule = true;
+    });
+    // L'inventaire créé est sélectionné : son écran s'ouvre directement.
+    await _ouvrir(cree);
   }
 
-  /// Annuler : arrêt immédiat (la réponse déjà demandée sera ignorée), l'avancement précédent reste.
-  void _annulerAvancement() {
-    if (!_avancement.enCours) return;
-    _avancement.annuler();
-    nvMessage(context, 'Actualisation de l\'avancement annulée.', ton: context.nv.neutre);
+  Future<void> _scanner(List<Inventory> invs, Inventory? courant) async {
+    var liste = invs;
+    if (liste.isEmpty) {
+      await _rafraichir();
+      if (!mounted) return;
+      liste = context.read<InventoryProvider>().inventories;
+    }
+    final choix = await ouvrirFeuilleScanner(context, inventaires: liste, courantId: courant?.id);
+    if (!mounted || choix == null) return;
+    switch (choix) {
+      case ScannerCollecte():
+        await _apres(() => NvAller.collecte(context));
+      case ScannerInventaire(:final inventaire):
+        setState(() => _courantId = inventaire.id);
+        await InventaireCourant.ecrire(inventaire.id);
+        if (mounted) await _apres(() => NvAller.scan(context, inventaire));
+    }
   }
 
   Future<void> _envoyerTout(SaisieQueue q) async {
@@ -164,10 +330,7 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
         ton: bilan.complet && bilan.refusees == 0 ? context.nv.ok : context.nv.attente);
   }
 
-  Future<void> _aller(Destination d, Inventory? inv) async {
-    await NvAller.vers(context, d, inv);
-    if (mounted) setState(() {});
-  }
+  Future<void> _aller(Destination d, Inventory? inv) => _apres(() => NvAller.vers(context, d, inv));
 
   @override
   Widget build(BuildContext context) {
@@ -179,20 +342,14 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
     try {
       q = context.watch<SaisieQueue>();
     } catch (_) {}
+    final nv = context.nv;
     final invs = provider.inventories;
     final courant = _courant(invs, q);
-    if (courant != null && courant.id != _avancementLu) {
-      _avancementLu = courant.id;
-      _avancement.charger(courant.id);
-    }
     final user = auth.user;
-    final sousTitre = [
-      if ((user?.officine ?? '').isNotEmpty) user!.officine,
-      if ((user?.firstName ?? '').isNotEmpty) user!.firstName,
-    ].join(' · ');
-    final large = Responsive.isExpanded(context);
+    final officine = (user?.officine ?? '').trim();
     final local = config.apiMode == ApiMode.local;
     final jours = licence.daysRemaining;
+    final acces = accesCreation(adminOuPharmacien: user?.adminOuPharmacien, autresComptesAutorises: config.creationAutresComptes);
 
     final enTete = <Widget>[
       Wrap(spacing: 8, runSpacing: 8, children: [
@@ -203,31 +360,15 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
           semantique: 'Mode de connexion : ${local ? 'local' : 'distant'}. Toucher pour changer.',
           onTap: () => config.setApiMode(local ? ApiMode.distant : ApiMode.local),
         ),
-        _PuceEntete(
-          icon: Icons.verified_outlined,
-          texte: 'Licence : $jours j',
-          alerte: jours < 30,
-          semantique: 'Licence : $jours jours restants',
-        ),
+        _PuceEntete(icon: Icons.verified_outlined, texte: 'Licence : $jours j', alerte: jours < 30, semantique: 'Licence : $jours jours restants'),
       ]),
-      if (courant != null)
-        ListenableBuilder(
-          listenable: _avancement,
-          builder: (context, _) => _CarteEnCours(
-            inventaire: courant,
-            queue: q,
-            avancement: _avancement,
-            onActualiser: () => _actualiserAvancement(courant),
-            onAnnuler: _annulerAvancement,
-          ),
-        ),
     ];
 
-    final blocsPrincipaux = <Widget>[
+    final liste = <Widget>[
       if (q != null && q.aTraiter() > 0) ...[
         Bandeau(
           key: const ValueKey('nv-bandeau-a-envoyer'),
-          ton: q.refusees() > 0 ? context.nv.erreur : context.nv.attente,
+          ton: q.refusees() > 0 ? nv.erreur : nv.attente,
           texte: '${q.aTraiter()} saisie(s) sur le téléphone, pas encore envoyée(s)${q.refusees() > 0 ? ' dont ${q.refusees()} refusée(s)' : ''}',
           action: _envoi ? 'Envoi…' : 'Envoyer',
           actionKey: const ValueKey('nv-envoyer-tout'),
@@ -236,156 +377,106 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
         ),
         const SizedBox(height: 12),
       ],
-      if (courant != null) ...[
-        _BoutonReprendre(inventaire: courant, queue: q, onTap: (rayonId, scan) async {
-          if (scan) {
-            await NvAller.scan(context, courant);
-          } else {
-            await NvAller.guidee(context, courant, rayonId: rayonId);
-          }
-          if (mounted) setState(() {});
-        }),
-        _CarteMode(
-          key: const ValueKey('nv-saisie-guidee'),
-          icon: Icons.format_list_bulleted,
-          titre: 'Saisie guidée',
-          detail: 'Rayon par rayon, produit par produit',
-          fond: context.nv.info.bg,
-          couleur: context.nv.info.fg,
-          onTap: () => _aller(Destination.guidee, courant),
-        ),
-        const SizedBox(height: 10),
-        _CarteMode(
-          key: const ValueKey('nv-scan-continu'),
-          icon: Icons.qr_code_scanner,
-          titre: 'Scan continu',
-          detail: 'Scanner puis quantité, sans rayon',
-          fond: context.nv.attente.bg,
-          couleur: context.nv.attente.fg,
-          onTap: () => _aller(Destination.scan, courant),
-        ),
-      ],
-    ];
-
-    final tuiles = Row(children: [
-      Expanded(
-        child: _Tuile(
-          key: const ValueKey('nv-tuile-ecarts'),
-          icon: Icons.compare_arrows,
-          texte: 'Écarts',
-          actif: courant != null,
-          onTap: () => _aller(Destination.ecarts, courant),
-        ),
-      ),
-      const SizedBox(width: 10),
-      Expanded(
-        child: _Tuile(
-          key: const ValueKey('nv-tuile-restants'),
-          icon: Icons.hourglass_bottom,
-          texte: 'Restants',
-          actif: courant != null,
-          onTap: () => _aller(Destination.restants, courant),
-        ),
-      ),
-      const SizedBox(width: 10),
-      Expanded(
-        child: _Tuile(
-          key: const ValueKey('nv-tuile-collecte'),
-          icon: Icons.download_for_offline_outlined,
-          texte: 'Collecte',
-          onTap: () => _aller(Destination.collecte, courant),
-        ),
-      ),
-    ]);
-
-    final listeInventaires = <Widget>[
-      SectionTitre(
-        invs.length > 1 ? 'Inventaires ouverts (${invs.length})' : 'Inventaires ouverts',
-        trailing: TextButton.icon(
+      if (acces != AccesCreation.refuse) ...[
+        FilledButton.icon(
           key: const ValueKey('nouvel-inventaire'),
-          onPressed: _nouvelInventaire,
-          icon: const Icon(Icons.add, size: 20),
-          label: const Text('Nouveau'),
-        ),
-      ),
-      if (provider.isLoading)
-        const Padding(padding: EdgeInsets.all(24), child: NvChargement())
-      else if (provider.error != null)
-        SizedBox(height: 300, child: NvErreur(provider.errorObject ?? provider.error!, onRetry: _rafraichir))
-      else if (invs.isEmpty)
-        const SizedBox(height: 160, child: NvVide(icon: Icons.inventory_2_outlined, titre: 'Aucun inventaire ouvert', detail: 'Créez-en un avec « Nouveau ».'))
-      else
-        for (final inv in invs) ...[
-          _LigneInventaire(
-            inventaire: inv,
-            courant: inv.id == courant?.id,
-            nouveau: inv.id == _nouveauId,
-            enAttente: q?.aTraiter(inventaireId: inv.id) ?? 0,
-            onTap: () => _choisir(inv),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(56),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontSize: 17, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 8),
-        ],
+          onPressed: _nouvelInventaire,
+          icon: Icon(acces == AccesCreation.codeAdmin ? Icons.lock_outline : Icons.add_circle_outline, size: 22),
+          label: const Text('Créer un inventaire'),
+        ),
+        const SizedBox(height: 12),
+      ],
+      _LigneDerouler(
+        nombre: invs.length,
+        ouvert: _deroule,
+        chargement: provider.isLoading,
+        onTap: () => _basculer(invs),
+      ),
+      const SizedBox(height: 8),
+      if (provider.error != null)
+        SizedBox(height: 320, child: NvErreur(provider.errorObject ?? provider.error!, onRetry: _rafraichir))
+      else if (!_deroule)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+          child: Text('Touchez la flèche pour dérouler la liste et choisir l\'inventaire à saisir.',
+              key: const ValueKey('nv-aide-derouler'), textAlign: TextAlign.center, style: TextStyle(color: nv.gris, fontSize: 14.5)),
+        )
+      else if (provider.isLoading && invs.isEmpty)
+        const Padding(padding: EdgeInsets.all(24), child: NvChargement())
+      else if (invs.isEmpty)
+        const SizedBox(height: 160, child: NvVide(icon: Icons.inventory_2_outlined, titre: 'Aucun inventaire ouvert'))
+      else
+        ListenableBuilder(
+          listenable: _calculs,
+          builder: (context, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            for (final inv in invs) ...[
+              _LigneInventaire(
+                inventaire: inv,
+                nouveau: inv.id == _nouveauId,
+                lignesLocales: q?.lignes(inventaireId: inv.id).map((s) => s.ligneId).toList() ?? const [],
+                enAttente: q?.aTraiter(inventaireId: inv.id) ?? 0,
+                calcul: _calculs.attend(inv.id),
+                erreur: _calculs.erreur(inv.id),
+                onTap: () => _ouvrir(inv),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ]),
+        ),
     ];
 
-    final Widget corps;
-    if (large) {
-      corps = RefreshIndicator(
-        onRefresh: _rafraichir,
-        child: ListView(padding: const EdgeInsets.fromLTRB(24, 16, 24, 24), children: [
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [...blocsPrincipaux, const SizedBox(height: 12), tuiles])),
-            const SizedBox(width: 20),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: listeInventaires)),
-          ]),
-        ]),
-      );
-    } else {
-      final colonnes = Responsive.columns(context, compact: 1, medium: 2, expanded: 2);
-      corps = RefreshIndicator(
-        onRefresh: _rafraichir,
-        child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), children: [
-          if (colonnes > 1)
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [...blocsPrincipaux, const SizedBox(height: 12), tuiles])),
-              const SizedBox(width: 16),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: listeInventaires)),
-            ])
-          else ...[
-            ...blocsPrincipaux,
-            const SizedBox(height: 12),
-            tuiles,
-            ...listeInventaires,
-          ],
-        ]),
-      );
-    }
+    final collecte = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: _BoutonCollecte(scannes: _scannes, onTap: () => _aller(Destination.collecte, courant)),
+    );
 
     return NvScaffold(
-      title: 'Inventaire',
-      subtitle: sousTitre.isEmpty ? null : sousTitre,
+      surtitre: 'Prestige Inventaire',
+      title: officine.isEmpty ? 'Inventaire' : officine,
+      subtitle: user == null ? null : 'Bienvenu(e), ${user.nomComplet}',
       retour: false,
       wide: true,
       actions: [
-        ActionEntete(icon: Icons.pie_chart_outline, tooltip: 'Analyse', onPressed: () => _aller(Destination.analyse, courant)),
         ActionEntete(icon: Icons.logout, tooltip: 'Déconnexion', onPressed: () => performLogout(context)),
       ],
       header: enTete,
       menuLateral: NvMenuLateral(actif: Destination.accueil, inventaire: courant, onChoisir: (d) => _aller(d, courant)),
+      piedDeCorps: Responsive.isExpanded(context) ? null : collecte,
       bottomNavigationBar: NavigationBar(
         key: const ValueKey('nv-barre-bas'),
         selectedIndex: 0,
         height: 68,
-        backgroundColor: context.nv.carte,
-        indicatorColor: context.nv.info.bg,
-        onDestinationSelected: (i) => _aller(const [Destination.accueil, Destination.scan, Destination.ecarts, Destination.reglages][i], courant),
+        backgroundColor: nv.carte,
+        indicatorColor: nv.info.bg,
+        onDestinationSelected: (i) {
+          switch (i) {
+            case 1:
+              _scanner(invs, courant);
+            case 2:
+              _aller(Destination.analyse, courant);
+            case 3:
+              _aller(Destination.reglages, courant);
+          }
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Accueil'),
           NavigationDestination(icon: Icon(Icons.qr_code_scanner), label: 'Scanner'),
-          NavigationDestination(icon: Icon(Icons.compare_arrows), label: 'Écarts'),
+          NavigationDestination(icon: Icon(Icons.pie_chart_outline), label: 'Analyse'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Réglages'),
         ],
       ),
-      body: corps,
+      body: RefreshIndicator(
+        onRefresh: () => _rafraichir(recalculer: true),
+        child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 16), children: [
+          ...liste,
+          if (Responsive.isExpanded(context)) ...[const SizedBox(height: 8), _BoutonCollecte(scannes: _scannes, onTap: () => _aller(Destination.collecte, courant))],
+        ]),
+      ),
     );
   }
 }
@@ -427,308 +518,194 @@ class _PuceEntete extends StatelessWidget {
       );
 }
 
-/// Carte « EN COURS » dans l'en-tête bleu : inventaire, saisies sur l'appareil, rayons terminés.
-/// Avancement : celui calculé sur demande (« Actualiser l'avancement », avec son heure) s'il existe,
-/// sinon celui lu par l'écran « Choisir un rayon » (comme avant).
-class _CarteEnCours extends StatelessWidget {
-  final Inventory inventaire;
-  final SaisieQueue? queue;
-  final AvancementCalcul avancement;
-  final VoidCallback onActualiser;
-  final VoidCallback onAnnuler;
-  const _CarteEnCours({required this.inventaire, required this.queue, required this.avancement, required this.onActualiser, required this.onAnnuler});
-
-  @override
-  Widget build(BuildContext context) {
-    final lignes = queue?.lignes(inventaireId: inventaire.id) ?? const <SaisieLigne>[];
-    final envoyees = lignes.where((s) => s.envoyee).length;
-    final entry = context.watch<EntryProvider>();
-    final calcule = avancement.resultat(inventaire.id);
-    final Map<String, int> statuts;
-    final int total;
-    if (calcule != null) {
-      statuts = calcule.statuts;
-      total = calcule.total;
-    } else {
-      statuts = entry.inventoryId == inventaire.id && entry.rayons.isNotEmpty ? entry.rayonStatuses : const <String, int>{};
-      total = entry.inventoryId == inventaire.id ? entry.rayons.length : 0;
-    }
-    final termines = statuts.values.where((s) => s == 2).length;
-    final enCours = statuts.values.where((s) => s == 1).length;
-    final pct = total > 0 && (statuts.isNotEmpty || calcule != null) ? ((termines + enCours * 0.5) / total * 100).round() : null;
-    final details = [
-      '${lignes.length} saisie(s) sur ce téléphone · $envoyees envoyée(s)',
-      if (total > 0 && (statuts.isNotEmpty || calcule != null)) '$termines rayon(s) terminé(s) sur $total',
-      if (calcule != null && enCours > 0) '$enCours commencé(s)',
-    ].join(' · ');
-    final calculIci = avancement.enCours && avancement.inventaireId == inventaire.id;
-    final calculAilleurs = avancement.enCours && !calculIci;
-    final erreur = avancement.erreurPour(inventaire.id);
-    final heure = calcule == null
-        ? null
-        : 'Avancement à ${calcule.heure()}${calcule.inconnus > 0 ? ' · ${calcule.inconnus} rayon(s) non lu(s)' : ''}';
-    return Semantics(
-      container: true,
-      label: 'Inventaire en cours : ${inventaire.libelle}. $details${pct != null ? '. Avancement $pct pour cent' : ''}${heure != null ? '. $heure' : ''}',
-      child: Container(
-        key: const ValueKey('nv-en-cours'),
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(16)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('EN COURS', style: TextStyle(color: Pal.headerMuted, fontSize: 12.5, letterSpacing: 0.8)),
-                Text(inventaire.libelle,
-                    maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              ]),
-            ),
-            if (pct != null)
-              Container(
-                key: const ValueKey('nv-avancement-pct'),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: Pal.amber, borderRadius: BorderRadius.circular(999)),
-                child: Text('$pct %', style: const TextStyle(color: Pal.onAmber, fontWeight: FontWeight.bold)),
-              ),
-          ]),
-          if (total > 0 && statuts.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: SizedBox(
-                height: 8,
-                child: Row(children: [
-                  if (termines > 0) Expanded(flex: termines, child: Container(color: const Color(0xFF4ADE80))),
-                  if (enCours > 0) Expanded(flex: enCours, child: Container(color: Pal.amber)),
-                  if (total - termines - enCours > 0) Expanded(flex: total - termines - enCours, child: Container(color: Colors.white.withValues(alpha: 0.2))),
-                ]),
-              ),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Text(details, style: const TextStyle(color: Color(0xFFDCE6F2), fontSize: 13.5)),
-          const SizedBox(height: 8),
-          if (calculIci)
-            _ProgressionAvancement(avancement: avancement, onAnnuler: onAnnuler)
-          else
-            Wrap(spacing: 10, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
-              OutlinedButton.icon(
-                key: const ValueKey('nv-actualiser-avancement'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  disabledForegroundColor: Colors.white54,
-                  side: const BorderSide(color: Colors.white54),
-                  minimumSize: const Size(48, 48),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  // Style du thème (police de l'application), seulement plus gras.
-                  textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontWeight: FontWeight.w600, fontSize: 14.5),
-                ),
-                onPressed: calculAilleurs ? null : onActualiser,
-                icon: const Icon(Icons.refresh, size: 20),
-                label: const Text('Actualiser l\'avancement'),
-              ),
-              if (heure != null)
-                Text(heure, key: const ValueKey('nv-avancement-heure'), style: const TextStyle(color: Pal.headerMuted, fontSize: 13)),
-            ]),
-          if (erreur != null && !calculIci) _ErreurAvancement(erreur: erreur, onReessayer: onActualiser),
-        ]),
-      ),
-    );
-  }
-}
-
-/// Calcul en cours : « Rayon 3/12 », barre de progression, Annuler (placé à droite, loin du bouton
-/// d'origine : un double appui sur « Actualiser » ne peut pas annuler).
-class _ProgressionAvancement extends StatelessWidget {
-  final AvancementCalcul avancement;
-  final VoidCallback onAnnuler;
-  const _ProgressionAvancement({required this.avancement, required this.onAnnuler});
-
-  @override
-  Widget build(BuildContext context) {
-    final n = avancement.rayons;
-    final texte = n == 0 ? 'Lecture des rayons…' : 'Rayon ${avancement.rayon}/$n';
-    return Semantics(
-      liveRegion: true,
-      label: 'Calcul de l\'avancement : $texte',
-      child: Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(texte, key: const ValueKey('nv-avancement-progression'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14.5)),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: n == 0 ? null : (avancement.rayon - 1).clamp(0, n) / n,
-                minHeight: 6,
-                color: Pal.amber,
-                backgroundColor: Colors.white.withValues(alpha: 0.2),
-              ),
-            ),
-          ]),
-        ),
-        const SizedBox(width: 12),
-        TextButton(
-          key: const ValueKey('nv-annuler-avancement'),
-          style: TextButton.styleFrom(foregroundColor: Colors.white, minimumSize: const Size(48, 48), textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontWeight: FontWeight.w600)),
-          onPressed: onAnnuler,
-          child: const Text('Annuler'),
-        ),
-      ]),
-    );
-  }
-}
-
-/// Échec du calcul : motif exact (réseau, session…), le dernier avancement connu reste affiché.
-class _ErreurAvancement extends StatelessWidget {
-  final Object erreur;
-  final VoidCallback onReessayer;
-  const _ErreurAvancement({required this.erreur, required this.onReessayer});
-
-  @override
-  Widget build(BuildContext context) {
-    final session = estSessionExpiree(erreur);
-    return Container(
-      key: const ValueKey('nv-avancement-erreur'),
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
-      decoration: BoxDecoration(color: const Color(0xFF7F1D1D).withValues(alpha: 0.55), borderRadius: BorderRadius.circular(12)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(session ? Icons.lock_clock : Icons.cloud_off, color: Colors.white, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text('Avancement non actualisé : ${AvancementCalcul.motif(erreur)}',
-                style: const TextStyle(color: Colors.white, fontSize: 13.5)),
-          ),
-        ]),
-        if (session)
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              key: const ValueKey('nv-avancement-reconnecter'),
-              style: TextButton.styleFrom(foregroundColor: Colors.white, minimumSize: const Size(48, 48)),
-              onPressed: () async {
-                if (await demanderReconnexion(context)) onReessayer();
-              },
-              child: const Text('Se reconnecter'),
-            ),
-          ),
-      ]),
-    );
-  }
-}
-
-/// « Reprendre : rayon … » (dernière saisie guidée) ou « Reprendre le scan continu ».
-class _BoutonReprendre extends StatelessWidget {
-  final Inventory inventaire;
-  final SaisieQueue? queue;
-  final void Function(String? rayonId, bool scan) onTap;
-  const _BoutonReprendre({required this.inventaire, required this.queue, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final derniere = queue?.lignes(inventaireId: inventaire.id).reversed
-        .where((s) => s.origine == OrigineSaisie.guidee || s.origine == OrigineSaisie.rapide)
-        .firstOrNull;
-    if (derniere == null) return const SizedBox.shrink();
-    final scan = derniere.origine == OrigineSaisie.rapide || derniere.rayonId == null;
-    final texte = scan ? 'Reprendre le scan continu' : 'Reprendre : rayon ${derniere.rayonLibelle ?? derniere.rayonId}';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: SizedBox(
-        width: double.infinity,
-        child: FilledButton.icon(
-          key: const ValueKey('nv-reprendre'),
-          style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontSize: 17, fontWeight: FontWeight.bold)),
-          onPressed: () => onTap(scan ? null : derniere.rayonId, scan),
-          icon: const Icon(Icons.play_arrow_rounded, size: 26),
-          label: Text(texte, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
-        ),
-      ),
-    );
-  }
-}
-
-class _CarteMode extends StatelessWidget {
-  final IconData icon;
-  final String titre;
-  final String detail;
-  final Color fond;
-  final Color couleur;
+/// « Voir les inventaires (N) » avec la flèche ▼ / ▲.
+class _LigneDerouler extends StatelessWidget {
+  final int nombre;
+  final bool ouvert;
+  final bool chargement;
   final VoidCallback onTap;
-  const _CarteMode({super.key, required this.icon, required this.titre, required this.detail, required this.fond, required this.couleur, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) => SoftCard(
-        onTap: onTap,
-        semantique: '$titre : $detail',
-        padding: const EdgeInsets.all(16),
-        child: Row(children: [
-          Container(width: 56, height: 56, decoration: BoxDecoration(color: fond, borderRadius: BorderRadius.circular(14)), child: Icon(icon, color: couleur, size: 28)),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(titre, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: context.nv.encre)),
-              Text(detail, style: TextStyle(color: context.nv.gris, fontSize: 14.5)),
-            ]),
-          ),
-          Icon(Icons.chevron_right, color: context.nv.gris),
-        ]),
-      );
-}
-
-class _Tuile extends StatelessWidget {
-  final IconData icon;
-  final String texte;
-  final bool actif;
-  final VoidCallback onTap;
-  const _Tuile({super.key, required this.icon, required this.texte, required this.onTap, this.actif = true});
-
-  @override
-  Widget build(BuildContext context) => Opacity(
-        opacity: actif ? 1 : 0.45,
-        child: SoftCard(
-          onTap: actif ? onTap : null,
-          semantique: texte,
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
-          child: Column(children: [
-            Icon(icon, color: context.nv.action, size: 26),
-            const SizedBox(height: 6),
-            FittedBox(fit: BoxFit.scaleDown, child: Text(texte, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15.5, color: context.nv.encre))),
-          ]),
-        ),
-      );
-}
-
-class _LigneInventaire extends StatelessWidget {
-  final Inventory inventaire;
-  final bool courant;
-  final bool nouveau;
-  final int enAttente;
-  final VoidCallback onTap;
-  const _LigneInventaire({required this.inventaire, required this.courant, required this.nouveau, required this.enAttente, required this.onTap});
+  const _LigneDerouler({required this.nombre, required this.ouvert, required this.chargement, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final nv = context.nv;
+    return Semantics(
+      button: true,
+      expanded: ouvert,
+      label: 'Voir les inventaires, $nombre. ${ouvert ? 'Toucher pour replier' : 'Toucher pour dérouler'}',
+      excludeSemantics: true,
+      child: Material(
+        color: nv.carte,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: nv.ligne)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: const ValueKey('nv-voir-inventaires'),
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 60),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(children: [
+                Expanded(
+                  child: Text(chargement && nombre == 0 ? 'Voir les inventaires' : 'Voir les inventaires ($nombre)',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: nv.action)),
+                ),
+                Text(ouvert ? 'Replier' : 'Dérouler', style: TextStyle(fontSize: 13.5, color: nv.gris)),
+                const SizedBox(width: 4),
+                Icon(ouvert ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, key: ValueKey(ouvert ? 'nv-fleche-haut' : 'nv-fleche-bas'), color: nv.action, size: 28),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Couleurs du bouton d'une ligne (Commencer bleu clair, Poursuivre orange, Revérifier vert).
+(Color fond, Color texte, Color pct) couleursAction(BuildContext context, ActionInventaire a) {
+  final nv = context.nv;
+  return switch (a) {
+    ActionInventaire.commencer => (nv.info.bg, nv.info.fg, nv.gris),
+    ActionInventaire.poursuivre => (Pal.amber, Pal.onAmber, nv.attente.fg),
+    ActionInventaire.reverifier => (const Color(0xFF15803D), Colors.white, nv.ok.fg),
+    ActionInventaire.inconnu => (nv.neutre.bg, nv.neutre.fg, nv.gris),
+  };
+}
+
+class _LigneInventaire extends StatelessWidget {
+  final Inventory inventaire;
+  final bool nouveau;
+  final List<int> lignesLocales;
+  final int enAttente;
+  final bool calcul;
+  final Object? erreur;
+  final VoidCallback onTap;
+  const _LigneInventaire({
+    required this.inventaire,
+    required this.nouveau,
+    required this.lignesLocales,
+    required this.enAttente,
+    required this.calcul,
+    required this.erreur,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final nv = context.nv;
+    final r = AvancementCalcul.enCache(inventaire.id);
+    final etat = etatAvancement(r, lignesLocales: lignesLocales);
+    final (fond, texte, couleurPct) = couleursAction(context, etat.action);
+    final details = [
+      if (nouveau) 'Nouveau — créé depuis ce terminal',
+      if (r != null) '${r.total} rayon(s)',
+      if (etat.comptes != null && etat.total != null) '${etat.comptes} / ${etat.total} produits',
+      if (r == null && calcul) 'Calcul de l\'avancement…',
+      if (r == null && !calcul && erreur != null) 'Avancement non lu (${estSessionExpiree(erreur) ? 'session expirée' : 'réseau'})',
+      if (enAttente > 0) '$enAttente à envoyer',
+    ].join(' · ');
+    final pct = pourcentageAffiche(etat);
     return SoftCard(
+      key: ValueKey('nv-ligne-inv-${inventaire.id}'),
       onTap: onTap,
-      bordure: courant ? nv.action : null,
-      semantique: '${inventaire.libelle}${courant ? ', inventaire en cours' : ', toucher pour le choisir'}',
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      bordure: nv.ligne,
+      semantique: '${inventaire.libelle}, avancement $pct. ${etat.action.libelle}',
+      padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
       child: Row(children: [
-        Icon(courant ? Icons.radio_button_checked : Icons.radio_button_off, color: courant ? nv.action : nv.gris),
-        const SizedBox(width: 12),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(inventaire.libelle, key: ValueKey('nv-inv-${inventaire.id}'), maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15.5, color: nv.encre)),
-            if (nouveau) Text('Nouveau — créé depuis ce terminal', style: TextStyle(color: nv.ok.fg, fontSize: 13)),
+            Text(inventaire.libelle,
+                key: ValueKey('nv-inv-${inventaire.id}'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: nv.encre)),
+            if (details.isNotEmpty)
+              Text(details, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: nouveau ? nv.ok.fg : nv.gris, fontSize: 12.5)),
           ]),
         ),
-        if (enAttente > 0) Pastille('$enAttente à envoyer', ton: nv.attente) else if (courant) Pastille('en cours', ton: nv.info),
+        const SizedBox(width: 6),
+        SizedBox(
+          width: 56,
+          child: calcul && r == null
+              ? const Align(
+                  alignment: Alignment.centerRight,
+                  child: SizedBox(key: ValueKey('nv-calcul-ligne'), width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5)),
+                )
+              : FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(pct, key: ValueKey('nv-pct-${inventaire.id}'), style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: couleurPct)),
+                ),
+        ),
+        const SizedBox(width: 8),
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 112),
+          child: FilledButton(
+            key: ValueKey('nv-ouvrir-${inventaire.id}'),
+            style: FilledButton.styleFrom(
+              backgroundColor: fond,
+              foregroundColor: texte,
+              minimumSize: const Size(48, 48),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            onPressed: onTap,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(etat.action.libelle, key: ValueKey('nv-action-${inventaire.id}')),
+              const SizedBox(width: 4),
+              const Icon(Icons.arrow_forward, size: 16),
+            ]),
+          ),
+        ),
       ]),
+    );
+  }
+}
+
+/// « Collecte · N produits scannés → » (maquette, en bas de l'accueil).
+class _BoutonCollecte extends StatelessWidget {
+  final int? scannes;
+  final VoidCallback onTap;
+  const _BoutonCollecte({required this.scannes, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final nv = context.nv;
+    final n = scannes;
+    final detail = n == null ? '' : (n == 0 ? 'Aucun produit scanné' : '$n produit(s) scanné(s)');
+    return Semantics(
+      button: true,
+      label: 'Collecte. $detail',
+      excludeSemantics: true,
+      child: Material(
+        color: nv.ok.bg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: nv.ok.fg.withValues(alpha: 0.3))),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: const ValueKey('nv-tuile-collecte'),
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 60),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(children: [
+                Icon(Icons.download_for_offline_outlined, color: nv.ok.fg, size: 24),
+                const SizedBox(width: 10),
+                Text('Collecte', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: nv.ok.fg)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(detail, key: const ValueKey('nv-collecte-compte'), textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13.5, color: nv.ok.fg)),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.arrow_forward, size: 18, color: nv.ok.fg),
+              ]),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

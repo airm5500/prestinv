@@ -8,6 +8,7 @@ import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/inventaire/creation_inventaire.dart';
 import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/providers/auth_provider.dart';
+import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/presentation_style.dart';
 import 'package:prestinv/ui/theme.dart';
@@ -50,18 +51,18 @@ class _NvCreationInventaireScreenState extends State<NvCreationInventaireScreen>
     setState(() => _erreur = null);
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final libelle = LibelleInventaire.normaliser(_libelle.text);
-    final confirme = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Créer l\'inventaire ?'),
-        content: Text('« $libelle » (${_type.valeur})\n\n'
-            'Le serveur y met TOUS les produits actifs de l\'officine, avec leur stock théorique, '
-            'à compter ensuite. Cela peut prendre jusqu\'à une minute.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),
-          FilledButton(key: const ValueKey('confirmer-creation'), onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Créer')),
-        ],
-      ),
+    final confirme = await nvDialogue<bool>(
+      context,
+      icone: Icons.add_circle_outline,
+      ton: context.nv.info,
+      titre: 'Créer l\'inventaire ?',
+      message: '« $libelle » (${_type.valeur})\n\n'
+          'Le serveur y met TOUS les produits actifs de l\'officine, avec leur stock théorique, '
+          'à compter ensuite. Cela peut prendre jusqu\'à une minute.',
+      boutons: const [
+        NvBouton('Annuler', false, genre: NvGenre.secondaire),
+        NvBouton('Créer', true, genre: NvGenre.principal, key: ValueKey('confirmer-creation')),
+      ],
     );
     if (confirme != true || !mounted) return;
     setState(() => _enCours = true);
@@ -71,18 +72,18 @@ class _NvCreationInventaireScreenState extends State<NvCreationInventaireScreen>
     switch (r.issue) {
       case IssueCreation.creee:
         nvMessage(context, 'Inventaire « $libelle » créé${r.lignes != null ? ' : ${r.lignes} produit(s)' : ''}.', ton: context.nv.ok);
+        // Identifiant inconnu (absent de la liste relue) : l'appelant le retrouve par son libellé.
         Navigator.of(context).pop(r.inventaire ?? Inventory(id: '', libelle: libelle));
       case IssueCreation.doublon:
-        final ouvrir = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Libellé déjà utilisé'),
-            content: Text('${r.message}\nAucun inventaire n\'a été créé.'),
-            actions: [
-              TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Changer le libellé')),
-              FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Utiliser celui-ci')),
-            ],
-          ),
+        final ouvrir = await nvDialogue<bool>(
+          context,
+          icone: Icons.priority_high,
+          titre: 'Libellé déjà utilisé',
+          message: '${r.message}\nAucun inventaire n\'a été créé.',
+          boutons: const [
+            NvBouton('Changer le libellé', false, genre: NvGenre.secondaire),
+            NvBouton('Utiliser celui-ci', true, genre: NvGenre.principal),
+          ],
         );
         if (ouvrir == true && mounted) Navigator.of(context).pop(r.inventaire);
       case IssueCreation.session:

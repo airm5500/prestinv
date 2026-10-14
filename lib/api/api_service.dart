@@ -366,6 +366,17 @@ class ApiService implements SaisieServeur {
               delai: const Duration(seconds: 8)))
           .isNotEmpty;
 
+  /// Lignes déjà comptées d'un emplacement (id, quantités), même requête que [rayonAProduitsComptes] ;
+  /// l'échec est levé ([ApiLoadException]). Sert au calcul de l'avancement en produits.
+  Future<List<Map<String, dynamic>>> lignesCompteesRayon(String inventoryId, String rayonId) =>
+      _loadList('produits comptés', _uri('/detailsTouchedRayon', {'idInventaire': inventoryId, 'idRayon': rayonId}), (m) => m,
+          delai: const Duration(seconds: 8));
+
+  /// Lignes restant à compter d'un emplacement, même requête que [rayonAProduitsRestants] (échec levé).
+  Future<List<Map<String, dynamic>>> lignesRestantesRayon(String inventoryId, String rayonId) =>
+      _loadList('restants', _uri('/detailsUntouchedRayon', {'idInventaire': inventoryId, 'idRayon': rayonId}), (m) => m,
+          delai: const Duration(seconds: 8));
+
   /// Reste-t-il des produits à compter ? `null` si on ne peut pas le savoir.
   Future<bool?> hasUntouchedProductsInRayon(String inventoryId, String rayonId) async {
     try {
