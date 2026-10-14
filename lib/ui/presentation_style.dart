@@ -24,10 +24,18 @@ class NavyHeader extends StatelessWidget {
   /// Bouton Retour forcé (null : affiché si la route peut revenir en arrière).
   final bool? retour;
 
+  /// Petites capitales au-dessus du titre (« PRESTIGE INVENTAIRE »).
+  final String? surtitre;
+
+  /// Texte à droite de la barre de progression (« 15 / 126 »), sur la même ligne.
+  final String? progressionTexte;
+
   const NavyHeader({
     super.key,
     required this.title,
     this.subtitle,
+    this.surtitre,
+    this.progressionTexte,
     this.actions = const [],
     this.children = const [],
     this.rounded = true,
@@ -63,6 +71,12 @@ class NavyHeader extends StatelessWidget {
                   const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    if (surtitre != null)
+                      Text(surtitre!.toUpperCase(),
+                          key: const ValueKey('nv-surtitre'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Pal.headerMuted, fontSize: 12.5, letterSpacing: 1, fontWeight: FontWeight.w600)),
                     Semantics(
                       header: true,
                       child: Text(title,
@@ -79,15 +93,25 @@ class NavyHeader extends StatelessWidget {
               if (progression != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: progression!.clamp(0, 1),
-                      minHeight: 6,
-                      backgroundColor: Colors.white.withValues(alpha: 0.18),
-                      color: Pal.amber,
+                  child: Row(children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: progression!.clamp(0, 1),
+                          minHeight: 6,
+                          backgroundColor: Colors.white.withValues(alpha: 0.18),
+                          color: Pal.amber,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (progressionTexte != null) ...[
+                      const SizedBox(width: 10),
+                      Text(progressionTexte!,
+                          key: const ValueKey('nv-progression-texte'),
+                          style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w600)),
+                    ],
+                  ]),
                 ),
               for (final c in children) Padding(padding: const EdgeInsets.fromLTRB(12, 12, 12, 0), child: c),
             ]),
@@ -431,11 +455,19 @@ class NvScaffold extends StatelessWidget {
   final bool wide;
   final bool rounded;
   final bool? retour;
+  final String? surtitre;
+  final String? progressionTexte;
+
+  /// Bouton fixé en bas du corps, au-dessus de la barre du bas (Collecte de l'accueil).
+  final Widget? piedDeCorps;
 
   const NvScaffold({
     super.key,
     required this.title,
     this.subtitle,
+    this.surtitre,
+    this.progressionTexte,
+    this.piedDeCorps,
     this.actions = const [],
     this.header = const [],
     required this.body,
@@ -455,6 +487,8 @@ class NvScaffold extends StatelessWidget {
       NavyHeader(
         title: title,
         subtitle: subtitle,
+        surtitre: surtitre,
+        progressionTexte: progressionTexte,
         actions: actions,
         rounded: rounded && !avecMenu,
         wide: wide,
@@ -463,6 +497,7 @@ class NvScaffold extends StatelessWidget {
         children: header,
       ),
       Expanded(child: avecMenu ? body : ContentWidth(wide: wide, child: body)),
+      if (piedDeCorps != null) ContentWidth(wide: wide, child: piedDeCorps!),
     ]);
     return Scaffold(
       backgroundColor: context.nv.page,

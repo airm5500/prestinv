@@ -2,11 +2,14 @@
 
 import 'package:flutter/material.dart';
 import 'package:prestinv/config/app_config.dart';
+import 'package:prestinv/interface_version.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/screens/login_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/ui/dialogues.dart';
+import 'package:prestinv/ui/theme.dart';
 
 /// Affiche une boîte de dialogue de progression centrée qui écoute les changements
 /// d'un ValueNotifier pour mettre à jour son message en temps réel.
@@ -48,7 +51,26 @@ Future<void> performLogout(BuildContext context) async {
   bool shouldLogout = true;
   // Des saisies ne sont pas encore confirmées par le serveur : elles restent enregistrées sur
   // l'appareil (file persistante) et repartiront à la prochaine connexion.
-  if (enAttente > 0) {
+  if (enAttente > 0 && InterfaceVersion.useNew.value) {
+    // Nouvelle interface : même question, fenêtre au nouveau style.
+    if (!context.mounted) return;
+    shouldLogout = await nvDialogue<bool>(
+          context,
+          fermable: false,
+          icone: Icons.cloud_upload_outlined,
+          ton: context.nv.attente,
+          titre: 'Données non envoyées',
+          message: saisies != null
+              ? '$enAttente saisie(s) ne sont pas encore enregistrée(s) sur le serveur. Elles restent gardées sur cet appareil '
+                  '(« À envoyer ») et repartiront à la prochaine connexion. Voulez-vous vous déconnecter ?'
+              : 'Certaines modifications n\'ont pas été envoyées au serveur. Voulez-vous continuer ?',
+          boutons: const [
+            NvBouton('Rester connecté', false, genre: NvGenre.secondaire),
+            NvBouton('Déconnexion', true, genre: NvGenre.principal),
+          ],
+        ) ??
+        false;
+  } else if (enAttente > 0) {
     if (!context.mounted) return;
 
     shouldLogout = await showDialog<bool>(

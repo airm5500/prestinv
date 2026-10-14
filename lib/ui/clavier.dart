@@ -22,7 +22,7 @@ class NvPave extends StatelessWidget {
   /// Hauteur conseillée selon la hauteur d'écran (Sunmi V2s : 640 dp utiles environ).
   static double hauteurPour(BuildContext context) {
     final h = MediaQuery.sizeOf(context).height;
-    return h < 680 ? 48 : (h < 760 ? 52 : 58);
+    return h < 760 ? 48 : (h < 820 ? 52 : 56);
   }
 
   @override
@@ -92,10 +92,61 @@ class AfficheQuantite extends StatelessWidget {
   final String? erreur;
   final Widget? droite;
   final String? aide;
-  const AfficheQuantite({super.key, required this.label, required this.valeur, this.proposee = false, this.erreur, this.droite, this.aide});
+
+  /// Une seule ligne (maquette « Saisie », 4.13) : libellé à gauche, quantité à droite.
+  final bool compact;
+
+  /// Version compacte : ligne sous le libellé (rappel du produit).
+  final Widget? detail;
+  const AfficheQuantite(
+      {super.key,
+      required this.label,
+      required this.valeur,
+      this.proposee = false,
+      this.erreur,
+      this.droite,
+      this.aide,
+      this.compact = false,
+      this.detail});
+
+  Widget _compact(BuildContext context) {
+    final nv = context.nv;
+    return Semantics(
+      label: '$label : ${valeur.isEmpty ? 'vide' : valeur}',
+      liveRegion: true,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 4),
+        decoration: BoxDecoration(
+          color: nv.carte,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: erreur != null ? nv.erreur.fg : nv.action, width: 2),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: nv.gris, fontSize: 13))),
+                if (droite != null) ...[const SizedBox(width: 8), Flexible(child: droite!)],
+              ]),
+              if (detail != null) detail!,
+              if (erreur != null)
+                Text(erreur!, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: nv.erreur.fg, fontSize: 13, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          Text(valeur.isEmpty ? ' ' : valeur,
+              key: const ValueKey('nv-quantite'),
+              maxLines: 1,
+              style: TextStyle(fontSize: 30, height: 1.15, fontWeight: FontWeight.w800, color: context.nvSombre ? nv.encre : Pal.navy)),
+        ]),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (compact) return _compact(context);
     final nv = context.nv;
     return Semantics(
       label: '$label : ${valeur.isEmpty ? 'vide' : valeur}${proposee ? ' (proposée)' : ''}',

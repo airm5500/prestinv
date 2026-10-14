@@ -31,6 +31,11 @@ class AppConfig with ChangeNotifier {
   // CORRECTION : Variable d'instance privée (pas de static)
   bool _isCumulEnabled = false;
 
+  // --- Réglages de la nouvelle interface (4.13), protégés par le code administrateur ---
+  // Désactivés par défaut. Les écrans d'origine ne les lisent pas.
+  bool _masquerDejaCompte = false;
+  bool _creationAutresComptes = false;
+
   // --- Scan (douchette) ---
   bool _sonScan = true;
   bool _vibrationScan = true;
@@ -57,6 +62,12 @@ class AppConfig with ChangeNotifier {
 
   // CORRECTION : Getter public ajouté
   bool get isCumulEnabled => _isCumulEnabled;
+
+  /// Nouvelle interface : la quantité déjà comptée est masquée (saisie, écarts, PDF / CSV des écarts).
+  bool get masquerDejaCompte => _masquerDejaCompte;
+
+  /// Nouvelle interface : les comptes autres qu'administrateur / pharmacien peuvent créer un inventaire.
+  bool get creationAutresComptes => _creationAutresComptes;
 
   /// Bip après un scan (succès / déjà compté / erreur).
   bool get sonScan => _sonScan;
@@ -120,6 +131,9 @@ class AppConfig with ChangeNotifier {
 
     // CORRECTION : Chargement correct de la variable
     _isCumulEnabled = _prefs.getBool('isCumulEnabled') ?? false;
+
+    _masquerDejaCompte = _prefs.getBool('masquerDejaCompte') ?? false;
+    _creationAutresComptes = _prefs.getBool('creationInventaireAutresComptes') ?? false;
 
     _sonScan = _prefs.getBool('scanSon') ?? true;
     _vibrationScan = _prefs.getBool('scanVibration') ?? true;
@@ -244,6 +258,19 @@ class AppConfig with ChangeNotifier {
     } else if (quantiteDefaut != null && quantiteDefaut >= 1 && quantiteDefaut <= 99999) {
       _quantiteScanDefaut = quantiteDefaut;
       await _prefs.setInt('scanQuantiteDefaut', quantiteDefaut);
+    }
+    notifyListeners();
+  }
+
+  /// Réglages protégés de la nouvelle interface (le code administrateur est demandé par l'écran).
+  Future<void> setReglagesProteges({bool? masquerDejaCompte, bool? creationAutresComptes}) async {
+    if (masquerDejaCompte != null) {
+      _masquerDejaCompte = masquerDejaCompte;
+      await _prefs.setBool('masquerDejaCompte', masquerDejaCompte);
+    }
+    if (creationAutresComptes != null) {
+      _creationAutresComptes = creationAutresComptes;
+      await _prefs.setBool('creationInventaireAutresComptes', creationAutresComptes);
     }
     notifyListeners();
   }

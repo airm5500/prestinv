@@ -31,8 +31,9 @@ class AuthProvider with ChangeNotifier {
 
   /// Tests : session ouverte sans appel réseau.
   @visibleForTesting
-  void connecterPourTest({String login = 'test', String cookie = 'JSESSIONID=test', String? prenom, String officine = ''}) {
-    _user = AppUser(id: login, login: login, firstName: prenom ?? login, lastName: '', officine: officine);
+  void connecterPourTest(
+      {String login = 'test', String cookie = 'JSESSIONID=test', String? prenom, String nom = '', String officine = '', String? typeAccueil = 'dashboard'}) {
+    _user = AppUser(id: login, login: login, firstName: prenom ?? login, lastName: nom, officine: officine, typeAccueil: typeAccueil);
     _sessionCookie = cookie;
     _isLoggedIn = true;
     notifyListeners();

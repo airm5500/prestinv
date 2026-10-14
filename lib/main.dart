@@ -12,8 +12,12 @@ import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/config/theme_origine.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/utils/app_utils.dart';
+import 'package:prestinv/saisie/rappel_envoi.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
 import 'package:prestinv/saisie/saisie_store.dart';
+import 'package:prestinv/ui/dialogues.dart';
+import 'package:prestinv/ui/taille_ecran.dart';
+import 'package:prestinv/widgets/reconnexion.dart';
 import 'package:prestinv/services/identifiants_securises.dart';
 
 // --- IMPORTS PROVIDERS ---
@@ -33,6 +37,8 @@ void main() async {
   final appConfig = AppConfig();
   await appConfig.load();
   await InterfaceVersion.load();
+  // Taille de l'écran (Automatique / Compact / Très compact), appliquée dès ce lancement.
+  await TailleEcranReglage.charger();
 
   // Mot de passe mémorisé : migration silencieuse de l'ancienne clé en clair vers le stockage sécurisé.
   await IdentifiantsSecurises.instance.migrer();
@@ -97,6 +103,7 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
   SaisieQueue? _saisies;
   AuthProvider? _auth;
   bool _etaitConnecte = false;
+  GardienEnvoi? _gardien;
 
   @override
   void initState() {
@@ -126,6 +133,31 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
     queue.demarrerReprise();
     _etaitConnecte = auth.isLoggedIn;
     auth.addListener(_surChangementConnexion);
+
+    // Envoi manuel (Collecte), nouvelle interface : rappel BLOQUANT après le délai réglé, ou envoi
+    // automatique toutes les 15 min si le délai est à 0 (lib/saisie/rappel_envoi.dart).
+    _gardien = GardienEnvoi(
+      queue: queue,
+      envoiManuel: () => config.sendMode == SendMode.collect,
+      delaiMinutes: () => config.sendReminderMinutes,
+      actif: () => mounted && auth.isLoggedIn && InterfaceVersion.useNew.value && navigateurApp.currentContext != null,
+      afficherRappel: _afficherRappelEnvoi,
+    )..demarrer();
+  }
+
+  /// Message bloquant puis envoi avec sa progression (l'envoi se poursuit si l'on ferme la fenêtre).
+  Future<BilanEnvoi?> _afficherRappelEnvoi(int nombre, Duration depuis) async {
+    final ctx = navigateurApp.currentContext;
+    final queue = _saisies;
+    if (ctx == null || queue == null) return null;
+    await nvRappelSauvegarde(ctx, nombre: nombre, depuis: depuis, themer: true);
+    final ctx2 = navigateurApp.currentContext;
+    if (ctx2 == null || !ctx2.mounted) return null;
+    final bilan = await nvEnvoiSaisies(ctx2,
+        envoyer: (p) => queue.envoyer(onProgress: p), demandees: queue.enAttente(), sousTitre: 'Toutes les saisies non envoyées', themer: true);
+    final ctx3 = navigateurApp.currentContext;
+    if (bilan.sessionExpiree && ctx3 != null && ctx3.mounted) await demanderReconnexion(ctx3);
+    return bilan;
   }
 
   /// Connexion (ou reconnexion après session expirée) : les saisies en attente repartent.
@@ -154,6 +186,7 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _auth?.removeListener(_surChangementConnexion);
     _saisies?.arreterReprise();
+    _gardien?.arreter();
     _inactivityTimer?.cancel();
     super.dispose();
   }
@@ -240,12 +273,15 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
             homeWidget = const LoginScreen();
           }
 
-          return MaterialApp(
-            navigatorKey: navigateurApp,
-            title: 'Prestige Inventaire',
-            debugShowCheckedModeBanner: false,
-            theme: themeOrigine(),
-            home: homeWidget,
+          // Taille de l'écran (réglage) : toute l'interface, fenêtres et calques compris, deux interfaces.
+          return RacineTailleEcran(
+            child: MaterialApp(
+              navigatorKey: navigateurApp,
+              title: 'Prestige Inventaire',
+              debugShowCheckedModeBanner: false,
+              theme: themeOrigine(),
+              home: homeWidget,
+            ),
           );
         },
       ),

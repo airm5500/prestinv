@@ -100,6 +100,16 @@ class ChampDouchetteState extends State<ChampDouchette> {
     }
     widget.onClavier?.call(v);
     widget.focusNode.requestFocus();
+    if (v) {
+      // Correctif 4.13 : le champ a DÉJÀ le focus (douchette), donc le demander ne rouvre pas le clavier,
+      // et passer le type de clavier de « aucun » à « texte » ne l'affiche pas non plus. Après la
+      // reconstruction (nouveau type transmis au système), on demande explicitement son affichage.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_clavier) return;
+        if (!widget.focusNode.hasFocus) widget.focusNode.requestFocus();
+        SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+      });
+    }
   }
 
   void _soumettre(String texte) {

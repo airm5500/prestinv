@@ -3,8 +3,11 @@
 // gardées sur l'appareil (file persistante) ne sont pas touchées et repartent après la reconnexion.
 import 'package:flutter/material.dart';
 import 'package:prestinv/config/app_config.dart';
+import 'package:prestinv/interface_version.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/ui/dialogues.dart';
+import 'package:prestinv/ui/theme.dart';
 import 'package:provider/provider.dart';
 
 /// Ouvre la fenêtre de reconnexion. Renvoie `true` si la reconnexion a réussi.
@@ -69,7 +72,43 @@ class _ReconnexionDialogState extends State<ReconnexionDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
+  Widget build(BuildContext context) => InterfaceVersion.useNew.value ? NvTheme(child: Builder(builder: _nouveau)) : _ancien();
+
+  /// Nouvelle interface : même fenêtre (mêmes champs, même bouton « Se reconnecter »), nouveau style.
+  Widget _nouveau(BuildContext context) => NvCadreDialogue(
+        icone: Icons.lock_clock,
+        ton: context.nv.attente,
+        titre: 'Session expirée',
+        message: 'Reconnectez-vous pour continuer. Les saisies déjà faites sont gardées sur l\'appareil.',
+        contenu: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          TextField(controller: _login, decoration: const InputDecoration(labelText: 'Identifiant'), enabled: !_enCours),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _motDePasse,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'Mot de passe'),
+            enabled: !_enCours,
+            onSubmitted: (_) => _valider(),
+          ),
+          if (_erreur != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_erreur!, style: TextStyle(color: context.nv.erreur.fg, fontWeight: FontWeight.w600)),
+            ),
+        ]),
+        boutons: nvRangeeBoutons(context, [
+          nvBoutonFenetre(context, libelle: 'Annuler', genre: NvGenre.secondaire, onPressed: _enCours ? null : () => Navigator.of(context).pop(false)),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Pal.amber, foregroundColor: Pal.onAmber),
+            onPressed: _enCours ? null : _valider,
+            child: _enCours
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Pal.onAmber))
+                : const FittedBox(fit: BoxFit.scaleDown, child: Text('Se reconnecter')),
+          ),
+        ], const []),
+      );
+
+  Widget _ancien() => AlertDialog(
         title: const Text('Session expirée'),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
