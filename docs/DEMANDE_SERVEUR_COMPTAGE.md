@@ -14,6 +14,7 @@ Sommaire : [0. Constat](#0-constat-lu-dans-le-code-et-vérifié-sur-le-serveur-d
 [A. État des rayons](#a--état-des-rayons-en-une-requête) · [B. Auteur de la saisie](#b--auteur-et-date-de-la-dernière-saisie-par-ligne) ·
 [C. Sécuriser l'écriture](#c--sécuriser-put-wsinventairesdetails) · [D. Création](#d--création-dinventaire-v1inventairecreation) ·
 [E. Licence](#e--activation-de-licence-avant-connexion) · [F. Versement en lot](#f--versement-de-collecte-en-lot-optionnel) ·
+[G. Rôle de l'utilisateur](#g--rôle-de-lutilisateur-dans-la-réponse-de-connexion-413) ·
 [3. Règles communes](#3-règles-communes-à-toutes-les-routes) · [4. Ce que l'app fait déjà](#4-ce-que-lapplication-fait-déjà-sans-attendre)
 
 ---
@@ -481,6 +482,69 @@ versés, non reconnus, à choisir). Détection : 404/405 → versement actuel li
 
 ---
 
+## G — Rôle de l'utilisateur dans la réponse de connexion (4.13)
+
+*Ajouté le 14/10/2026 pour Prestige Inventaire 4.13.0.*
+
+### Besoin
+
+Le pharmacien a décidé que **la création d'un inventaire depuis le terminal est réservée à
+l'administrateur et au pharmacien** ; les autres comptes n'y ont accès que si un réglage du terminal
+(protégé par le code administrateur) l'autorise. L'application doit donc connaître le **profil** de
+l'utilisateur connecté.
+
+### Ce que le serveur donne aujourd'hui (lu dans `rest/AccountResource.java`, branche `claude/new-session-xm8ptu`)
+
+- `POST /v1/user/auth` ne renvoie **pas** le rôle, mais renvoie `"xtypeuser"` : **`"dashboard"`** pour
+  l'utilisateur système (`lg_USER_ID = "00"`), le rôle `Pharmacien`, le super administrateur et
+  l'administrateur (détection par préfixe `isSuperAdminRole` / `isAdminRole`), **`"mainmenumanager"`**
+  pour tous les autres profils. C'est exactement la règle voulue : **l'application 4.13 s'en sert**
+  (`AppUser.typeAccueil`, `lib/inventaire/autorisation_creation.dart`).
+- `GET /v1/user/account` renvoie `accountInfo.lg_ROLE_ID` (désignation du rôle) et
+  `accountInfo.retourTableauBord` (vrai pour super administrateur, pharmacien, administrateur) — une
+  requête de plus, non utilisée.
+
+Limites : `xtypeuser` est un détail d'affichage de l'application web (écran d'accueil) détourné de son
+usage ; sur un serveur plus ancien, l'administrateur pouvait recevoir `"mainmenumanager"` (la détection
+par préfixe est récente) ou le champ peut manquer. **Sans le champ, l'application demande le code
+administrateur du terminal pour créer un inventaire** (décision du pharmacien).
+
+### Demande (ajout, rétrocompatible)
+
+Ajouter à la réponse de `POST /v1/user/auth` (succès) :
+
+```json
+{
+  "success": true,
+  "str_LOGIN": "…",
+  "role": { "code": "PHARMACIEN", "libelle": "Pharmacien" },
+  "droits": { "creerInventaire": true }
+}
+```
+
+- `role.code` : `SYSTEME`, `SUPER_ADMINISTRATEUR`, `ADMINISTRATEUR`, `PHARMACIEN` ou `AUTRE` (valeur
+  stable, indépendante du libellé saisi dans Prestige) ; `role.libelle` : désignation affichable.
+- `droits.creerInventaire` (idéalement calculé à partir des privilèges `TPrivilege` du rôle, pour que
+  l'officine puisse l'accorder à un profil sans modifier l'application).
+- Le serveur doit **aussi** refuser `POST /v1/inventaire/creation` (403 lisible
+  `{"success":0,"message":"Création réservée…"}`) pour un compte non autorisé : le terminal n'est pas la
+  seule protection.
+- Ne rien retirer : `xtypeuser` reste (anciennes versions de l'application).
+
+### Impact dans l'application
+
+Ordre de lecture : `droits.creerInventaire` s'il existe, sinon `role.code`, sinon `xtypeuser`, sinon
+« profil inconnu » (code administrateur). Le réglage « Autoriser la création d'inventaire aux autres
+comptes » reste prioritaire pour ouvrir l'accès.
+
+### Tests serveur à prévoir
+
+1. Connexion pharmacien, administrateur, super administrateur, caissier : `role.code` et
+   `droits.creerInventaire` attendus ; `xtypeuser` inchangé.
+2. `POST /inventaire/creation` par un caissier : 403 lisible, rien de créé.
+
+---
+
 ## 3. Règles communes à toutes les routes
 
 1. **404/405 signifient « route absente »** pour l'application (elle bascule alors sur son ancien
@@ -502,7 +566,11 @@ versés, non reconnus, à choisir). Détection : 404/405 → versement actuel li
 ## 4. Ce que l'application fait déjà, sans attendre
 
 - Avancement **à la demande** (4.12.0) avec les routes actuelles, progression et annulation ; aucun
-  calcul automatique pour ne pas charger le serveur.
+  calcul au lancement. Depuis la 4.13, il est aussi calculé **au déroulé** de la liste des inventaires
+  de l'accueil (une ligne après l'autre, résultat gardé) et compté **en produits** (« 110 / 130 ») : les
+  deux requêtes `detailsTouchedRayon` + `detailsUntouchedRayon` sont faites pour chaque rayon (avant :
+  la seconde seulement pour les rayons entamés). La route A ramènerait cela à une requête.
+- Profil (création d'inventaire) lu dans `xtypeuser` en attendant G.
 - Saisies gardées sur le terminal avant tout envoi, renvoi automatique, « À envoyer », reconnexion sans
   quitter l'écran (401) : prête pour C2.
 - Versement de la collecte par `POST ligne/quantite` (auteur enregistré), repli sur le PUT si la route

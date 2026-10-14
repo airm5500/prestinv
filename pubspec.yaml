@@ -2,9 +2,9 @@ name: prestinv
 description: "Application de gestion d'inventaire"
 publish_to: 'none'
 
-# Version UNIQUE de l'application : Android la reprend (versionName = 4.12.0, versionCode = 8).
+# Version UNIQUE de l'application : Android la reprend (versionName = 4.13.0, versionCode = 9).
 # Le numéro après « + » doit augmenter à chaque APK publié (dernier publié : 4.8.5, code 4).
-version: 4.12.0+8
+version: 4.13.0+9
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
