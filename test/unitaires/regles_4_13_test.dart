@@ -6,7 +6,8 @@
 //    (horloge simulée) ;
 //  - création d'inventaire : profil (réponse de connexion), réglage, code administrateur ;
 //  - masquages dans les PDF / CSV (stock théorique, quantité déjà comptée) ;
-//  - taille de l'écran : données d'écran ramenées à l'échelle, réglage mémorisé.
+//  - taille de l'écran : données d'écran ramenées à l'échelle, réglage mémorisé ; (4.13.1) seuil des
+//    petits écrans (Automatique → Compact), calibré sur le parc réel.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/inventaire/autorisation_creation.dart';
@@ -299,6 +300,56 @@ void main() {
       await TailleEcranReglage.charger();
       expect(TailleEcranReglage.active.value, TailleEcran.automatique, reason: 'valeur abîmée : défaut');
       TailleEcranReglage.reinitialiser();
+    });
+  });
+
+  group('Petits écrans : Automatique → Compact (4.13.1)', () {
+    // Taille logique (dp) = pixels / densité, dans les deux orientations.
+    Size dp(double l, double h, double densite) => Size(l / densite, h / densite);
+    final petits = <String, Size>{
+      'Sunmi V2s 720×1440, ×2 (360 × 720 dp)': dp(720, 1440, 2),
+      'Sunmi V2s sans barre de navigation (360 × 672 dp)': const Size(360, 672),
+      'Sunmi V2s couché (720 × 360 dp)': dp(1440, 720, 2),
+      'Sunmi V3 / V3H / V3mix 1080×1920, ×3 (360 × 640 dp)': dp(1080, 1920, 3),
+      'téléphone 720×1280, ×2 (360 × 640 dp)': dp(720, 1280, 2),
+      'téléphone très étroit 320 × 800 dp': const Size(320, 800),
+    };
+    final normaux = <String, Size>{
+      'téléphone 1080×2400, ×2,625 (411 × 914 dp)': dp(1080, 2400, 2.625),
+      'téléphone 1080×2400 couché': dp(2400, 1080, 2.625),
+      'téléphone 1080×2400, ×2,75 (393 × 873 dp)': dp(1080, 2400, 2.75),
+      'téléphone 1080×2400, ×3 (360 × 800 dp, Samsung)': dp(1080, 2400, 3),
+      'téléphone 1080×2400, ×3, sans barre de navigation (360 × 752 dp)': const Size(360, 752),
+      'téléphone 1080×2340, ×2,75 (393 × 851 dp)': dp(1080, 2340, 2.75),
+      'tablette 1920×1200, ×1,5': dp(1920, 1200, 1.5),
+      'tablette 800 × 1280 dp': const Size(800, 1280),
+    };
+    for (final e in petits.entries) {
+      test('petit : ${e.key}', () {
+        expect(TailleEcranReglage.petitEcran(e.value), isTrue);
+        expect(TailleEcranReglage.effective(TailleEcran.automatique, e.value), TailleEcran.compact);
+      });
+    }
+    for (final e in normaux.entries) {
+      test('normal : ${e.key}', () {
+        expect(TailleEcranReglage.petitEcran(e.value), isFalse);
+        expect(TailleEcranReglage.effective(TailleEcran.automatique, e.value), TailleEcran.automatique);
+      });
+    }
+
+    test('seuils exacts : côté long 740 dp, côté court 340 dp (limites incluses = taille normale)', () {
+      expect(TailleEcranReglage.petitEcran(const Size(360, 739.9)), isTrue);
+      expect(TailleEcranReglage.petitEcran(const Size(360, 740)), isFalse);
+      expect(TailleEcranReglage.petitEcran(const Size(339.9, 900)), isTrue);
+      expect(TailleEcranReglage.petitEcran(const Size(340, 900)), isFalse);
+      expect(TailleEcranReglage.petitEcran(Size.zero), isFalse, reason: 'taille inconnue : rien d\'imposé');
+    });
+
+    test('les choix manuels restent prioritaires (petit écran ou non)', () {
+      for (final ecran in [dp(720, 1440, 2), dp(1080, 2400, 2.625)]) {
+        expect(TailleEcranReglage.effective(TailleEcran.compact, ecran), TailleEcran.compact);
+        expect(TailleEcranReglage.effective(TailleEcran.tresCompact, ecran), TailleEcran.tresCompact);
+      }
     });
   });
 }

@@ -6,7 +6,9 @@
 // TOUTE l'interface d'un seul réglage, sans retoucher aucun écran : chaque écran reçoit plus de place
 // (en dp) et le rendu est réduit d'autant.
 //
-//   Automatique (défaut) : facteur 1,0 — rien ne change (taille définie par Android) ;
+//   Automatique (défaut) : facteur 1,0 — rien ne change (taille définie par Android) ; SUR UN PETIT
+//                          ÉCRAN ([TailleEcranReglage.petitEcran] : côté long < 740 dp ou côté court
+//                          < 340 dp, ex. Sunmi V2s 360 × 720 dp), Compact est appliqué d'office (4.13.1) ;
 //   Compact              : facteur 0,9 — 360 × 720 dp deviennent 400 × 800 dp ;
 //   Très compact         : facteur 0,8 — 360 × 720 dp deviennent 450 × 900 dp.
 //
@@ -78,6 +80,39 @@ class TailleEcranReglage {
   /// « Relancer maintenant » : l'interface est reconstruite à la taille enregistrée.
   static void appliquerMaintenant() => active.value = enregistree;
 
+  // ---------- Automatique sur petit écran (4.13.1) ----------
+
+  /// Seuils en taille LOGIQUE (dp), calculés sur l'écran réel (avant toute réduction), indépendants de
+  /// l'orientation. Ce qui manque aux petits terminaux, c'est la HAUTEUR (côté long) :
+  ///  - Sunmi V2s 720 × 1440 px, densité 2 → 360 × 720 dp (≈ 360 × 672 sans la barre de navigation) :
+  ///    petit ; Sunmi V3 / V3H / V3mix 1080 × 1920, ×3 → 360 × 640 dp : petit ;
+  ///  - téléphones courants 1080 × 2400 px : 411 × 914 dp (×2,625), 392 × 873 (×2,75) et même
+  ///    360 × 800 dp (×3, Samsung), soit 752 dp sans la barre de navigation : taille normale.
+  /// Le seuil de largeur seul (< 380 dp) ne convient pas : il prendrait les Samsung 360 × 800 dp.
+  static const seuilCoteLong = 740.0;
+
+  /// Écrans très étroits (≤ 320 dp) : petits quelle que soit leur hauteur.
+  static const seuilCoteCourt = 340.0;
+
+  /// L'écran de taille logique [ecran] (dp, avant réduction) est-il petit ?
+  static bool petitEcran(Size ecran) => !ecran.isEmpty && (ecran.longestSide < seuilCoteLong || ecran.shortestSide < seuilCoteCourt);
+
+  /// Taille réellement appliquée pour le choix [choisie] sur l'écran [ecran] (dp) : Automatique devient
+  /// Compact sur un petit écran ; Compact et Très compact (choix manuels) restent prioritaires.
+  static TailleEcran effective(TailleEcran choisie, Size ecran) =>
+      choisie == TailleEcran.automatique && petitEcran(ecran) ? TailleEcran.compact : choisie;
+
+  /// Taille logique RÉELLE de l'écran (dp), lue sur la vue : la même à l'intérieur de l'interface
+  /// réduite (dont la MediaQuery est agrandie).
+  static Size ecranReel(BuildContext context) {
+    final v = View.maybeOf(context);
+    if (v == null) return MediaQuery.maybeSizeOf(context) ?? Size.zero;
+    return v.physicalSize / v.devicePixelRatio;
+  }
+
+  /// Automatique est-il ramené à Compact sur cet écran ?
+  static bool compactAutomatique(BuildContext context) => petitEcran(ecranReel(context));
+
   /// Tests : retour à l'état initial.
   @visibleForTesting
   static void reinitialiser() {
@@ -126,7 +161,8 @@ class EchelleInterface extends StatelessWidget {
 }
 
 /// Racine qui applique la taille active ([TailleEcranReglage.active]) : quand elle change
-/// (« Relancer maintenant »), toute l'interface sous [child] est reconstruite.
+/// (« Relancer maintenant »), toute l'interface sous [child] est reconstruite. Automatique : Compact sur
+/// un petit écran ([TailleEcranReglage.effective]).
 class RacineTailleEcran extends StatelessWidget {
   final Widget child;
   const RacineTailleEcran({super.key, required this.child});
@@ -134,6 +170,13 @@ class RacineTailleEcran extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<TailleEcran>(
         valueListenable: TailleEcranReglage.active,
-        builder: (_, t, __) => KeyedSubtree(key: ValueKey('taille-${t.name}'), child: EchelleInterface(facteur: t.facteur, child: child)),
+        builder: (context, t, __) => KeyedSubtree(
+          key: ValueKey('taille-${t.name}'),
+          // Au-dessus de l'interface réduite : la MediaQuery est celle de l'écran réel (suivie).
+          child: EchelleInterface(
+            facteur: TailleEcranReglage.effective(t, MediaQuery.maybeSizeOf(context) ?? TailleEcranReglage.ecranReel(context)).facteur,
+            child: child,
+          ),
+        ),
       );
 }

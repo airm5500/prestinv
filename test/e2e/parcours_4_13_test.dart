@@ -6,7 +6,8 @@
 //  - envoi manuel : message BLOQUANT après le délai réglé, « Envoyer maintenant » ; délai 0 : envoi
 //    automatique toutes les 15 min (horloge simulée) ;
 //  - création réservée (profil), réglage protégé, création depuis la collecte ;
-//  - taille de l'écran (réglage protégé) appliquée par « Relancer maintenant ».
+//  - taille de l'écran (réglage protégé) appliquée par « Relancer maintenant » ; Automatique → Compact
+//    sur petit écran (4.13.1).
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/collecte/collecte_store.dart';
@@ -300,11 +301,13 @@ void main() {
     tailleEcran(tester, sunmiV2s);
     await lancerApplication(tester);
     await seConnecter(tester);
-    expect(MediaQuery.sizeOf(tester.element(find.byType(NvAccueilScreen))).width, 360);
+    // 4.13.1 : petit écran en Automatique → Compact appliqué d'office (360 dp → 400 dp).
+    expect(MediaQuery.sizeOf(tester.element(find.byType(NvAccueilScreen))).width, closeTo(400, 0.01));
     await toucher(tester, find.text('Réglages'));
     await tester.pumpAndSettle();
     final choix = find.byKey(const ValueKey('nv-taille-tresCompact'));
     await tester.scrollUntilVisible(choix, 300, scrollable: find.byType(Scrollable).first);
+    expect(find.text('Automatique (Compact appliqué sur cet écran)'), findsOneWidget);
     await tester.tap(choix);
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, codeAdminFictif);

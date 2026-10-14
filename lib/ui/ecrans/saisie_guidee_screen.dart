@@ -443,6 +443,7 @@ class _NvSaisieGuideeScreenState extends State<NvSaisieGuideeScreen> with Douche
     final hauteurNom = MediaQuery.textScalerOf(context).scale(_tailleNom) * _interligneNom * 2;
     final dejaCompte = !touche ? '—' : (appConfig.masquerDejaCompte ? '•••' : '${p.quantiteSaisie}');
     return SoftCard(
+      key: const ValueKey('nv-carte-produit'),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SizedBox(

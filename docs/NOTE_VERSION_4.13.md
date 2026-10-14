@@ -1,13 +1,33 @@
-# Prestige Inventaire 4.13.0 — Note de version
+# Prestige Inventaire 4.13.1 — Note de version
 
 *Pour le pharmacien et l'équipe qui compte. Cette version applique la revue de la nouvelle interface
-et la maquette que vous avez validée. Les écrans d'origine ne changent pas : ils restent disponibles
-dans les Réglages (code administrateur).*
+et la maquette que vous avez validée, puis (4.13.1) vos décisions sur la 4.13.0. Les écrans d'origine
+restent disponibles dans les Réglages (code administrateur) ; ils ne changent que pour recevoir le
+rappel « Veuillez sauvegarder vos saisies » (voir ci-dessous).*
 
-Version : **4.13.0** (code 9). Elle s'installe par-dessus la 4.12.0 sans désinstaller. Rien n'est
-perdu : réglages, saisies en attente, collecte et rapports sont repris tels quels.
+Version : **4.13.1** (code 10). Elle s'installe par-dessus la 4.13.0 ou la 4.12.0 sans désinstaller.
+Rien n'est perdu : réglages, saisies en attente, collecte et rapports sont repris tels quels.
 
-Captures (terminal Sunmi V2s et téléphone) : `docs/captures_4.13/`.
+Captures (terminal Sunmi V2s et téléphone) : `docs/captures_4.13/` (V2s en taille « Automatique »,
+donc Compact depuis la 4.13.1).
+
+## Nouveau en 4.13.1 (vos décisions)
+
+1. **Rappel bloquant aussi dans l'ancienne interface.** Le message « **Veuillez sauvegarder vos
+   saisies** » (après le délai de rappel ; délai 0 → envoi automatique toutes les 15 minutes) s'affiche
+   maintenant **quelle que soit l'interface**. Dans l'ancienne interface, il a le **style des écrans
+   d'origine** et **remplace** l'ancien bandeau bleu de 5 secondes « Rappel : Vous avez des données non
+   envoyées ! » de la saisie guidée : plus de message en double. « Envoyer maintenant » envoie toutes
+   les saisies non envoyées avec la progression d'origine (« Envoi... (3/7) »).
+2. **Clavier du téléphone dans le champ de scan** : la correction est gardée dans les deux interfaces
+   (vérifiée aussi dans la saisie guidée et la saisie rapide d'origine).
+3. **Compact automatique sur les petits écrans.** En taille « **Automatique** », l'application applique
+   **Compact** d'elle-même sur un petit écran : le Sunmi V2s (720 × 1440, densité 2) et les écrans de
+   même hauteur (Sunmi V3 360 × 640 dp…). Le réglage affiche alors « **Automatique (Compact appliqué sur
+   cet écran)** ». Les téléphones courants (1080 × 2400) restent en taille normale. Si vous choisissez
+   Compact ou Très compact, votre choix est toujours appliqué. Sur le V2s, la carte du produit de la
+   saisie guidée est maintenant **entière** (stock, déjà compté, prix d'achat), sans faire défiler.
+4. « Masquer la quantité déjà comptée » reste protégé par le code administrateur (inchangé).
 
 ---
 
@@ -121,6 +141,8 @@ Choisissez l'inventaire (celui en cours est proposé), puis l'emplacement :
   sans réseau).
 - **Délai réglé à 0** : pas de message ; les saisies non envoyées partent **toutes seules toutes les
   15 minutes**.
+- **Les deux interfaces** (4.13.1) : dans l'ancienne, même règle, fenêtre au style d'origine ; l'ancien
+  bandeau de rappel de 5 secondes est retiré (pas de doublon).
 - La progression d'envoi est nouvelle (anneau, « 31 sur 50 saisies envoyées », barre) ; « Continuer la
   saisie » ferme la fenêtre, **l'envoi continue en arrière-plan**.
 
@@ -128,7 +150,10 @@ Choisissez l'inventaire (celui en cours est proposé), puis l'emplacement :
 
 Réglages → Réglages protégés → **Taille de l'écran : Automatique / Compact / Très compact** (code
 administrateur). Pour les petits écrans comme le **Sunmi V2s** : Compact réduit toute l'interface de
-10 %, Très compact de 20 % (fenêtres et menus compris), dans les deux interfaces. Appliqué au prochain
+10 %, Très compact de 20 % (fenêtres et menus compris), dans les deux interfaces.
+**Automatique** (4.13.1) : Compact est appliqué d'office sur un petit écran (côté long de moins de
+740 dp, ou côté court de moins de 340 dp : Sunmi V2s, Sunmi V3…), avec la mention « Automatique (Compact
+appliqué sur cet écran) » ; taille normale ailleurs (téléphones 1080 × 2400). Appliqué au prochain
 lancement, ou tout de suite avec **« Relancer maintenant »** (retour à l'accueil, rien n'est perdu).
 
 ## 11. Corrections
@@ -141,4 +166,5 @@ lancement, ou tout de suite avec **« Relancer maintenant »** (retour à l'accu
 
 Mêmes routes du serveur, mêmes règles : un serveur injoignable n'est jamais pris pour une absence de
 licence ; session expirée → « Se reconnecter » sans quitter l'écran ; toute saisie est gardée sur le
-terminal avant d'être envoyée. Écrans d'origine strictement inchangés (fenêtres comprises).
+terminal avant d'être envoyée. Écrans d'origine inchangés (fenêtres comprises), sauf le rappel d'envoi
+de la saisie guidée, remplacé par le rappel bloquant commun (4.13.1).

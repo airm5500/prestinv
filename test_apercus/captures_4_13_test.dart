@@ -1,6 +1,7 @@
 // Captures PNG RÉELLES de la 4.13 (maquette validée par le pharmacien), polices Roboto + icônes
 // Material du SDK chargées, en taille Sunmi V2s (720 × 1440 px, densité 2) et téléphone (1080 × 2400 px,
-// densité 2,625). Hors CI ; pour régénérer :
+// densité 2,625), en taille de l'écran « Automatique » (Compact appliqué d'office sur le V2s depuis la
+// 4.13.1). Hors CI ; pour régénérer :
 //   flutter test test_apercus/captures_4_13_test.dart --update-goldens
 // Fichiers : docs/captures_4.13/<appareil>_<écran>.png.
 // ignore_for_file: invalid_use_of_visible_for_testing_member
@@ -18,6 +19,7 @@ import 'package:prestinv/ui/ecrans/accueil_screen.dart';
 import 'package:prestinv/ui/ecrans/analyse_screen.dart';
 import 'package:prestinv/ui/ecrans/inventaire_screen.dart';
 import 'package:prestinv/ui/ecrans/saisie_guidee_screen.dart';
+import 'package:prestinv/ui/taille_ecran.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../test/helpers/banc_essai.dart';
@@ -110,7 +112,9 @@ Future<void> _avancementsConnus() async {
   calc.dispose();
 }
 
-Widget _cadre(Banc b, Widget ecran) => RepaintBoundary(key: const ValueKey('apercu'), child: monterNv(b, ecran));
+/// Comme main() : taille de l'écran Automatique à la racine (4.13.1 : Compact appliqué d'office sur le
+/// Sunmi V2s, taille normale sur le téléphone).
+Widget _cadre(Banc b, Widget ecran) => RepaintBoundary(key: const ValueKey('apercu'), child: RacineTailleEcran(child: monterNv(b, ecran)));
 
 Future<void> _photo(WidgetTester tester, String appareil, String nom) =>
     expectLater(find.byKey(const ValueKey('apercu')), matchesGoldenFile('$_dossier/${appareil}_$nom.png'));

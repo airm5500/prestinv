@@ -1,6 +1,6 @@
 // Nouvelle interface 4.13 — écrans (widgets) : correctifs et nouveautés de la maquette validée.
 //  - mini-clavier du champ de scan : le clavier du téléphone s'ouvre (guidée, scan continu, collecte,
-//    écarts, restants) ;
+//    écarts, restants ; et, même champ partagé, saisie guidée et rapide de l'ANCIENNE interface) ;
 //  - récapitulatif du rayon : Tous / Déjà comptés / Pas comptés, toucher une ligne → retour au produit ;
 //  - « Masquer la quantité déjà comptée » : saisie et écarts ; stock théorique masqué : récapitulatif,
 //    analyse ;
@@ -18,9 +18,11 @@ import 'package:prestinv/widgets/pin_admin.dart';
 import 'package:prestinv/widgets/reconnexion.dart';
 import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/models/product.dart';
+import 'package:prestinv/screens/inventory_entry_screen.dart';
 import 'package:prestinv/ui/avancement.dart';
 import 'package:prestinv/ui/ecrans/analyse_screen.dart';
 import 'package:prestinv/ui/ecrans/collecte_screen.dart';
+import 'package:prestinv/ui/ecrans/config_screen.dart';
 import 'package:prestinv/ui/ecrans/ecarts_screen.dart';
 import 'package:prestinv/ui/ecrans/inventaire_screen.dart';
 import 'package:prestinv/ui/ecrans/recap_screen.dart';
@@ -64,6 +66,35 @@ void main() {
         final b = await banc();
         await tester.pumpWidget(monterNv(b, e.value()));
         await tester.pumpAndSettle();
+        expect(champScanAFocus(tester), isTrue, reason: 'douchette prête (focus déjà pris)');
+        tester.testTextInput.log.clear();
+        await tester.tap(find.byTooltip('Clavier (chercher par nom)').first);
+        await tester.pumpAndSettle();
+        expect(tester.testTextInput.log.map((c) => c.method), contains('TextInput.show'), reason: 'affichage du clavier demandé au système');
+        final config = tester.testTextInput.log.lastWhere((c) => c.method == 'TextInput.setClient', orElse: () => const MethodCall('aucun'));
+        if (config.arguments != null) {
+          expect('${(config.arguments as List)[1]}', isNot(contains('TextInputType.none')));
+        }
+        expect(find.byTooltip('Masquer le clavier (scan)'), findsOneWidget);
+        await demonter(tester);
+      });
+    }
+  });
+
+  group('Mini-clavier du champ de scan, ANCIENNE interface (même champ partagé) : le clavier du téléphone s\'ouvre', () {
+    for (final rapide in [false, true]) {
+      testWidgets(rapide ? 'saisie rapide (origine)' : 'saisie guidée (origine)', (tester) async {
+        ecranTerminal(tester);
+        expect(InterfaceVersion.useNew.value, isFalse, reason: 'ancienne interface');
+        final b = await preparerBanc(mode: SendMode.collect);
+        await tester.pumpWidget(monter(b, InventoryEntryScreen(inventoryId: 'INV1', isQuickMode: rapide)));
+        await tester.pumpAndSettle();
+        if (!rapide) {
+          await tester.tap(find.text('Sélectionner un emplacement'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('RAYON UN'));
+          await tester.pumpAndSettle();
+        }
         expect(champScanAFocus(tester), isTrue, reason: 'douchette prête (focus déjà pris)');
         tester.testTextInput.log.clear();
         await tester.tap(find.byTooltip('Clavier (chercher par nom)').first);
@@ -288,10 +319,35 @@ void main() {
         return const SizedBox();
       }))));
       expect(taille.width, closeTo(400, 0.01));
+      TailleEcranReglage.enregistree = TailleEcran.tresCompact;
+      TailleEcranReglage.appliquerMaintenant();
+      await tester.pump();
+      expect(taille.width, closeTo(450, 0.01));
+      // 4.13.1 : Automatique sur un petit écran (360 × 640 dp) → Compact appliqué d'office.
       TailleEcranReglage.enregistree = TailleEcran.automatique;
       TailleEcranReglage.appliquerMaintenant();
       await tester.pump();
-      expect(taille.width, 360);
+      expect(taille.width, closeTo(400, 0.01), reason: 'petit écran : Compact appliqué');
+      // Téléphone courant (1080 × 2400 px, ×2,625 → 411 × 914 dp) : taille normale.
+      tailleEcran(tester, const Size(1080 / 2.625, 2400 / 2.625), densite: 2.625);
+      await tester.pump();
+      expect(taille.width, closeTo(1080 / 2.625, 0.01), reason: 'écran normal : rien ne change');
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    testWidgets('Réglages : « Automatique (Compact appliqué sur cet écran) » sur un petit écran seulement', (tester) async {
+      for (final (ecran, petit) in [(sunmiV2s, true), (telephone360, false)]) {
+        tailleEcran(tester, ecran);
+        TailleEcranReglage.reinitialiser();
+        final b = await banc();
+        await tester.pumpWidget(RacineTailleEcran(child: monterNv(b, const NvConfigScreen())));
+        await tester.pumpAndSettle();
+        final aide = find.byKey(const ValueKey('nv-taille-aide'));
+        await tester.scrollUntilVisible(aide, 300, scrollable: find.byType(Scrollable).first);
+        expect(find.text('Automatique (Compact appliqué sur cet écran)'), petit ? findsOneWidget : findsNothing, reason: '$ecran');
+        await demonter(tester);
+      }
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
     });

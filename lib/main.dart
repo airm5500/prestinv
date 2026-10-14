@@ -17,6 +17,7 @@ import 'package:prestinv/saisie/saisie_queue.dart';
 import 'package:prestinv/saisie/saisie_store.dart';
 import 'package:prestinv/ui/dialogues.dart';
 import 'package:prestinv/ui/taille_ecran.dart';
+import 'package:prestinv/widgets/rappel_sauvegarde_origine.dart';
 import 'package:prestinv/widgets/reconnexion.dart';
 import 'package:prestinv/services/identifiants_securises.dart';
 
@@ -134,27 +135,37 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
     _etaitConnecte = auth.isLoggedIn;
     auth.addListener(_surChangementConnexion);
 
-    // Envoi manuel (Collecte), nouvelle interface : rappel BLOQUANT après le délai réglé, ou envoi
-    // automatique toutes les 15 min si le délai est à 0 (lib/saisie/rappel_envoi.dart).
+    // Envoi manuel (Collecte), DEUX interfaces (4.13.1) : rappel BLOQUANT après le délai réglé, ou
+    // envoi automatique toutes les 15 min si le délai est à 0 (lib/saisie/rappel_envoi.dart). Dans
+    // l'ancienne interface, il remplace le rappel d'origine de la saisie guidée (pas de doublon).
     _gardien = GardienEnvoi(
       queue: queue,
       envoiManuel: () => config.sendMode == SendMode.collect,
       delaiMinutes: () => config.sendReminderMinutes,
-      actif: () => mounted && auth.isLoggedIn && InterfaceVersion.useNew.value && navigateurApp.currentContext != null,
+      actif: () => mounted && auth.isLoggedIn && navigateurApp.currentContext != null,
       afficherRappel: _afficherRappelEnvoi,
     )..demarrer();
   }
 
-  /// Message bloquant puis envoi avec sa progression (l'envoi se poursuit si l'on ferme la fenêtre).
+  /// Message bloquant puis envoi avec sa progression (nouvelle interface : l'envoi se poursuit si l'on
+  /// ferme la fenêtre). Style de l'interface active : nouvelle (maquette) ou d'origine.
   Future<BilanEnvoi?> _afficherRappelEnvoi(int nombre, Duration depuis) async {
     final ctx = navigateurApp.currentContext;
     final queue = _saisies;
     if (ctx == null || queue == null) return null;
-    await nvRappelSauvegarde(ctx, nombre: nombre, depuis: depuis, themer: true);
+    final nouvelle = InterfaceVersion.useNew.value;
+    if (nouvelle) {
+      await nvRappelSauvegarde(ctx, nombre: nombre, depuis: depuis, themer: true);
+    } else {
+      await origineRappelSauvegarde(ctx, nombre: nombre, depuis: depuis);
+    }
     final ctx2 = navigateurApp.currentContext;
     if (ctx2 == null || !ctx2.mounted) return null;
-    final bilan = await nvEnvoiSaisies(ctx2,
-        envoyer: (p) => queue.envoyer(onProgress: p), demandees: queue.enAttente(), sousTitre: 'Toutes les saisies non envoyées', themer: true);
+    final Future<BilanEnvoi> envoi = nouvelle
+        ? nvEnvoiSaisies(ctx2,
+            envoyer: (p) => queue.envoyer(onProgress: p), demandees: queue.enAttente(), sousTitre: 'Toutes les saisies non envoyées', themer: true)
+        : origineEnvoiSaisies(ctx2, envoyer: (p) => queue.envoyer(onProgress: p), demandees: queue.enAttente());
+    final bilan = await envoi;
     final ctx3 = navigateurApp.currentContext;
     if (bilan.sessionExpiree && ctx3 != null && ctx3.mounted) await demanderReconnexion(ctx3);
     return bilan;

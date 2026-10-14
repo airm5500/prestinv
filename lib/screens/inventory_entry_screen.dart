@@ -56,7 +56,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
   String? _notificationMessage;
   Color? _notificationColor;
   Timer? _notificationTimer;
-  Timer? _sendReminderTimer;
+  // Rappel d'envoi (mode Collecte) : garde-fou global BLOQUANT (lib/saisie/rappel_envoi.dart, 4.13.1),
+  // qui remplace l'ancien bandeau de rappel de 5 s de cet écran.
 
   Timer? _debounceTimer;
 
@@ -295,7 +296,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
     _quantityController.dispose();
     _quantityFocusNode.dispose();
     _notificationTimer?.cancel();
-    _sendReminderTimer?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _debounceTimer?.cancel();
@@ -465,28 +465,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
     });
   }
 
-  void _resetSendReminderTimer() {
-    _sendReminderTimer?.cancel();
-    final appConfig = Provider.of<AppConfig>(context, listen: false);
-    final provider = Provider.of<EntryProvider>(context, listen: false);
-    if (appConfig.sendMode == SendMode.collect &&
-        appConfig.sendReminderMinutes > 0) {
-      _sendReminderTimer =
-          Timer(Duration(minutes: appConfig.sendReminderMinutes), () {
-            if (provider.hasUnsyncedData && mounted) {
-              _showSendReminderNotification();
-            }
-          });
-    }
-  }
-
-  void _showSendReminderNotification() {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Rappel : Vous avez des données non envoyées !'),
-        backgroundColor: Colors.blue,
-        duration: Duration(seconds: 5)));
-  }
-
   void _onKeyPressed(String value) {
     if (value == 'DEL') {
       if (_quantityController.text.isNotEmpty) {
@@ -540,8 +518,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
       progressNotifier.value = '❌ Échec : ${bilan.interruption ?? 'Vérifiez votre connexion au serveur.'} '
           'Les saisies restent sur l\'appareil.';
     }
-
-    _sendReminderTimer?.cancel();
 
     // On laisse le message affiché 2.5 secondes pour que l'utilisateur puisse lire l'erreur
     await Future.delayed(const Duration(milliseconds: 2500));
@@ -645,7 +621,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
         return;
       }
       if (!mounted) return;
-      _resetSendReminderTimer();
+      // (Rappel d'envoi : garde-fou global, lib/saisie/rappel_envoi.dart.)
 
       // 2. Mode Direct : envoi immédiat (la file renvoie une correction faite pendant l'envoi).
       if (appConfig.sendMode == SendMode.direct) {
@@ -655,7 +631,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
       bool isLastProduct =
           provider.currentProductIndex >= provider.totalProducts - 1;
       if (isLastProduct && provider.totalProducts > 0) {
-        _sendReminderTimer?.cancel();
         if (!mounted) return;
         _showFinishDialog();
       } else {
@@ -708,8 +683,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
 
   // --- LOGIQUE DE SÉCURITÉ DE SORTIE RÉVISÉE ---
   Future<bool> _handleExitSecurity() async {
-    _sendReminderTimer?.cancel();
-
     final provider = Provider.of<EntryProvider>(context, listen: false);
     final appConfig = Provider.of<AppConfig>(context, listen: false);
 
@@ -837,7 +810,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
       if (!canChange) return;
 
       if (mounted) {
-        _sendReminderTimer?.cancel();
         _searchController.clear();
         _showSearchResults = false;
         if (newValue == null) {
@@ -846,7 +818,6 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
           provider
               .fetchProducts(_apiService, widget.inventoryId, newValue.id)
               .then((_) {
-            _resetSendReminderTimer();
             _reprendreFocusScan();
           });
         }

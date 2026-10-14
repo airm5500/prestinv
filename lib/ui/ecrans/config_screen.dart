@@ -334,6 +334,12 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
               onSelectionChanged: (s) => _changerTaille(s.first),
             ),
             const SizedBox(height: 6),
+            // Automatique sur un petit écran (Sunmi V2s…) : Compact appliqué d'office (4.13.1).
+            if (TailleEcranReglage.enregistree == TailleEcran.automatique && TailleEcranReglage.compactAutomatique(context)) ...[
+              Text('Automatique (Compact appliqué sur cet écran)',
+                  key: const ValueKey('nv-taille-auto-compact'), style: TextStyle(color: nv.encre, fontSize: 13.5, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 2),
+            ],
             Text(
               TailleEcranReglage.enAttente
                   ? 'Choix enregistré : appliqué au prochain lancement.'

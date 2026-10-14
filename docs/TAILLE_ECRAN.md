@@ -7,15 +7,35 @@
 ## 1. Le besoin
 
 Sur les petits terminaux (Sunmi V2s, écran 5,45″ : 720 × 1440 px, densité 2 → **360 × 720 dp**), les
-écrans conçus pour un téléphone de 390 × 844 dp n'ont pas assez de hauteur : la saisie guidée, par
-exemple, doit faire défiler une partie du produit. Plutôt que de retoucher chaque écran, un **réglage
-unique** réduit toute l'interface :
+écrans conçus pour un téléphone de 390 × 844 dp n'ont pas assez de hauteur : en 4.13.0, la saisie
+guidée y coupait le bas de la carte produit (il fallait la faire défiler). Plutôt que de retoucher
+chaque écran, un **réglage unique** réduit toute l'interface :
 
 | Taille | Facteur | Surface vue par l'application sur un V2s | Effet |
 |---|---|---|---|
-| **Automatique** (défaut) | 1,0 | 360 × 720 dp | rien ne change (taille définie par Android) |
+| **Automatique** (défaut) | 1,0, ou 0,9 sur un petit écran | 400 × 800 dp (Compact appliqué) | taille définie par Android ; **Compact sur un petit écran** (4.13.1) |
 | **Compact** | 0,9 | 400 × 800 dp | tout est 10 % plus petit |
 | **Très compact** | 0,8 | 450 × 900 dp | tout est 20 % plus petit |
+
+### Automatique sur les petits écrans (4.13.1)
+
+`TailleEcranReglage.petitEcran(taille)` : écran **petit** si son **côté long < 740 dp** ou son **côté
+court < 340 dp**, mesuré sur l'écran réel (taille de la vue, avant réduction), quelle que soit
+l'orientation. `TailleEcranReglage.effective(choix, taille)` : Automatique → Compact sur un petit écran ;
+**Compact et Très compact (choix manuels) restent prioritaires**. Calibrage :
+
+| Appareil | Taille logique | Résultat |
+|---|---|---|
+| Sunmi V2s 720 × 1440, ×2 | 360 × 720 dp (≈ 672 sans barre de navigation) | Compact |
+| Sunmi V3 / V3H / V3mix 1080 × 1920, ×3 ; téléphone 720 × 1280, ×2 | 360 × 640 dp | Compact |
+| Téléphone 1080 × 2400, ×2,625 / ×2,75 | 411 × 914 / 393 × 873 dp | normale |
+| Téléphone 1080 × 2400, ×3 (Samsung) | 360 × 800 dp (752 sans barre de navigation) | normale |
+| Tablettes | 1280 × 800 dp… | normale |
+
+Un seuil sur la seule largeur (< 380 dp) a été écarté : il aurait réduit les Samsung 1080 × 2400
+(360 dp de large), qui ont assez de hauteur. Ce qui manque aux petits terminaux, c'est la hauteur.
+Les réglages affichent alors « **Automatique (Compact appliqué sur cet écran)** »
+(`TailleEcranReglage.compactAutomatique(context)`).
 
 Le réglage est **protégé par le code administrateur** et **appliqué au prochain lancement** ; la fenêtre
 qui suit le choix propose « **Relancer maintenant** » (l'interface est reconstruite et revient à
@@ -76,9 +96,13 @@ relance (d'où le retour à l'accueil avant `appliquerMaintenant`).
 ## 4. Tests (dans Prestige Inventaire)
 
 - `test/unitaires/regles_4_13_test.dart` : facteurs, données d'écran ramenées à l'échelle (taille,
-  marges, clavier, densité), réglage mémorisé, valeur abîmée.
+  marges, clavier, densité), réglage mémorisé, valeur abîmée ; seuil des petits écrans (parc réel,
+  limites exactes, choix manuels prioritaires).
+- `test/ergonomie/petits_ecrans_test.dart` : V2s en Automatique → Compact, carte produit de la saisie
+  guidée entière (coupée à 1,0) ; téléphone 1080 × 2400 en taille normale.
 - `test/nv_4_13_test.dart` : touchers justes, bouton posé au-dessus du clavier sur l'écran réel,
-  `RacineTailleEcran` qui suit le réglage.
+  `RacineTailleEcran` qui suit le réglage (Automatique → Compact sur petit écran), mention dans les
+  Réglages.
 - `test/e2e/parcours_4_13_test.dart` : Réglages → Très compact (code administrateur) → « Relancer
   maintenant » → surface de 450 dp sur un V2s, la liste se déroule normalement.
 - `test/ergonomie/` : **chaque écran** (nouvelle et ancienne interface) × appareils × texte 1,0 / 1,3 ×

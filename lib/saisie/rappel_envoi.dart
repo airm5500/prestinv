@@ -1,6 +1,7 @@
 // lib/saisie/rappel_envoi.dart
-// ENVOI MANUEL (mode « Collecte ») — garde-fou global de la nouvelle interface (décision du pharmacien,
-// 4.13), branché sur la file des saisies (SaisieQueue) dans main.dart :
+// ENVOI MANUEL (mode « Collecte ») — garde-fou global des DEUX interfaces (décision du pharmacien,
+// 4.13 ; ancienne interface depuis la 4.13.1, où il remplace le rappel d'origine de 5 s), branché sur
+// la file des saisies (SaisieQueue) dans main.dart :
 //  - délai de rappel réglé (Réglages → « Rappel d'envoi », sendReminderMinutes) > 0 : quand la PLUS
 //    ANCIENNE saisie non envoyée dépasse ce délai, un message BLOQUANT « Veuillez sauvegarder vos
 //    saisies » s'affiche avec « Envoyer maintenant » ; il revient tant que les saisies ne sont pas
@@ -63,7 +64,7 @@ class GardienEnvoi {
   /// Délai de rappel réglé (minutes, 0 = envoi automatique toutes les 15 min).
   final int Function() delaiMinutes;
 
-  /// Le garde-fou s'applique-t-il maintenant (connecté, nouvelle interface) ?
+  /// Le garde-fou s'applique-t-il maintenant (connecté, navigateur prêt) ?
   final bool Function() actif;
 
   /// Affiche le message bloquant ; se termine quand l'opérateur a lancé l'envoi (et que celui-ci est
