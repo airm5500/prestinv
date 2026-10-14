@@ -78,9 +78,9 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
   Future<bool> _pin(String motif) => widget.verifierPin != null ? widget.verifierPin!(context) : demanderPinAdmin(context, motif: motif);
 
   /// Réglage protégé (4.13) : changé seulement après le code administrateur, enregistré tout de suite.
-  Future<void> _reglageProtege({bool? masquer, bool? creation}) async {
+  Future<void> _reglageProtege({bool? masquer, bool? creation, bool? camera}) async {
     if (!await _pin('Ce réglage ne peut être modifié que par l\'administrateur.') || !mounted) return;
-    await context.read<AppConfig>().setReglagesProteges(masquerDejaCompte: masquer, creationAutresComptes: creation);
+    await context.read<AppConfig>().setReglagesProteges(masquerDejaCompte: masquer, creationAutresComptes: creation, scanCamera: camera);
   }
 
   /// Taille de l'écran : code administrateur, enregistrée pour le prochain lancement ; « Relancer
@@ -320,6 +320,14 @@ class _NvConfigScreenState extends State<NvConfigScreen> {
               subtitle: const Text('Administrateur et pharmacien : toujours. Désactivé par défaut pour les autres comptes.'),
               value: config.creationAutresComptes,
               onChanged: (v) => _reglageProtege(creation: v),
+            ),
+            SwitchListTile(
+              key: const ValueKey('nv-scan-camera'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Scan par l\'appareil photo'),
+              subtitle: const Text('Téléphones sans douchette : bouton appareil photo à côté du champ de scan. Désactivé par défaut.'),
+              value: config.scanCamera,
+              onChanged: (v) => _reglageProtege(camera: v),
             ),
             const SizedBox(height: 8),
             Text('Taille de l\'écran', style: TextStyle(color: nv.encre, fontWeight: FontWeight.w600)),

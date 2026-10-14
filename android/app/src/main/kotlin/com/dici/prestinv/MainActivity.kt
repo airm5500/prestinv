@@ -1,6 +1,7 @@
 package com.dici.prestinv
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
@@ -31,6 +32,14 @@ class MainActivity : FlutterActivity() {
             } catch (e: Exception) {
                 // Le retour n'est qu'une aide : son échec ne doit jamais gêner la saisie.
                 result.success(null)
+            }
+        }
+        // 4.14 : présence d'un appareil photo (lib/scan/camera/scan_camera.dart) — sans appareil photo, le
+        // bouton de scan par l'appareil photo n'est pas affiché. Aucune autorisation nécessaire.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "prestinv/appareil").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "cameraPresente" -> result.success(packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY))
+                else -> result.notImplemented()
             }
         }
     }

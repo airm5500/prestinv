@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/interface_version.dart';
 
 import '../helpers/banc_essai.dart';
+import '../helpers/camera_essai.dart';
 import '../helpers/douchette_essai.dart';
 import '../helpers/nouvelle_interface.dart';
 import '../support/ergonomie.dart';
@@ -18,8 +19,8 @@ import 'catalogue_ecrans.dart';
 
 final bool releve = Platform.environment['PRESTINV_RELEVE'] == '1';
 
-Future<Banc> banc() async {
-  final b = await preparerBanc(serveur: serveurRealiste());
+Future<Banc> banc([Map<String, Object> prefs = const {}]) async {
+  final b = await preparerBanc(serveur: serveurRealiste(), prefsEnPlus: prefs);
   b.auth.connecterPourTest(login: 'Awa K.', prenom: 'Awa');
   return b;
 }
@@ -29,17 +30,18 @@ void main() {
   setUp(() {
     reinitialiserDouchette();
     installerFauxRetour();
+    installerCameraSimulee();
   });
   tearDown(() => InterfaceVersion.useNew.value = false);
 
-  for (final ecran in [...ecransNouvelleInterface, ...ecransAncienneInterface]) {
+  for (final ecran in [...ecransNouvelleInterface, ...ecransAncienneInterface, ...ecransAppareilPhoto]) {
     group(ecran.nom, () {
       for (final appareil in appareils) {
         for (final echelle in echellesTexte) {
           for (final taille in taillesEcran) {
           testWidgets('$appareil, texte ×$echelle${suffixeTaille(taille)}', (tester) async {
             configurer(tester, appareil, echelle);
-            final b = await banc();
+            final b = await banc(ecran.prefs);
             final rendu = await releverErreursRendu(tester, () async {
               await tester.pumpWidget(ecran.monterAvec(b, taille: taille));
               if (ecran.anime) {

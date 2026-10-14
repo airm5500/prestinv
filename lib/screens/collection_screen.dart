@@ -7,6 +7,7 @@ import 'package:prestinv/utils/journal.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:prestinv/scan/camera/bouton_camera.dart';
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/models/collected_item.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
@@ -162,6 +163,16 @@ class _CollectionScreenState extends State<CollectionScreen> {
   }
 
   // --- LOGIQUE MÉTIER ---
+
+  /// Code lu par l'appareil photo (4.14) : même chemin qu'une lecture de la douchette dans le champ de
+  /// scan (mêmes filtres de saisie, puis validation comme Entrée).
+  void _lectureCamera(String brut) {
+    var v = TextEditingValue(text: brut, selection: TextSelection.collapsed(offset: brut.length));
+    for (final f in SaisieInput.rechercheFormatters) {
+      v = f.formatEditUpdate(TextEditingValue.empty, v);
+    }
+    _handleScan(v.text);
+  }
 
   void _handleScan(String code) {
     code = SaisieInput.nettoyerRecherche(code);
@@ -478,24 +489,29 @@ class _CollectionScreenState extends State<CollectionScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: TextField(
-              controller: _scanController,
-              inputFormatters: SaisieInput.rechercheFormatters,
-              focusNode: _scanFocusNode,
-              onSubmitted: _handleScan,
-              textInputAction: TextInputAction.done,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Scanner un code',
-                hintText: 'EAN, Code barre...',
-                prefixIcon: const Icon(Icons.qr_code_scanner, size: 28),
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    _scanController.clear();
-                    _scanFocusNode.requestFocus();
-                  },
+            // 4.14 : appareil photo (réglage protégé, désactivé par défaut : le champ reste seul, tel quel).
+            child: AvecBoutonCamera(
+              continu: true,
+              surLecture: _lectureCamera,
+              child: TextField(
+                controller: _scanController,
+                inputFormatters: SaisieInput.rechercheFormatters,
+                focusNode: _scanFocusNode,
+                onSubmitted: _handleScan,
+                textInputAction: TextInputAction.done,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'Scanner un code',
+                  hintText: 'EAN, Code barre...',
+                  prefixIcon: const Icon(Icons.qr_code_scanner, size: 28),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () {
+                      _scanController.clear();
+                      _scanFocusNode.requestFocus();
+                    },
+                  ),
                 ),
               ),
             ),

@@ -109,6 +109,7 @@ class _NvScanContinuScreenState extends State<NvScanContinuScreen> with Douchett
         focusNode: champScanFocus,
         label: 'Scannez le produit suivant',
         hint: 'Clavier : recherche par nom',
+        cameraContinue: true,
         onCode: surCodeChamp,
         onTexte: surFrappe,
         onClavier: surClavier,

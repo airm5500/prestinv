@@ -18,6 +18,7 @@ import 'package:prestinv/ui/taille_ecran.dart';
 import 'package:prestinv/widgets/numeric_keyboard.dart';
 
 import '../helpers/banc_essai.dart';
+import '../helpers/camera_essai.dart';
 import '../helpers/douchette_essai.dart';
 import '../helpers/nouvelle_interface.dart';
 import '../support/ergonomie.dart';
@@ -41,6 +42,9 @@ class SituationSaisie {
   /// (ex. 'A|Sunmi V2s|1.3'), valeur = raison. Ces seules configurations sont sautées ; toutes les
   /// autres restent exigées (une régression ailleurs fait échouer le test).
   final Map<String, String> anomalies;
+
+  /// Préférences en plus (ex. 4.14 : réglage « Scan par l'appareil photo » actif).
+  final Map<String, Object> prefs;
   const SituationSaisie(this.nom,
       {required this.nouvelle,
       required this.ecran,
@@ -48,7 +52,8 @@ class SituationSaisie {
       required this.champ,
       this.fenetre = false,
       this.anomalieB,
-      this.anomalies = const {}});
+      this.anomalies = const {},
+      this.prefs = const {}});
 
   /// Raison de saut pour le cas [cas] sur [a] à l'échelle [e], ou null (exigé).
   String? anomalie(String cas, Appareil a, double e) => cas == 'B' && anomalieB != null ? anomalieB : anomalies['$cas|${a.nom}|$e'];
@@ -80,6 +85,13 @@ Future<void> scannerChampTexte(WidgetTester tester) async {
 }
 
 Finder quantiteScanOrigine() => find.byKey(const ValueKey('qte-scan'));
+
+/// 4.14 : code lu par l'appareil photo (simulé) ; la feuille / fenêtre de quantité s'ouvre AU-DESSUS de
+/// l'aperçu, qui reste ouvert (scan continu, collecte, saisie rapide d'origine).
+Future<void> scannerCamera(WidgetTester tester) async {
+  await ouvrirCamera(tester);
+  await lireCamera(tester, '3400930000001');
+}
 
 final situations = <SituationSaisie>[
   SituationSaisie('Saisie guidée (nouvelle)',
@@ -113,6 +125,32 @@ final situations = <SituationSaisie>[
       amener: scannerChampTexte,
       champ: () => quantiteOrigine().last,
       fenetre: true),
+  // 4.14 — scan par l'appareil photo (réglage actif) : bouton à côté du champ, zone de quantité épinglée
+  // au-dessus du pavé inchangée ; feuilles / fenêtres de quantité ouvertes au-dessus de l'aperçu.
+  SituationSaisie('Saisie guidée, bouton appareil photo (nouvelle)',
+      nouvelle: true,
+      ecran: () => NvSaisieGuideeScreen(inventaire: inventaireEssai, rayonId: 'S2B2'),
+      amener: rien,
+      champ: quantiteNv,
+      prefs: prefsCamera),
+  SituationSaisie('Scan continu, feuille de quantité sur l\'aperçu photo (nouvelle)',
+      nouvelle: true, ecran: () => NvScanContinuScreen(inventaire: inventaireEssai), amener: scannerCamera, champ: quantiteNv, fenetre: true, prefs: prefsCamera),
+  SituationSaisie('Collecte, feuille de quantité sur l\'aperçu photo (nouvelle)',
+      nouvelle: true, ecran: () => const NvCollecteScreen(), amener: scannerCamera, champ: quantiteNv, fenetre: true, prefs: prefsCamera),
+  SituationSaisie('Saisie rapide, fenêtre de quantité sur l\'aperçu photo (origine)',
+      nouvelle: false,
+      ecran: () => InventoryEntryScreen(inventoryId: 'INV1', inventoryName: inventaireEssai.libelle, isQuickMode: true),
+      amener: scannerCamera,
+      champ: quantiteScanOrigine,
+      fenetre: true,
+      prefs: prefsCamera),
+  SituationSaisie('Collecte, fenêtre de quantité sur l\'aperçu photo (origine)',
+      nouvelle: false,
+      ecran: () => const CollectionScreen(),
+      amener: scannerCamera,
+      champ: () => quantiteOrigine().last,
+      fenetre: true,
+      prefs: prefsCamera),
 ];
 
 /// Haut du pavé numérique affiché (nouvelle ou ancienne interface), ou null.
@@ -125,7 +163,7 @@ double? hautDuPave(WidgetTester tester) {
 }
 
 Future<Banc> monterSituation(WidgetTester tester, SituationSaisie s, {TailleEcran taille = TailleEcran.automatique}) async {
-  final b = await preparerBanc(serveur: serveurRealiste());
+  final b = await preparerBanc(serveur: serveurRealiste(), prefsEnPlus: s.prefs);
   b.auth.connecterPourTest(login: 'Awa K.');
   InterfaceVersion.useNew.value = s.nouvelle;
   await tester.pumpWidget(aLaTaille(taille, s.nouvelle ? monterNv(b, s.ecran()) : monter(b, s.ecran())));
@@ -151,6 +189,7 @@ void main() {
   setUp(() {
     reinitialiserDouchette();
     installerFauxRetour();
+    installerCameraSimulee();
   });
   tearDown(() => InterfaceVersion.useNew.value = false);
 

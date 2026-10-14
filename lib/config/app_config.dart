@@ -36,6 +36,10 @@ class AppConfig with ChangeNotifier {
   bool _masquerDejaCompte = false;
   bool _creationAutresComptes = false;
 
+  // --- Scan par l'appareil photo (4.14) : téléphones sans douchette. Protégé par le code administrateur,
+  // DÉSACTIVÉ par défaut (rien ne change pour les terminaux Sunmi ni pour les utilisateurs actuels).
+  bool _scanCamera = false;
+
   // --- Scan (douchette) ---
   bool _sonScan = true;
   bool _vibrationScan = true;
@@ -68,6 +72,9 @@ class AppConfig with ChangeNotifier {
 
   /// Nouvelle interface : les comptes autres qu'administrateur / pharmacien peuvent créer un inventaire.
   bool get creationAutresComptes => _creationAutresComptes;
+
+  /// Bouton « appareil photo » à côté du champ de scan (téléphones sans douchette). Faux par défaut.
+  bool get scanCamera => _scanCamera;
 
   /// Bip après un scan (succès / déjà compté / erreur).
   bool get sonScan => _sonScan;
@@ -134,6 +141,7 @@ class AppConfig with ChangeNotifier {
 
     _masquerDejaCompte = _prefs.getBool('masquerDejaCompte') ?? false;
     _creationAutresComptes = _prefs.getBool('creationInventaireAutresComptes') ?? false;
+    _scanCamera = _prefs.getBool('scanCamera') ?? false;
 
     _sonScan = _prefs.getBool('scanSon') ?? true;
     _vibrationScan = _prefs.getBool('scanVibration') ?? true;
@@ -262,8 +270,12 @@ class AppConfig with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Réglages protégés de la nouvelle interface (le code administrateur est demandé par l'écran).
-  Future<void> setReglagesProteges({bool? masquerDejaCompte, bool? creationAutresComptes}) async {
+  /// Réglages protégés (le code administrateur est demandé par l'écran). [scanCamera] : les deux interfaces.
+  Future<void> setReglagesProteges({bool? masquerDejaCompte, bool? creationAutresComptes, bool? scanCamera}) async {
+    if (scanCamera != null) {
+      _scanCamera = scanCamera;
+      await _prefs.setBool('scanCamera', scanCamera);
+    }
     if (masquerDejaCompte != null) {
       _masquerDejaCompte = masquerDejaCompte;
       await _prefs.setBool('masquerDejaCompte', masquerDejaCompte);

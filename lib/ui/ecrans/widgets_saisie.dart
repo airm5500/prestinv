@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:prestinv/models/product.dart';
 import 'package:prestinv/saisie/saisie.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
+import 'package:prestinv/scan/camera/bouton_camera.dart';
 import 'package:prestinv/scan/champ_douchette.dart';
 import 'package:prestinv/scan/code_scan.dart';
 import 'package:prestinv/scan/journal_scans.dart';
@@ -24,6 +25,9 @@ class ChampScanNv extends StatelessWidget {
   final ValueChanged<bool> onClavier;
   final String label;
   final String hint;
+
+  /// Bouton appareil photo (réglage 4.14) : aperçu continu (scan continu) ou fermé après une lecture.
+  final bool cameraContinue;
   const ChampScanNv({
     super.key,
     required this.controller,
@@ -33,20 +37,24 @@ class ChampScanNv extends StatelessWidget {
     required this.onClavier,
     required this.label,
     required this.hint,
+    this.cameraContinue = false,
   });
 
   @override
-  Widget build(BuildContext context) => CadreScan(
-        champ: ChampDouchette(
-          key: const ValueKey('champ-scan'),
-          controller: controller,
-          focusNode: focusNode,
-          autofocus: true,
-          label: label,
-          hint: hint,
-          onCode: onCode,
-          onTexte: onTexte,
-          onClavier: onClavier,
+  Widget build(BuildContext context) => AvecBoutonCamera(
+        continu: cameraContinue,
+        child: CadreScan(
+          champ: ChampDouchette(
+            key: const ValueKey('champ-scan'),
+            controller: controller,
+            focusNode: focusNode,
+            autofocus: true,
+            label: label,
+            hint: hint,
+            onCode: onCode,
+            onTexte: onTexte,
+            onClavier: onClavier,
+          ),
         ),
       );
 }

@@ -13,6 +13,8 @@ import 'package:prestinv/collecte/collecte_store.dart';
 import 'package:prestinv/collecte/versement.dart';
 import 'package:prestinv/inventaire/autorisation_creation.dart';
 import 'package:prestinv/models/collected_item.dart';
+import 'package:prestinv/scan/camera/bouton_camera.dart';
+import 'package:prestinv/scan/camera/scan_camera.dart';
 import 'package:prestinv/scan/champ_douchette.dart';
 import 'package:prestinv/scan/douchette.dart';
 import 'package:prestinv/ui/clavier.dart';
@@ -49,7 +51,7 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
   @override
   void initState() {
     super.initState();
-    _cible = CibleDouchette(active: () => mounted && !_feuille && (ModalRoute.of(context)?.isCurrent ?? true), onCode: _scan);
+    _cible = CibleDouchette(active: () => mounted && !_feuille && ScanCamera.auPremierPlan(context), onCode: _scan);
     Douchette.instance.ajouter(_cible);
     _charger();
   }
@@ -373,14 +375,17 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
       body: _chargement
           ? const NvChargement()
           : ListView(padding: const EdgeInsets.fromLTRB(16, 14, 16, 24), children: [
-              CadreScan(
-                champ: ChampDouchette(
-                  key: const ValueKey('champ-scan'),
-                  controller: _champ,
-                  focusNode: _focus,
-                  label: 'Scanner un code',
-                  hint: 'EAN, code-barres…',
-                  onCode: _scan,
+              AvecBoutonCamera(
+                continu: true,
+                child: CadreScan(
+                  champ: ChampDouchette(
+                    key: const ValueKey('champ-scan'),
+                    controller: _champ,
+                    focusNode: _focus,
+                    label: 'Scanner un code',
+                    hint: 'EAN, code-barres…',
+                    onCode: _scan,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),

@@ -239,6 +239,19 @@ class Douchette {
     }
   }
 
+  /// Lecture venue d'un AUTRE lecteur (appareil photo du téléphone, 4.14) : traitée EXACTEMENT comme
+  /// une lecture de la douchette terminée par Entrée — mêmes caractères gardés, même décodage
+  /// (code / quantité), même cible, même nettoyage ([CodeScan.nettoyer]), donc même traitement, mêmes
+  /// contrôles et même retour sonore / vibration. Une saisie de douchette en cours est abandonnée.
+  void injecterLecture(String texte) {
+    _fin?.cancel();
+    _decodeur.vider();
+    for (final r in texte.runes) {
+      _decodeur.caractere(String.fromCharCode(r));
+    }
+    _distribuer(_decodeur.entree(quantiteAttendue: _quantiteAttendue));
+  }
+
   void _programmerFin() {
     _fin?.cancel();
     _fin = Timer(delaiFin, () => _distribuer(_decodeur.finDeSaisie(quantiteAttendue: _quantiteAttendue)));

@@ -24,6 +24,8 @@ import 'package:prestinv/utils/saisie_input.dart';
 import 'package:prestinv/widgets/chargement_erreur.dart';
 import 'package:prestinv/widgets/reconnexion.dart';
 import 'package:prestinv/saisie/saisie.dart';
+import 'package:prestinv/scan/camera/bouton_camera.dart';
+import 'package:prestinv/scan/camera/scan_camera.dart';
 import 'package:prestinv/scan/champ_douchette.dart';
 import 'package:prestinv/scan/code_scan.dart';
 import 'package:prestinv/scan/douchette.dart';
@@ -126,7 +128,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
     });
   }
 
-  bool get _routeCourante => ModalRoute.of(context)?.isCurrent ?? true;
+  // 4.14 : vrai aussi quand l'écran n'est recouvert que par l'aperçu de l'appareil photo ouvert depuis lui.
+  bool get _routeCourante => ScanCamera.auPremierPlan(context);
 
   /// Le champ de scan reprend le focus (après OK, après une fenêtre, après une erreur).
   void _reprendreFocusScan() {
@@ -1833,6 +1836,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
                                     _filteredProducts = [];
                                   }
                                 }))),
+                        // 4.14 : appareil photo (réglage protégé, désactivé par défaut : rien n'est ajouté).
+                        BoutonCamera(continu: widget.isQuickMode, cote: 48),
                         if (!widget.isQuickMode) ...[
                           const SizedBox(width: 8),
                           OutlinedButton(

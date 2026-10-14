@@ -52,6 +52,13 @@ class _ConfigScreenState extends State<ConfigScreen> {
   String? Function(String?) _siDeverrouille(String? Function(String?) controle) =>
       (v) => _serveurDeverrouille ? controle(v) : null;
 
+  /// 4.14 : scan par l'appareil photo — réglage protégé (code administrateur), enregistré tout de suite.
+  Future<void> _changerScanCamera(bool v) async {
+    final ok = await demanderPinAdmin(context, motif: 'Ce réglage ne peut être modifié que par l\'administrateur.');
+    if (!ok || !mounted) return;
+    await Provider.of<AppConfig>(context, listen: false).setReglagesProteges(scanCamera: v);
+  }
+
   Future<void> _deverrouillerServeur() async {
     final ok = await demanderPinAdmin(context);
     if (!mounted) return;
@@ -326,6 +333,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
               contentPadding: EdgeInsets.zero,
               value: _vibrationScan,
               onChanged: (v) => setState(() => _vibrationScan = v),
+            ),
+            SwitchListTile(
+              key: const ValueKey('reglage-scan-camera'),
+              title: const Text('Scan par l\'appareil photo'),
+              subtitle: const Text('Téléphones sans douchette (code administrateur). Désactivé par défaut.'),
+              contentPadding: EdgeInsets.zero,
+              value: appConfig.scanCamera,
+              onChanged: _changerScanCamera,
             ),
             Wrap(spacing: 4, children: [
               TextButton(onPressed: () => RetourScan.jouer(TypeRetour.succes, son: _sonScan, vibration: _vibrationScan), child: const Text('Essai : trouvé')),

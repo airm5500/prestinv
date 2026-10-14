@@ -10,6 +10,9 @@
     <!-- On déclare que la caméra est une fonctionnalité utilisée,
          mais elle n'est pas obligatoire pour que l'application s'installe. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- 4.14 (scan par l'appareil photo, réglage désactivé par défaut) : la permission CAMERA implique
+         aussi l'autofocus ; déclaré facultatif pour que l'application reste installable sans lui. -->
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
 

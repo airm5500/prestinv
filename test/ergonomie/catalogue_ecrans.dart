@@ -39,6 +39,7 @@ import 'package:prestinv/ui/ecrans/scan_continu_screen.dart';
 import 'package:prestinv/ui/ecrans/serveur_injoignable_screen.dart';
 
 import '../helpers/banc_essai.dart';
+import '../helpers/camera_essai.dart';
 import '../helpers/nouvelle_interface.dart';
 import '../support/ergonomie.dart';
 
@@ -65,8 +66,17 @@ class EcranControle {
   /// dans test/README.md). À n'utiliser que pour les écrans d'origine, gelés à l'identique.
   final Map<String, String> exemptions;
 
+  /// Préférences en plus (ex. 4.14 : réglage « Scan par l'appareil photo » actif, [prefsCamera]).
+  final Map<String, Object> prefs;
+
   const EcranControle(this.nom,
-      {required this.nouvelle, required this.construire, this.apres, this.champQuantite, this.anime = false, this.exemptions = const {}});
+      {required this.nouvelle,
+      required this.construire,
+      this.apres,
+      this.champQuantite,
+      this.anime = false,
+      this.exemptions = const {},
+      this.prefs = const {}});
 
   /// Monte l'écran avec les providers de l'application (session ouverte, faux serveur réaliste), à la
   /// taille d'écran [taille] (réglage 4.13, comme main()).
@@ -117,6 +127,41 @@ final ecransNouvelleInterface = <EcranControle>[
 ];
 
 final inventaireEssai2 = Inventory(id: 'INV2', libelle: 'Réserve S3 — octobre');
+
+/// 4.14 — écrans avec le bouton appareil photo (réglage actif, appareil photo simulé) et aperçu plein écran.
+final ecransAppareilPhoto = <EcranControle>[
+  EcranControle('Saisie guidée, bouton appareil photo', nouvelle: true,
+      construire: () => NvSaisieGuideeScreen(inventaire: inventaireEssai, rayonId: 'S2B2'), champQuantite: quantiteNv, prefs: prefsCamera),
+  EcranControle('Scan continu, bouton appareil photo', nouvelle: true, construire: () => NvScanContinuScreen(inventaire: inventaireEssai), prefs: prefsCamera),
+  EcranControle('Collecte, bouton appareil photo', nouvelle: true, construire: () => const NvCollecteScreen(), prefs: prefsCamera),
+  EcranControle('Aperçu appareil photo (scan continu, après une lecture)', nouvelle: true,
+      construire: () => NvScanContinuScreen(inventaire: inventaireEssai), apres: lectureAppareilPhoto, prefs: prefsCamera),
+  EcranControle('Aperçu appareil photo (saisie guidée)', nouvelle: true,
+      construire: () => NvSaisieGuideeScreen(inventaire: inventaireEssai, rayonId: 'S2B2'), apres: ouvrirCamera, prefs: prefsCamera),
+  EcranControle('Saisie guidée (origine), bouton appareil photo', nouvelle: false,
+      construire: () => InventoryEntryScreen(inventoryId: 'INV1', inventoryName: inventaireEssai.libelle),
+      apres: ouvrirEmplacementOrigine,
+      exemptions: _contrasteOrigine,
+      prefs: prefsCamera),
+  EcranControle('Saisie rapide / scan (origine), bouton appareil photo', nouvelle: false,
+      construire: () => InventoryEntryScreen(inventoryId: 'INV1', inventoryName: inventaireEssai.libelle, isQuickMode: true),
+      exemptions: _contrasteOrigine,
+      prefs: prefsCamera),
+  EcranControle('Collecte (origine), bouton appareil photo', nouvelle: false,
+      construire: () => const CollectionScreen(), exemptions: _contrasteOrigine, prefs: prefsCamera),
+  EcranControle('Aperçu appareil photo (origine, saisie rapide)', nouvelle: false,
+      construire: () => InventoryEntryScreen(inventoryId: 'INV1', inventoryName: inventaireEssai.libelle, isQuickMode: true),
+      apres: ouvrirCamera,
+      prefs: prefsCamera),
+];
+
+/// Aperçu ouvert, un code inconnu lu (ligne « Lu (1) : … », cadre de visée, lampe, Fermer).
+Future<void> lectureAppareilPhoto(WidgetTester tester) async {
+  await ouvrirCamera(tester);
+  await lireCamera(tester, '1234567890128');
+  await tester.pump(const Duration(seconds: 4)); // fin du message d'erreur
+  await tester.pumpAndSettle();
+}
 
 Future<void> actualiserAvancement(WidgetTester tester) async {
   await tester.tap(find.byKey(const ValueKey('nv-actualiser-avancement')));

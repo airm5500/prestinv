@@ -17,6 +17,7 @@ import 'package:prestinv/providers/entry_provider.dart';
 import 'package:prestinv/saisie/saisie.dart';
 import 'package:prestinv/saisie/saisie_queue.dart';
 import 'package:prestinv/saisie/saisie_serveur.dart';
+import 'package:prestinv/scan/camera/scan_camera.dart';
 import 'package:prestinv/scan/code_scan.dart';
 import 'package:prestinv/scan/douchette.dart';
 import 'package:prestinv/scan/file_scans.dart';
@@ -64,7 +65,8 @@ mixin SaisieCommune<T extends StatefulWidget> on State<T>, DouchetteCibleMixin<T
   EntryProvider get entry => context.read<EntryProvider>();
   AppConfig get config => context.read<AppConfig>();
   SaisieQueue? get queue => entry.queue;
-  bool get routeCourante => ModalRoute.of(context)?.isCurrent ?? true;
+  /// Écran au premier plan (ou seulement recouvert par l'aperçu de l'appareil photo ouvert depuis lui).
+  bool get routeCourante => ScanCamera.auPremierPlan(context);
 
   /// Douchette : chiffres / effacer / valider de la saisie guidée (null en scan continu).
   void Function(String key)? get toucheGuidee => null;
