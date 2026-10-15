@@ -159,6 +159,19 @@ class _PageCameraState extends State<PageCamera> {
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
                       Text(aide, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 15)),
+                      // 4.14.1 : conseil de lecture (codes-barres fins, étiquettes froissées, pièce sombre).
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: ValueListenableBuilder<bool?>(
+                          valueListenable: _moteur.lampe,
+                          builder: (_, allumee, __) => Text(
+                            allumee == null ? 'Approchez le code, bien éclairé' : 'Approchez le code, bien éclairé (lampe en haut à droite)',
+                            key: const ValueKey('camera-conseil'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Color(0xFFE5E7EB), fontSize: 13),
+                          ),
+                        ),
+                      ),
                       if (_dernier != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),

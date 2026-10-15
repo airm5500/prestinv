@@ -241,6 +241,8 @@ void main() {
       expect(find.bySemanticsLabel('Scanner avec l\'appareil photo'), findsOneWidget);
       await ouvrirCamera(tester);
       expect(find.byKey(const ValueKey('camera-cadre')), findsOneWidget, reason: 'cadre de visée');
+      // 4.14.1 : conseil de lecture, avec la place de la lampe quand le téléphone en a une.
+      expect(find.text('Approchez le code, bien éclairé (lampe en haut à droite)'), findsOneWidget);
       expect(find.bySemanticsLabel('Allumer la lampe'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('camera-lampe')));
       await tester.pumpAndSettle();

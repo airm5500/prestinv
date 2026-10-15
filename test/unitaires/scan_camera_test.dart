@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/scan/camera/moteur_mobile_scanner.dart';
+import 'package:prestinv/scan/code_scan.dart';
 import 'package:prestinv/scan/camera/page_camera.dart';
 import 'package:prestinv/scan/camera/scan_camera.dart';
 import 'package:prestinv/scan/douchette.dart';
@@ -157,6 +158,61 @@ void main() {
       );
       expect(MoteurMobileScanner.formats,
           containsAll([BarcodeFormat.ean13, BarcodeFormat.ean8, BarcodeFormat.code128, BarcodeFormat.dataMatrix, BarcodeFormat.qrCode]));
+    });
+
+    // 4.14.1 (retour du pharmacien) : un « simple code-barre » n'était pas lu alors que l'EAN l'était.
+    test('formats linéaires ajoutés : Code 39, Code 93, ITF, Codabar, UPC-E (en plus des précédents)', () {
+      expect(MoteurMobileScanner.formats, [
+        BarcodeFormat.ean13,
+        BarcodeFormat.ean8,
+        BarcodeFormat.upcA,
+        BarcodeFormat.upcE,
+        BarcodeFormat.code128,
+        BarcodeFormat.code39,
+        BarcodeFormat.code93,
+        BarcodeFormat.itf,
+        BarcodeFormat.codabar,
+        BarcodeFormat.dataMatrix,
+        BarcodeFormat.qrCode,
+      ]);
+      expect(MoteurMobileScanner.formats, isNot(contains(BarcodeFormat.all)), reason: 'liste explicite : lecture rapide');
+    });
+
+    String? lu(BarcodeFormat f, String v) => MoteurMobileScanner.valeur(Barcode(format: f, rawValue: v));
+
+    test('UPC-E → UPC-A → EAN-13 (6, 7 ou 8 chiffres ; clé recalculée ; quatre règles d\'expansion)', () {
+      expect(MoteurMobileScanner.upcEVersUpcA('01234565'), '012345000065');
+      expect(lu(BarcodeFormat.upcE, '01234565'), '0012345000065');
+      expect(lu(BarcodeFormat.upcE, '0123456'), '0012345000065', reason: 'sans clé');
+      expect(lu(BarcodeFormat.upcE, '123456'), '0012345000065', reason: 'sans système de numérotation');
+      expect(MoteurMobileScanner.upcEVersUpcA('04252614'), '042100005264', reason: 'dernier chiffre 0-2');
+      expect(MoteurMobileScanner.upcEVersUpcA('01234531'), '012300000451', reason: 'dernier chiffre 3');
+      expect(MoteurMobileScanner.upcEVersUpcA('01234541'), '012340000053', reason: 'dernier chiffre 4');
+      expect(MoteurMobileScanner.upcEVersUpcA('11234565'), '112345000062', reason: 'système 1');
+      expect(MoteurMobileScanner.upcEVersUpcA('21234565'), isNull, reason: 'système 2 : pas un UPC-E');
+      expect(lu(BarcodeFormat.upcE, 'ABC'), 'ABC', reason: 'illisible : rendu tel quel');
+    });
+
+    test('délimiteurs retirés (Code 39 *…*, Codabar A…B) ; ITF et Code 93 rendus tels quels', () {
+      expect(lu(BarcodeFormat.code39, '*3400930000001*'), '3400930000001');
+      expect(lu(BarcodeFormat.code39, 'ETQ-1234'), 'ETQ-1234');
+      expect(lu(BarcodeFormat.codabar, 'A3400930000001B'), '3400930000001');
+      expect(lu(BarcodeFormat.codabar, '123456'), '123456');
+      expect(lu(BarcodeFormat.itf, '03400930000001'), '03400930000001');
+      expect(lu(BarcodeFormat.code93, 'CIP3400930'), 'CIP3400930');
+    });
+
+    test('caractères de contrôle et espaces retirés ; séparateur GS (FNC1) conservé', () {
+      expect(lu(BarcodeFormat.code128, '\u00003400930000001\r\n'), '3400930000001');
+      expect(lu(BarcodeFormat.itf, ' 12345678 \t'), '12345678');
+      expect(lu(BarcodeFormat.code128, '0103400930000001\u001d10LOT'), '0103400930000001\u001d10LOT');
+      expect(lu(BarcodeFormat.ean13, '\u00073400930000001'), '3400930000001');
+    });
+
+    test('code linéaire lu → même recherche que la douchette (candidats)', () {
+      // ITF-14 commençant par 0 → EAN-13 → CIP7, comme un code tapé par la douchette.
+      expect(CodeScan.candidats(lu(BarcodeFormat.itf, '03400935955838')!), ['03400935955838', '3400935955838', '3595583']);
+      expect(CodeScan.candidats(lu(BarcodeFormat.upcE, '01234565')!), contains('0012345000065'));
     });
   });
 }

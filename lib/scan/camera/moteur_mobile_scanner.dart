@@ -1,7 +1,11 @@
 // lib/scan/camera/moteur_mobile_scanner.dart
 // Moteur réel du scan par l'appareil photo : mobile_scanner 6.0.2 (CameraX 1.3 + ML Kit, version figée
 // comme dans prestige_vente_app). Formats lus : EAN-13, EAN-8, UPC-A (EAN-13 commençant par 0, lu ainsi
-// par ML Kit), Code 128, DataMatrix, QR. Le contenu rendu garde le séparateur GS du DataMatrix GS1.
+// par ML Kit), UPC-E, Code 128, Code 39, Code 93, ITF (2 parmi 5 entrelacé), Codabar, DataMatrix, QR
+// (4.14.1 : les « simples » codes-barres linéaires des étiquettes internes et de certains fournisseurs
+// n'étaient pas lus). Contenu normalisé ([valeur]) : UPC-A et UPC-E → EAN-13, délimiteurs de début / fin
+// du Code 39 (*) et du Codabar (A-D) retirés, caractères de contrôle retirés (sauf le séparateur GS du
+// DataMatrix GS1, conservé).
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -14,7 +18,12 @@ class MoteurMobileScanner implements MoteurCamera {
     BarcodeFormat.ean13,
     BarcodeFormat.ean8,
     BarcodeFormat.upcA,
+    BarcodeFormat.upcE,
     BarcodeFormat.code128,
+    BarcodeFormat.code39,
+    BarcodeFormat.code93,
+    BarcodeFormat.itf,
+    BarcodeFormat.codabar,
     BarcodeFormat.dataMatrix,
     BarcodeFormat.qrCode,
   ];
@@ -41,16 +50,66 @@ class MoteurMobileScanner implements MoteurCamera {
     };
   }
 
-  /// Contenu d'un code : UPC-A → EAN-13 ; DataMatrix dont le texte a perdu les séparateurs GS mais pas
-  /// les octets bruts → octets bruts (lot et série restent séparés).
+  static final RegExp _controle = RegExp(r'[\x00-\x1C\x1E\x1F\x7F]');
+
+  /// Contenu d'un code, normalisé pour la recherche du produit :
+  /// - UPC-A (12 chiffres) → EAN-13 (0 devant) ; UPC-E (6, 7 ou 8 chiffres) → UPC-A → EAN-13 ;
+  /// - Code 39 : astérisques de début / fin retirés ; Codabar : lettres de début / fin (A-D) retirées ;
+  /// - caractères de contrôle et espaces de début / fin retirés, séparateur GS (FNC1) conservé ;
+  /// - DataMatrix dont le texte a perdu les séparateurs GS mais pas les octets bruts → octets bruts (lot
+  ///   et série restent séparés).
   static String? valeur(Barcode b) {
-    final v = b.rawValue;
-    if (b.format == BarcodeFormat.upcA && v != null && RegExp(r'^\d{12}$').hasMatch(v)) return '0$v';
     final o = b.rawBytes;
-    if (o != null && o.contains(29) && (v == null || !v.contains('\u001d')) && o.every((x) => x == 29 || (x >= 32 && x <= 126))) {
+    final v0 = b.rawValue;
+    if (o != null &&
+        o.contains(29) &&
+        (v0 == null || !v0.contains('\u001d')) &&
+        o.every((x) => x == 29 || (x >= 32 && x <= 126))) {
       return String.fromCharCodes(o);
     }
+    if (v0 == null) return null;
+    var v = v0.replaceAll(_controle, '').trim();
+    switch (b.format) {
+      case BarcodeFormat.upcA:
+        if (RegExp(r'^\d{12}$').hasMatch(v)) return '0$v';
+      case BarcodeFormat.upcE:
+        final upcA = upcEVersUpcA(v);
+        if (upcA != null) return '0$upcA';
+      case BarcodeFormat.code39:
+        if (v.length > 2 && v.startsWith('*') && v.endsWith('*')) v = v.substring(1, v.length - 1).trim();
+      case BarcodeFormat.codabar:
+        final m = RegExp(r'^[A-Da-d](.+)[A-Da-d]$').firstMatch(v);
+        if (m != null) v = m.group(1)!.trim();
+      default:
+        break;
+    }
     return v;
+  }
+
+  /// UPC-E (6 chiffres, 7 avec le système de numérotation, 8 avec la clé) → UPC-A (12 chiffres, clé
+  /// recalculée). null si ce n'est pas un UPC-E valide (système de numérotation 0 ou 1 seulement).
+  static String? upcEVersUpcA(String code) {
+    if (!RegExp(r'^\d{6,8}$').hasMatch(code)) return null;
+    final ns = code.length == 6 ? '0' : code[0];
+    if (ns != '0' && ns != '1') return null;
+    final d = code.length == 6 ? code : code.substring(1, 7);
+    final String corps;
+    switch (d[5]) {
+      case '0' || '1' || '2':
+        corps = '${d.substring(0, 2)}${d[5]}0000${d.substring(2, 5)}';
+      case '3':
+        corps = '${d.substring(0, 3)}00000${d.substring(3, 5)}';
+      case '4':
+        corps = '${d.substring(0, 4)}00000${d[4]}';
+      default:
+        corps = '${d.substring(0, 5)}0000${d[5]}';
+    }
+    final onze = '$ns$corps';
+    var somme = 0;
+    for (var i = 0; i < 11; i++) {
+      somme += int.parse(onze[i]) * (i.isEven ? 3 : 1);
+    }
+    return '$onze${(10 - somme % 10) % 10}';
   }
 
   @override
