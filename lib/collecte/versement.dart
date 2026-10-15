@@ -589,6 +589,9 @@ class MoteurVersement {
         case IssueVersementLot.incertain:
           // A PEUT-ÊTRE été enregistré : le lot est gardé, la reprise renverra la même clé.
           return _interrompre(v, '${r.message} Reprenez le versement : rien ne sera compté deux fois.');
+        case IssueVersementLot.indisponible:
+          // Prestige en redéploiement : le lot est gardé (même clé à la reprise), jamais l'ancien chemin.
+          return _interrompre(v, '${r.message} Reprenez le versement ensuite : rien ne sera compté deux fois.');
         case IssueVersementLot.cleReutilisee:
           for (final i in idx) {
             v.lignes[i]

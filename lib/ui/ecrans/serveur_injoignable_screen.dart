@@ -76,7 +76,7 @@ class _NvServeurInjoignableScreenState extends State<NvServeurInjoignableScreen>
     final adresse = config.currentApiUrl.isEmpty ? 'non configurée' : config.currentApiUrl;
     final autre = config.apiMode == ApiMode.local ? config.distantApiAddress : config.localApiAddress;
     final certificat = licence.error == ApiService.messageCertificat;
-    // 4.15.2 : Prestige redéployé ou arrêté (404 sans réponse, 502 / 503, connexion refusée).
+    // 4.15.3 : cas 2 — le serveur répond, Prestige n'est pas déployé (404 sans réponse, 502 / 503 / 504).
     final indisponible = !certificat && (licence.error ?? '').startsWith('Serveur indisponible');
     return CadreEntree(
       titre: 'Inventaire',
@@ -107,10 +107,9 @@ class _NvServeurInjoignableScreenState extends State<NvServeurInjoignableScreen>
                         'téléphone. Votre licence n\'est pas en cause : vérifiez l\'adresse dans la Configuration ou faites '
                         'installer un certificat valide sur le serveur.'
                     : indisponible
-                        ? 'Serveur indisponible, veuillez réessayer. Le serveur Prestige ($adresse) ne répond pas pour le moment '
-                            '(redémarrage ou mise à jour en cours). Votre licence n\'est pas en cause.'
-                        : 'Le téléphone ne joint pas le serveur Prestige ($adresse). Votre licence n\'est pas en cause : '
-                            'vérifiez le Wi-Fi, que le serveur est allumé et l\'adresse dans la Configuration.',
+                        ? '${ApiService.messageIndisponible} (Serveur $adresse.) Votre licence n\'est pas en cause.'
+                        : '${ApiService.messageInjoignable} (Serveur $adresse ; adresse modifiable dans la Configuration.) '
+                            'Votre licence n\'est pas en cause.',
                 style: TextStyle(color: nv.erreur.fg, fontSize: 14.5)),
             if (licence.error != null && !certificat && !indisponible) ...[
               const SizedBox(height: 6),

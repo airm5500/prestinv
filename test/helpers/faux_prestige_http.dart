@@ -160,8 +160,8 @@ class FauxPrestige {
     if (delai > Duration.zero) await Future<void>.delayed(delai);
     final d = delais[fin];
     if (d != null) await Future<void>.delayed(d);
-    // Wi-Fi perdu, serveur hors de portée (« injoignable »). 4.15.2 : une connexion REFUSÉE (Prestige arrêté,
-    // redéploiement) est un autre cas — « Serveur indisponible » (FauxServeurPrestige.couper).
+    // Wi-Fi perdu, serveur hors de portée : cas 1 « Serveur injoignable » (comme une connexion refusée,
+    // FauxServeurPrestige.couper). Prestige non déployé (404 de Payara) : FauxServeurPrestige.nonDeploye.
     if (injoignable || routesInjoignables.contains(fin)) throw const SocketException('Network is unreachable');
     final code = codes[fin];
     if (code != null) return http.Response('', code);

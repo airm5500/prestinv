@@ -193,8 +193,8 @@ void main() {
       await toucher(tester, find.byKey(const ValueKey('nv-saisie-guidee')));
       await tester.pumpAndSettle();
       expect(find.text('Chargement impossible'), findsOneWidget);
-      // 4.15.2 : serveur coupé = connexion refusée (Prestige arrêté) → « Serveur indisponible, veuillez réessayer ».
-      expect(find.textContaining('Serveur indisponible, veuillez réessayer'), findsWidgets);
+      // 4.15.3 : serveur coupé = connexion refusée (PC serveur éteint, Payara arrêté) → cas 1 « Serveur injoignable ».
+      expect(find.textContaining('Serveur injoignable'), findsWidgets);
       app.serveur.retablir();
       await tester.tap(find.byKey(const ValueKey('nv-reessayer')));
       await tester.pumpAndSettle();
@@ -210,8 +210,8 @@ void main() {
       await tester.tap(find.text('SAISIE GUIDEE\n(Mode Guidé)'));
       await tester.pumpAndSettle();
       expect(find.text('Chargement impossible'), findsOneWidget);
-      // 4.15.2 : serveur coupé = connexion refusée (Prestige arrêté) → « Serveur indisponible, veuillez réessayer ».
-      expect(find.textContaining('Serveur indisponible, veuillez réessayer'), findsWidgets);
+      // 4.15.3 : serveur coupé = connexion refusée (PC serveur éteint, Payara arrêté) → cas 1 « Serveur injoignable ».
+      expect(find.textContaining('Serveur injoignable'), findsWidgets);
       app.serveur.retablir();
       await tester.tap(find.text('Réessayer'));
       await tester.pumpAndSettle();

@@ -74,8 +74,26 @@ class ApiService implements SaisieServeur {
   static const messageCertificat = 'Certificat du serveur refusé : connexion sécurisée (HTTPS) impossible. '
       'Vérifiez l\'adresse du serveur ou faites installer un certificat valide sur le serveur.';
 
-  /// 4.15.2 (retour du pharmacien) — Prestige en cours de redéploiement ou arrêté.
-  static const messageIndisponible = 'Serveur indisponible, veuillez réessayer.';
+  // 4.15.3 (retour du pharmacien) — DEUX cas distincts, dans les deux interfaces (connexion, lancement,
+  // listes) :
+  //  1. aucune réponse (délai dépassé, hôte ou réseau inaccessible, connexion refusée = PC serveur éteint ou
+  //     Payara arrêté) → [messageInjoignable] ;
+  //  2. le serveur répond mais Prestige n'est pas déployé (404 HTML / vide de Payara, 502 / 503 / 504) →
+  //     [messageIndisponible].
+
+  /// Cas 1 : le serveur ne répond pas.
+  static const messageInjoignable = 'Serveur injoignable. Vérifiez le Wi-Fi et que le PC serveur est allumé.';
+
+  /// Cas 2 : le serveur répond, Prestige n'est pas (encore) déployé.
+  static const messageIndisponible =
+      'Serveur indisponible : Prestige est en cours de démarrage ou de redéploiement. Veuillez réessayer dans un instant.';
+
+  /// Cas 1 pour une lecture ou une opération ([quoi]).
+  static String injoignable(String quoi) => 'Serveur injoignable ($quoi). Vérifiez le Wi-Fi et que le PC serveur est allumé.';
+
+  /// Cas 2 pour une lecture ou une opération ([quoi]).
+  static String indisponible(String quoi) =>
+      'Serveur indisponible ($quoi) : Prestige est en cours de démarrage ou de redéploiement. Veuillez réessayer dans un instant.';
 
   /// Réponse d'un serveur INDISPONIBLE (et non un refus) : 502 / 503 / 504 (relais ou serveur
   /// d'applications sans Prestige), ou 404 SANS réponse de Prestige (page HTML ou corps vide : application
@@ -101,10 +119,8 @@ class ApiService implements SaisieServeur {
     return m.contains('connection refused') || m.contains('connexion refusée');
   }
 
-  /// Message d'une panne réseau pendant une lecture ([quoi] : « inventaires », « produits »…).
-  static String messageReseau(String quoi, Object e) => connexionRefusee(e)
-      ? 'Serveur indisponible, veuillez réessayer ($quoi non chargés). Si cela dure : serveur injoignable, vérifiez le Wi-Fi et l\'adresse du serveur.'
-      : 'Serveur injoignable ($quoi non chargés). Vérifiez le Wi-Fi et l\'adresse du serveur puis réessayez.';
+  /// Message d'une panne réseau pendant une lecture ([quoi] : « inventaires », « produits »…) : cas 1.
+  static String messageReseau(String quoi, Object e) => injoignable('$quoi non chargés');
 
   // --- FILE DES SAISIES (SaisieServeur) ---
 
@@ -129,8 +145,7 @@ class ApiService implements SaisieServeur {
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Le serveur met trop de temps à répondre.');
     } catch (e) {
       if (estCertificatRefuse(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageCertificat);
-      if (connexionRefusee(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageIndisponible);
-      if (_estErreurReseau(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, 'Serveur injoignable.');
+      if (_estErreurReseau(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageInjoignable);
       return ReponseEnvoi(ResultatEnvoi.reseau, 'Envoi impossible : $e');
     }
   }
@@ -170,6 +185,20 @@ class ApiService implements SaisieServeur {
 
   /// Serveur reconnu récent à la connexion (réponse avec `role` / `droits`).
   bool get serveurRecent => _serveursRecents.contains(baseUrl);
+
+  /// 4.15.3 (retour du pharmacien) — un 404 sur une route NOUVELLE ne prouve pas un serveur ancien : pendant
+  /// un démarrage ou un redéploiement de Prestige, TOUT répond 404. Vérification légère, faite SEULEMENT après
+  /// un tel 404 (aucune requête en plus en fonctionnement normal) : `GET /licence/find`, route publique déjà lue
+  /// au lancement. Prestige répond → la route manque vraiment (serveur ancien) ; sinon → Prestige n'est pas
+  /// déployé (serveur indisponible : rien n'est conclu, on réessaiera).
+  Future<bool> _prestigeDeploye() async {
+    try {
+      final r = await _httpGet(Uri.parse('$baseUrl/api/v1/licence/find')).timeout(const Duration(seconds: 10));
+      return !serveurIndisponible(r) && r.statusCode < 500;
+    } catch (_) {
+      return false;
+    }
+  }
 
   bool _absente(String route) => _routesAbsentes[route]?.contains(baseUrl) ?? false;
   void _marquerAbsente(String route) => _routesAbsentes.putIfAbsent(route, () => {}).add(baseUrl);
@@ -240,8 +269,7 @@ class ApiService implements SaisieServeur {
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Le serveur met trop de temps à répondre.');
     } catch (e) {
       if (estCertificatRefuse(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageCertificat);
-      if (connexionRefusee(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageIndisponible);
-      if (_estErreurReseau(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, 'Serveur injoignable.');
+      if (_estErreurReseau(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageInjoignable);
       return ReponseEnvoi(ResultatEnvoi.reseau, 'Envoi impossible : $e');
     }
   }
@@ -280,7 +308,7 @@ class ApiService implements SaisieServeur {
     try {
       response = await _httpGet(url).timeout(delai);
     } on TimeoutException {
-      throw ApiLoadException('Le serveur met trop de temps à répondre ($quoi non chargés). Vérifiez le réseau puis réessayez.',
+      throw ApiLoadException(injoignable('$quoi non chargés, délai dépassé'),
           TypeErreurChargement.reseau);
     } catch (e) {
       if (estCertificatRefuse(e)) throw ApiLoadException('$messageCertificat ($quoi non chargés)', TypeErreurChargement.reseau);
@@ -289,7 +317,7 @@ class ApiService implements SaisieServeur {
     }
     final code = response.statusCode;
     if (serveurIndisponible(response)) {
-      throw ApiLoadException('Serveur indisponible, veuillez réessayer ($quoi non chargés).', TypeErreurChargement.reseau);
+      throw ApiLoadException(indisponible('$quoi non chargés'), TypeErreurChargement.reseau);
     }
     if (code == 401 || code == 403) {
       throw ApiLoadException('Session expirée ($quoi non chargés) : reconnectez-vous.', TypeErreurChargement.session);
@@ -369,8 +397,8 @@ class ApiService implements SaisieServeur {
       // Certificat refusé : la demande n'est jamais partie (poignée de main HTTPS refusée).
       if (estCertificatRefuse(e)) return const ResultatCreationServeur.refus(messageCertificat);
       // La demande a pu partir avant la coupure : on ne sait pas si l'inventaire existe.
-      if (connexionRefusee(e)) return const ResultatCreationServeur.refus(messageIndisponible); // rien n'est parti
-      return ResultatCreationServeur.incertain(_estErreurReseau(e) ? 'Serveur injoignable.' : 'Création impossible : $e');
+      if (connexionRefusee(e)) return const ResultatCreationServeur.refus(messageInjoignable); // rien n'est parti
+      return ResultatCreationServeur.incertain(_estErreurReseau(e) ? messageInjoignable : 'Création impossible : $e');
     }
     final code = response.statusCode;
     // Prestige indisponible : PEUT-ÊTRE rien de créé (relais 502 / 504) → la liste est relue avant tout.
@@ -422,7 +450,7 @@ class ApiService implements SaisieServeur {
     try {
       response = await _httpGet(url).timeout(delai);
     } on TimeoutException {
-      throw ApiLoadException('Le serveur met trop de temps à répondre ($quoi non chargés). Vérifiez le réseau puis réessayez.',
+      throw ApiLoadException(injoignable('$quoi non chargés, délai dépassé'),
           TypeErreurChargement.reseau);
     } catch (e) {
       if (estCertificatRefuse(e)) throw ApiLoadException('$messageCertificat ($quoi non chargés)', TypeErreurChargement.reseau);
@@ -431,7 +459,7 @@ class ApiService implements SaisieServeur {
     }
     final code = response.statusCode;
     if (serveurIndisponible(response)) {
-      throw ApiLoadException('Serveur indisponible, veuillez réessayer ($quoi non chargés).', TypeErreurChargement.reseau);
+      throw ApiLoadException(indisponible('$quoi non chargés'), TypeErreurChargement.reseau);
     }
     if (code == 401 || code == 403) {
       throw ApiLoadException('Session expirée ($quoi non chargés) : reconnectez-vous.', TypeErreurChargement.session);
@@ -503,6 +531,9 @@ class ApiService implements SaisieServeur {
     if (serveurRecent || (_routesPresentes['lignes/retenue']?.contains(baseUrl) ?? false)) return true;
     final r = await _envoyerJson('création de l\'inventaire', 'inventaire/lignes/retenue', {'lg_INVENTAIRE_ID': '', 'ids': <String>[]});
     if (r.statusCode == 404 || r.statusCode == 405) {
+      if (r.statusCode == 404 && !await _prestigeDeploye()) {
+        throw ApiLoadException(indisponible('création de l\'inventaire'), TypeErreurChargement.reseau);
+      }
       _marquerAbsente('lignes/retenue');
       return false;
     }
@@ -527,6 +558,9 @@ class ApiService implements SaisieServeur {
       final r = await _envoyerJson('produits de l\'inventaire', 'inventaire/lignes/retenue',
           {'lg_INVENTAIRE_ID': inventaireId, 'produits': lot, 'retenue': true});
       if (r.statusCode == 404 || r.statusCode == 405) {
+        if (r.statusCode == 404 && !await _prestigeDeploye()) {
+          throw ApiLoadException(indisponible('produits de l\'inventaire'), TypeErreurChargement.reseau);
+        }
         _marquerAbsente('lignes/retenue');
         throw const ApiLoadException('Ce serveur Prestige ne permet pas encore de créer un inventaire limité aux produits scannés. '
             'Mettez le serveur à jour ou versez la collecte dans un inventaire existant.');
@@ -550,17 +584,14 @@ class ApiService implements SaisieServeur {
       throw ApiLoadException('Le serveur met trop de temps à répondre ($quoi). Vérifiez le réseau puis réessayez.', TypeErreurChargement.reseau);
     } catch (e) {
       if (estCertificatRefuse(e)) throw ApiLoadException('$messageCertificat ($quoi)', TypeErreurChargement.reseau);
-      if (connexionRefusee(e)) throw ApiLoadException('Serveur indisponible, veuillez réessayer ($quoi).', TypeErreurChargement.reseau);
-      if (_estErreurReseau(e)) {
-        throw ApiLoadException('Serveur injoignable ($quoi). Vérifiez le Wi-Fi et l\'adresse du serveur puis réessayez.', TypeErreurChargement.reseau);
-      }
+      if (_estErreurReseau(e)) throw ApiLoadException(injoignable(quoi), TypeErreurChargement.reseau);
       throw ApiLoadException('Envoi impossible ($quoi) : $e', TypeErreurChargement.reseau);
     }
   }
 
   /// Contrôle commun d'une réponse JSON objet : droit manquant, session, erreur du serveur, illisible.
   Map<dynamic, dynamic> _controlerReponse(http.Response r, String quoi) {
-    if (serveurIndisponible(r)) throw ApiLoadException('Serveur indisponible, veuillez réessayer ($quoi).', TypeErreurChargement.reseau);
+    if (serveurIndisponible(r)) throw ApiLoadException(indisponible(quoi), TypeErreurChargement.reseau);
     final interdit = droitManquant(r);
     if (interdit != null) throw ApiLoadException(interdit);
     final code = r.statusCode;
@@ -602,10 +633,10 @@ class ApiService implements SaisieServeur {
       throw const ApiLoadException('Le serveur met trop de temps à répondre : impossible de savoir si ce produit est déjà compté.', TypeErreurChargement.reseau);
     } catch (e) {
       if (estCertificatRefuse(e)) throw const ApiLoadException(messageCertificat, TypeErreurChargement.reseau);
-      throw ApiLoadException(connexionRefusee(e) ? 'Serveur indisponible, veuillez réessayer : impossible de savoir si ce produit est déjà compté.' : 'Serveur injoignable : impossible de savoir si ce produit est déjà compté.', TypeErreurChargement.reseau);
+      throw ApiLoadException(injoignable('impossible de savoir si ce produit est déjà compté'), TypeErreurChargement.reseau);
     }
     if (serveurIndisponible(response)) {
-      throw const ApiLoadException('Serveur indisponible, veuillez réessayer : impossible de savoir si ce produit est déjà compté.', TypeErreurChargement.reseau);
+      throw ApiLoadException(indisponible('impossible de savoir si ce produit est déjà compté'), TypeErreurChargement.reseau);
     }
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw const ApiLoadException('Session expirée : reconnectez-vous pour vérifier si ce produit est déjà compté.', TypeErreurChargement.session);
@@ -673,7 +704,7 @@ class ApiService implements SaisieServeur {
     try {
       response = await _httpGet(url).timeout(const Duration(seconds: 20));
     } on TimeoutException {
-      throw const ApiLoadException('Le serveur met trop de temps à répondre ($quoi non chargés). Vérifiez le réseau puis réessayez.',
+      throw ApiLoadException(injoignable('$quoi non chargés, délai dépassé'),
           TypeErreurChargement.reseau);
     } catch (e) {
       if (estCertificatRefuse(e)) throw const ApiLoadException('$messageCertificat ($quoi non chargés)', TypeErreurChargement.reseau);
@@ -681,9 +712,10 @@ class ApiService implements SaisieServeur {
     }
     final code = response.statusCode;
     if (code == 502 || code == 503 || code == 504) {
-      throw const ApiLoadException('Serveur indisponible, veuillez réessayer ($quoi non chargés).', TypeErreurChargement.reseau);
+      throw ApiLoadException(indisponible('$quoi non chargés'), TypeErreurChargement.reseau);
     }
     if (code == 404 || code == 405) {
+      if (code == 404 && !await _prestigeDeploye()) throw ApiLoadException(indisponible('$quoi non chargés'), TypeErreurChargement.reseau);
       _marquerAbsente('rayons/etat');
       return null;
     }
@@ -817,10 +849,12 @@ class ApiService implements SaisieServeur {
       return const ResultatVersementLot(IssueVersementLot.incertain, 'Le serveur met trop de temps à répondre.');
     } catch (e) {
       if (estCertificatRefuse(e)) return const ResultatVersementLot(IssueVersementLot.reseau, messageCertificat);
-      return ResultatVersementLot(IssueVersementLot.incertain, _estErreurReseau(e) ? 'Serveur injoignable.' : 'Envoi impossible.');
+      return ResultatVersementLot(IssueVersementLot.incertain, _estErreurReseau(e) ? messageInjoignable : 'Envoi impossible.');
     }
     final code = response.statusCode;
     if (code == 404 || code == 405) {
+      // Prestige non déployé (redéploiement) : rien n'est conclu, le lot est gardé et renvoyé plus tard.
+      if (code == 404 && !await _prestigeDeploye()) return const ResultatVersementLot(IssueVersementLot.indisponible, messageIndisponible);
       _marquerAbsente('versement');
       return const ResultatVersementLot(IssueVersementLot.routeAbsente);
     }
@@ -890,15 +924,15 @@ class ApiService implements SaisieServeur {
       response = await _httpGet(url).timeout(const Duration(seconds: 10));
     } catch (e) {
       if (estCertificatRefuse(e)) throw const ApiLoadException(messageCertificat, TypeErreurChargement.reseau);
-      throw ApiLoadException(
-          connexionRefusee(e) ? 'Serveur indisponible, veuillez réessayer (serveur injoignable : licence non vérifiée).' : 'Serveur injoignable : impossible de vérifier la licence.',
-          TypeErreurChargement.reseau);
+      // Cas 1 (aucune réponse, délai dépassé compris) : la licence n'est pas en cause.
+      throw ApiLoadException(injoignable('licence non vérifiée, la licence n\'est pas en cause'), TypeErreurChargement.reseau);
     }
     // Erreur du serveur (5xx) ou réponse d'accès inattendue : le serveur n'a pas pu répondre,
     // on ne conclut RIEN sur la licence (même règle que les autres applications Prestige).
     // 4.15.2 : 404 sans réponse de Prestige (redéploiement) : serveur indisponible, jamais « aucune licence ».
-    if (response.statusCode == 404 && serveurIndisponible(response)) {
-      throw const ApiLoadException('Serveur indisponible, veuillez réessayer (code 404) : la licence n\'est pas en cause.', TypeErreurChargement.reseau);
+    // 4.15.3 : 502 / 503 / 504 aussi (cas 2), avec le code.
+    if (serveurIndisponible(response)) {
+      throw ApiLoadException(indisponible('code ${response.statusCode}, la licence n\'est pas en cause'), TypeErreurChargement.reseau);
     }
     if (response.statusCode >= 500 || response.statusCode == 401 || response.statusCode == 403) {
       throw ApiLoadException(
@@ -992,6 +1026,10 @@ enum IssueVersementLot {
 
   /// Pas de réponse lisible : a PEUT-ÊTRE été enregistré — renvoyer la MÊME clé à la reprise.
   incertain,
+
+  /// 4.15.3 — Prestige non déployé (404 de Payara, vérifié) : rien n'est enregistré ni conclu ; le lot est
+  /// gardé et renvoyé à l'identique plus tard (jamais l'ancien chemin à cause d'un redéploiement).
+  indisponible,
 
   /// Inventaire clôturé ou inconnu : rien n'a été enregistré.
   refuse,

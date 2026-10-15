@@ -124,6 +124,10 @@ class FauxServeurPrestige {
   /// Par défaut : envoyé (vrai) si le catalogue a les routes récentes.
   bool? droitCreation;
 
+  /// 4.15.3 — Payara répond, mais l'application Prestige n'est pas déployée (redéploiement en cours) : toute
+  /// route répond 404 (page HTML), y compris la licence et la connexion.
+  bool nonDeploye = false;
+
   /// Serveur à jour (réponse aux demandes mobiles) : routes récentes + `role` / `droits` à la connexion.
   set serveurRecent(bool v) {
     catalogue.routesRecentes = v;
@@ -303,6 +307,10 @@ class FauxServeurPrestige {
       if (!script.seulementDelai) return _json(script.corps ?? '', code: script.code, entetes: script.entetes);
     }
 
+    // 4.15.3 : Payara répond mais Prestige n'est pas déployé (démarrage, redéploiement) : 404 HTML partout.
+    if (nonDeploye) {
+      return http.Response('<html><body><h1>HTTP Status 404 - Not Found</h1></body></html>', 404, headers: {'content-type': 'text/html'});
+    }
     if (route == 'user/auth' && req.method == 'POST') return _connexion(req);
     if (route == 'user/logout') {
       final s = _jsession(cookie);

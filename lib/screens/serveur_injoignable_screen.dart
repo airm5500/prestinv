@@ -5,6 +5,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/providers/license_provider.dart';
 import 'package:prestinv/screens/config_screen.dart';
@@ -57,6 +58,7 @@ class _ServeurInjoignableScreenState extends State<ServeurInjoignableScreen> {
     final config = Provider.of<AppConfig>(context);
     final licence = Provider.of<LicenseProvider>(context);
     final adresse = config.currentApiUrl.isEmpty ? 'non configurée' : config.currentApiUrl;
+    final indisponible = (licence.error ?? '').startsWith('Serveur indisponible');
     return Scaffold(
       appBar: AppBar(title: const Text('Prestige Inventaire')),
       body: Center(
@@ -65,15 +67,19 @@ class _ServeurInjoignableScreenState extends State<ServeurInjoignableScreen> {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.cloud_off, size: 72, color: Colors.orange.shade800),
             const SizedBox(height: 16),
-            const Text('Serveur injoignable', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            // 4.15.3 (retour du pharmacien) : « Serveur indisponible » (Prestige en démarrage / redéploiement) ≠
+            // « Serveur injoignable » (aucune réponse). Le cas « certificat » garde le titre d'origine (A7).
+            Text(indisponible ? 'Serveur indisponible' : 'Serveur injoignable', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(
-              'L\'application n\'arrive pas à joindre le serveur Prestige ($adresse).\n'
-              'Ce n\'est pas un problème de licence : vérifiez le Wi-Fi, que le serveur est allumé et l\'adresse dans la Configuration.',
+              indisponible
+                  ? '${ApiService.messageIndisponible}\nServeur : $adresse. Ce n\'est pas un problème de licence.'
+                  : 'L\'application n\'arrive pas à joindre le serveur Prestige ($adresse).\n'
+                      'Ce n\'est pas un problème de licence : vérifiez le Wi-Fi, que le PC serveur est allumé et l\'adresse dans la Configuration.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey.shade700),
             ),
-            if (licence.error != null) ...[
+            if (licence.error != null && !indisponible) ...[
               const SizedBox(height: 8),
               Text(licence.error!, textAlign: TextAlign.center, style: TextStyle(color: Colors.red.shade800, fontSize: 12)),
             ],

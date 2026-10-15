@@ -87,7 +87,7 @@ void main() {
       serveur.scripter('licence/find', ReponseScriptee.code(404));
       final l = await verifier();
       expect(l.status, LicenseStatus.unreachable);
-      expect(l.error, startsWith('Serveur indisponible, veuillez réessayer'));
+      expect(l.error, startsWith('Serveur indisponible'));
     });
 
     for (final code in [500, 502, 503, 401, 403]) {
@@ -152,13 +152,13 @@ void main() {
       expect(auth.errorMessage, 'Erreur serveur (500)');
     });
 
-    // 4.15.2 (retour du pharmacien) : Prestige arrêté (connexion refusée) → « Serveur indisponible ».
-    test('serveur arrêté (connexion refusée) : « Serveur indisponible, veuillez réessayer. »', () async {
+    // 4.15.3 (retour du pharmacien) : PC serveur éteint ou Payara arrêté (connexion refusée) → cas 1, injoignable.
+    test('serveur arrêté (connexion refusée) : « Serveur injoignable. Vérifiez le Wi-Fi et que le PC serveur est allumé. »', () async {
       final config = await configSur(serveur);
       await serveur.arreter();
       final auth = AuthProvider();
       expect(await auth.login(CompteFictif.login, CompteFictif.motDePasse, config), isFalse);
-      expect(auth.errorMessage, 'Serveur indisponible, veuillez réessayer.');
+      expect(auth.errorMessage, ApiService.messageInjoignable);
     });
 
     test('chaque requête porte le cookie de la session ; sans cookie : 401 → « session expirée », jamais liste vide', () async {

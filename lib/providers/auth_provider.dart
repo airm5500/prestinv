@@ -94,21 +94,19 @@ class AuthProvider with ChangeNotifier {
           _errorMessage = "Identifiant ou mot de passe incorrect.";
         }
       } else if (ApiService.serveurIndisponible(response)) {
-        // 4.15.2 (retour du pharmacien) : Prestige en cours de redéploiement (404 sans réponse de Prestige),
-        // 502 / 503 / 504 — et non « erreur 404 ».
+        // 4.15.3 (retour du pharmacien), cas 2 : le serveur répond mais Prestige n'est pas déployé (404 HTML /
+        // vide de Payara, 502 / 503 / 504) — et non « erreur 404 ».
         _errorMessage = ApiService.messageIndisponible;
       } else {
         _errorMessage = "Erreur serveur (${response.statusCode})";
       }
     } on TimeoutException {
-      _errorMessage = "Le serveur ne répond pas (délai dépassé). Vérifiez le réseau et l'adresse du serveur.";
+      // 4.15.3, cas 1 : aucune réponse.
+      _errorMessage = ApiService.messageInjoignable;
     } catch (e) {
-      // 4.14.2 : certificat HTTPS refusé ≠ réseau.
-      _errorMessage = ApiService.estCertificatRefuse(e)
-          ? ApiService.messageCertificat
-          : ApiService.connexionRefusee(e)
-              ? ApiService.messageIndisponible
-              : "Erreur de connexion. Vérifiez le réseau et l'adresse du serveur.";
+      // 4.14.2 : certificat HTTPS refusé ≠ réseau. 4.15.3, cas 1 : hôte ou réseau inaccessible, connexion refusée
+      // (PC serveur éteint, Payara arrêté).
+      _errorMessage = ApiService.estCertificatRefuse(e) ? ApiService.messageCertificat : ApiService.messageInjoignable;
     }
 
     _isLoading = false;
