@@ -16,7 +16,9 @@
 //   en mémoire de [FauxPrestige] (test/helpers/faux_prestige_http.dart), quantités modifiables.
 //
 // Scénarios scriptables, par route (fin de chemin, ex. 'inventaires', 'licence/find', 'details') :
-//   [scripter] → 200 JSON, `success:false`, 401, 403, 500, délai, coupure réseau, n fois ou toujours ;
+//   [scripter] → 200 JSON, `success:false`, 401, 403, 500, délai, coupure réseau, réponse tronquée
+//   (longueur annoncée non atteinte), n fois ou toujours ;
+//   [demarrerSecurise] → même serveur en HTTPS (certificat de test) ;
 //   [exigerSession] → toute route protégée sans cookie de session valide répond 401 ;
 //   [expirerSessions] → les cookies délivrés ne valent plus (session expirée côté serveur) ;
 //   [couper] / [retablir] → serveur injoignable (connexion refusée / fermée) puis de retour.
@@ -46,7 +48,11 @@ class ReponseScriptee {
   /// Nombre d'utilisations restantes (null : toujours).
   int? fois;
 
-  ReponseScriptee({this.code = 200, this.corps, this.delai = Duration.zero, this.coupure = false, this.entetes = const {}, this.fois});
+  /// Réponse TRONQUÉE au niveau HTTP : en-têtes et longueur annoncée complets, puis la connexion se
+  /// ferme au milieu du corps (seule la première moitié est envoyée).
+  final bool tronquee;
+
+  ReponseScriptee({this.code = 200, this.corps, this.delai = Duration.zero, this.coupure = false, this.entetes = const {}, this.fois, this.tronquee = false});
 
   /// 200 avec un corps JSON.
   factory ReponseScriptee.json(Object corps, {int code = 200, int? fois}) => ReponseScriptee(code: code, corps: corps, fois: fois);
@@ -64,6 +70,11 @@ class ReponseScriptee {
   /// Coupure réseau pendant la requête.
   factory ReponseScriptee.coupee({int? fois}) => ReponseScriptee(coupure: true, fois: fois);
 
+  /// 200 dont le corps [corps] (texte brut, ex. JSON partiel) est coupé en cours de transfert : la
+  /// longueur annoncée n'est pas atteinte (connexion fermée). Transport en mémoire : le client reçoit
+  /// l'erreur que lève le paquet http dans ce cas (ClientException « Connection closed »).
+  factory ReponseScriptee.tronquee(String corps, {int? fois}) => ReponseScriptee(corps: corps, tronquee: true, fois: fois);
+
   /// Délai seul, puis traitement normal de la route.
   bool get seulementDelai => code == -1;
 }
@@ -77,7 +88,11 @@ class RequeteRecue {
   final Map<String, String> parametres;
   final String? cookie;
   final String corps;
-  const RequeteRecue(this.methode, this.route, this.parametres, this.cookie, this.corps);
+
+  /// Hôte et port appelés (ex. « 127.0.0.1:8080 », « serveur-local.invalid:8080 ») : adresse locale ou
+  /// distante choisie par l'application.
+  final String hote;
+  const RequeteRecue(this.methode, this.route, this.parametres, this.cookie, this.corps, {this.hote = ''});
 
   @override
   String toString() => '$methode $route';
@@ -85,6 +100,11 @@ class RequeteRecue {
 
 class _Coupure implements Exception {
   const _Coupure();
+}
+
+class _Troncature implements Exception {
+  final List<int> octets;
+  const _Troncature(this.octets);
 }
 
 class FauxServeurPrestige {
@@ -113,6 +133,7 @@ class FauxServeurPrestige {
   int _numeroSession = 0;
   bool _coupe = false;
   HttpServer? _http;
+  bool _securise = false;
 
   FauxServeurPrestige({FauxPrestige? catalogue, this.exigerSession = true}) : catalogue = catalogue ?? catalogueFictif();
 
@@ -148,6 +169,8 @@ class FauxServeurPrestige {
           return await traiter(req);
         } on _Coupure {
           throw const SocketException('Connexion refusée (faux serveur coupé)');
+        } on _Troncature {
+          throw http.ClientException('Connection closed while receiving data', req.url);
         }
       });
 
@@ -160,8 +183,18 @@ class FauxServeurPrestige {
     return adresse;
   }
 
+  /// Démarre un vrai serveur HTTPS local avec le certificat de [contexte] (certificat de test
+  /// auto-signé, voir test/reseau/https_test.dart) ; renvoie « https://127.0.0.1:<port>/prestige ».
+  Future<String> demarrerSecurise(SecurityContext contexte) async {
+    final s = await HttpServer.bindSecure(InternetAddress.loopbackIPv4, 0, contexte);
+    _http = s;
+    _securise = true;
+    s.listen(_servirHttp, onError: (_) {}); // poignée de main refusée par le client : ignorée
+    return adresse;
+  }
+
   /// Adresse de base du serveur HTTP démarré.
-  String get adresse => 'http://127.0.0.1:${_http!.port}/prestige';
+  String get adresse => '${_securise ? 'https' : 'http'}://127.0.0.1:${_http!.port}/prestige';
 
   /// Port du serveur HTTP démarré.
   int get port => _http!.port;
@@ -186,6 +219,15 @@ class FauxServeurPrestige {
     } on _Coupure {
       // Fermeture brutale, sans réponse : le client voit une connexion coupée.
       final socket = await r.response.detachSocket(writeHeaders: false);
+      socket.destroy();
+    } on _Troncature catch (t) {
+      // En-têtes complets (longueur annoncée), moitié du corps, puis fermeture.
+      final socket = await r.response.detachSocket(writeHeaders: false);
+      final moitie = t.octets.sublist(0, t.octets.length ~/ 2);
+      socket.add(utf8.encode('HTTP/1.1 200 OK\r\ncontent-type: application/json; charset=utf-8\r\n'
+          'content-length: ${t.octets.length}\r\nconnection: close\r\n\r\n'));
+      socket.add(moitie);
+      await socket.flush();
       socket.destroy();
     }
   }
@@ -230,7 +272,7 @@ class FauxServeurPrestige {
   Future<http.Response> traiter(http.Request req) async {
     final route = _route(req.url);
     final cookie = req.headers['cookie'];
-    requetes.add(RequeteRecue(req.method, route, req.url.queryParameters, cookie, req.body));
+    requetes.add(RequeteRecue(req.method, route, req.url.queryParameters, cookie, req.body, hote: req.url.hasPort ? '${req.url.host}:${req.url.port}' : req.url.host));
     if (_coupe) throw const _Coupure();
 
     final script = _script(req.method, route);
@@ -241,6 +283,7 @@ class FauxServeurPrestige {
       }
       if (script.delai > Duration.zero) await Future<void>.delayed(script.delai);
       if (script.coupure) throw const _Coupure();
+      if (script.tronquee) throw _Troncature(utf8.encode('${script.corps ?? ''}'));
       if (!script.seulementDelai) return _json(script.corps ?? '', code: script.code, entetes: script.entetes);
     }
 

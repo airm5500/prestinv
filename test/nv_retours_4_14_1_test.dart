@@ -64,7 +64,43 @@ void main() {
       expect(taille.width, greaterThanOrEqualTo(48));
       expect(taille.height, greaterThanOrEqualTo(48));
       expect(find.descendant(of: find.byKey(const ValueKey('nv-badge-attente')), matching: find.text('1')), findsOneWidget);
-      // Toucher l'icône envoie, comme avant : e2e/parcours_4_13_test (« icône d'envoi avec pastille »).
+      // Toucher l'icône envoie, comme avant : test ci-dessous et e2e/parcours_4_13_test.
+      await demonter(tester);
+    });
+
+    // Remis après la 4.14.1. Ce test « n'aboutissait pas » : la saisie posée dans la file AVANT
+    // l'ouverture de l'écran déclenche, à l'ouverture, la fenêtre bloquante « Saisie non terminée —
+    // Voulez-vous les envoyer maintenant ? » ; son voile (ModalBarrier) recouvre l'en-tête, si bien que
+    // le toucher arrivait sur le voile et non sur l'icône (avertissement « would not hit test »), sans
+    // envoi. Ni la cible (48 dp), ni ensureVisible, ni une animation n'étaient en cause. On répond
+    // donc d'abord à cette fenêtre (« Non »), puis on touche l'icône ; le toucher est rendu fatal s'il
+    // manque sa cible.
+    testWidgets('toucher l\'icône d\'envoi envoie les saisies en attente (fenêtre de reprise d\'abord fermée)', (tester) async {
+      tailleEcran(tester, telephone360);
+      final b = await banc();
+      await b.queue.enregistrer(inventaireId: 'INV1', ligneId: 2, quantite: 6, nom: 'AMOXICILLINE', rayonId: 'S2B2', rayonLibelle: 'ANTIBIOTIQUES');
+      await tester.pumpWidget(monterNv(b, NvSaisieGuideeScreen(inventaire: Inventory(id: 'INV1', libelle: 'Inventaire annuel 2026'), rayonId: 'S2B2')));
+      await tester.pumpAndSettle();
+      expect(find.text('Saisie non terminée'), findsOneWidget, reason: 'fenêtre de reprise affichée par-dessus l\'icône');
+      await tester.tap(find.text('Non'));
+      await tester.pumpAndSettle();
+      expect(find.text('Saisie non terminée'), findsNothing);
+      expect(b.queue.enAttente(), 1);
+
+      final ancien = WidgetController.hitTestWarningShouldBeFatal;
+      WidgetController.hitTestWarningShouldBeFatal = true;
+      addTearDown(() => WidgetController.hitTestWarningShouldBeFatal = ancien);
+      final bouton = find.byKey(const ValueKey('nv-envoyer-badge'));
+      await tester.ensureVisible(bouton);
+      await tester.tap(bouton);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const ValueKey('nv-envoi-saisies')), findsOneWidget, reason: 'progression de l\'envoi');
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(b.queue.enAttente(), 0);
+      expect(b.serveur.produit(2).saisi, 6, reason: 'quantité reçue par le serveur');
+      expect(b.serveur.puts.length + b.serveur.postsQuantite.length, 1, reason: 'un seul envoi');
+      expect(find.byKey(const ValueKey('nv-badge-attente')), findsNothing);
       await demonter(tester);
     });
   });
