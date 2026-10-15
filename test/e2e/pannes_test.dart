@@ -193,7 +193,8 @@ void main() {
       await toucher(tester, find.byKey(const ValueKey('nv-saisie-guidee')));
       await tester.pumpAndSettle();
       expect(find.text('Chargement impossible'), findsOneWidget);
-      expect(find.textContaining('Serveur injoignable'), findsWidgets);
+      // 4.15.2 : serveur coupé = connexion refusée (Prestige arrêté) → « Serveur indisponible, veuillez réessayer ».
+      expect(find.textContaining('Serveur indisponible, veuillez réessayer'), findsWidgets);
       app.serveur.retablir();
       await tester.tap(find.byKey(const ValueKey('nv-reessayer')));
       await tester.pumpAndSettle();
@@ -209,7 +210,8 @@ void main() {
       await tester.tap(find.text('SAISIE GUIDEE\n(Mode Guidé)'));
       await tester.pumpAndSettle();
       expect(find.text('Chargement impossible'), findsOneWidget);
-      expect(find.textContaining('Serveur injoignable'), findsWidgets);
+      // 4.15.2 : serveur coupé = connexion refusée (Prestige arrêté) → « Serveur indisponible, veuillez réessayer ».
+      expect(find.textContaining('Serveur indisponible, veuillez réessayer'), findsWidgets);
       app.serveur.retablir();
       await tester.tap(find.text('Réessayer'));
       await tester.pumpAndSettle();

@@ -654,11 +654,11 @@ class _NvSaisieGuideeScreenState extends State<NvSaisieGuideeScreen> with Douche
         if (afficherResultats)
           Positioned.fill(top: 76, child: ListeResultats(produits: resultats, stockVisible: appConfig.showTheoreticalStock, onTap: choisirResultat)),
       ]);
-      // Quantité tapée (et rappel compact du produit) ÉPINGLÉE juste au-dessus du pavé, hors de la
-      // liste qui défile : toujours visible sans défilement, quel que soit l'écran (640 dp de haut,
-      // texte agrandi) et même pendant la recherche par nom (clavier système ouvert, pavé masqué).
-      // Maquette : quantité puis Précédent · Récapitulatif · Suivant, juste au-dessus du pavé. Le rappel
-      // du produit est DANS la ligne de quantité (aucune hauteur en plus).
+      // Quantité tapée ÉPINGLÉE juste au-dessus du pavé, hors de la liste qui défile : toujours visible
+      // sans défilement, quel que soit l'écran (640 dp de haut, texte agrandi) et même pendant la
+      // recherche par nom (clavier système ouvert, pavé masqué). Maquette : quantité puis Précédent ·
+      // Récapitulatif · Suivant, juste au-dessus du pavé. 4.15.2 (retour du pharmacien) : AUCUN rappel du
+      // nom dans le champ de quantité — le nom est en haut, dans la carte produit (un seul endroit).
       final boutons =
         Row(children: [
             Expanded(
@@ -698,11 +698,6 @@ class _NvSaisieGuideeScreenState extends State<NvSaisieGuideeScreen> with Douche
             erreur: _erreur,
             compact: true,
             droite: _etatPrecedent(context, q),
-            detail: Text(p.produitName,
-                key: const ValueKey('nv-produit-compact'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.nv.encre)),
           ),
           const SizedBox(height: 8),
           boutons,

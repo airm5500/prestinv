@@ -12,8 +12,8 @@ minimum_sunmi: 4.8.5+4
 |---|---|---|---|
 | 4.8.5 | 4 | à compléter | dernière version publiée connue |
 
-Version en préparation (pas encore publiée) : **4.15.1+15** (`pubspec.yaml`), au-dessus de 4.8.5 / 4
-(4.15.1 > 4.8.5 nombre par nombre : 15 > 8 ; 15 > 4) et de la livraison de test précédente 4.15.0+14. Images du magasin : `docs/store_sunmi/`.
+Version en préparation (pas encore publiée) : **4.15.2+16** (`pubspec.yaml`), au-dessus de 4.8.5 / 4
+(4.15.2 > 4.8.5 nombre par nombre : 15 > 8 ; 16 > 4) et de la livraison de test précédente 4.15.1+15. Images du magasin : `docs/store_sunmi/`.
 
 ## Les 3 règles (permanentes)
 

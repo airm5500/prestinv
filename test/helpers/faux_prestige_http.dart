@@ -160,7 +160,9 @@ class FauxPrestige {
     if (delai > Duration.zero) await Future<void>.delayed(delai);
     final d = delais[fin];
     if (d != null) await Future<void>.delayed(d);
-    if (injoignable || routesInjoignables.contains(fin)) throw const SocketException('Connection refused');
+    // Wi-Fi perdu, serveur hors de portée (« injoignable »). 4.15.2 : une connexion REFUSÉE (Prestige arrêté,
+    // redéploiement) est un autre cas — « Serveur indisponible » (FauxServeurPrestige.couper).
+    if (injoignable || routesInjoignables.contains(fin)) throw const SocketException('Network is unreachable');
     final code = codes[fin];
     if (code != null) return http.Response('', code);
     final q = req.url.queryParameters;

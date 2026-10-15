@@ -81,9 +81,13 @@ void main() {
       expect((await verifier()).status, LicenseStatus.none);
     });
 
-    test('le serveur répond 404 sur la licence : « aucune licence »', () async {
+    // 4.15.2 (retour du pharmacien) : un 404 sans réponse de Prestige est un redéploiement en cours
+    // (la route renvoie toujours 200, avec ou sans licence) → serveur indisponible, jamais « aucune licence ».
+    test('le serveur répond 404 sur la licence (redéploiement) : « serveur indisponible », PAS « aucune licence »', () async {
       serveur.scripter('licence/find', ReponseScriptee.code(404));
-      expect((await verifier()).status, LicenseStatus.none);
+      final l = await verifier();
+      expect(l.status, LicenseStatus.unreachable);
+      expect(l.error, startsWith('Serveur indisponible, veuillez réessayer'));
     });
 
     for (final code in [500, 502, 503, 401, 403]) {
@@ -148,12 +152,13 @@ void main() {
       expect(auth.errorMessage, 'Erreur serveur (500)');
     });
 
-    test('serveur arrêté : message réseau', () async {
+    // 4.15.2 (retour du pharmacien) : Prestige arrêté (connexion refusée) → « Serveur indisponible ».
+    test('serveur arrêté (connexion refusée) : « Serveur indisponible, veuillez réessayer. »', () async {
       final config = await configSur(serveur);
       await serveur.arreter();
       final auth = AuthProvider();
       expect(await auth.login(CompteFictif.login, CompteFictif.motDePasse, config), isFalse);
-      expect(auth.errorMessage, contains('Vérifiez le réseau'));
+      expect(auth.errorMessage, 'Serveur indisponible, veuillez réessayer.');
     });
 
     test('chaque requête porte le cookie de la session ; sans cookie : 401 → « session expirée », jamais liste vide', () async {

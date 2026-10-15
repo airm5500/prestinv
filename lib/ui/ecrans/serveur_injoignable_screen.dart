@@ -76,6 +76,8 @@ class _NvServeurInjoignableScreenState extends State<NvServeurInjoignableScreen>
     final adresse = config.currentApiUrl.isEmpty ? 'non configurée' : config.currentApiUrl;
     final autre = config.apiMode == ApiMode.local ? config.distantApiAddress : config.localApiAddress;
     final certificat = licence.error == ApiService.messageCertificat;
+    // 4.15.2 : Prestige redéployé ou arrêté (404 sans réponse, 502 / 503, connexion refusée).
+    final indisponible = !certificat && (licence.error ?? '').startsWith('Serveur indisponible');
     return CadreEntree(
       titre: 'Inventaire',
       sousTitre: config.apiMode == ApiMode.local ? 'Connexion locale' : 'Connexion distante',
@@ -96,7 +98,7 @@ class _NvServeurInjoignableScreenState extends State<NvServeurInjoignableScreen>
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // 4.14.2 : certificat HTTPS refusé ≠ serveur injoignable (le serveur a répondu).
-            Text(certificat ? 'Certificat du serveur refusé' : 'Serveur injoignable',
+            Text(certificat ? 'Certificat du serveur refusé' : (indisponible ? 'Serveur indisponible' : 'Serveur injoignable'),
                 key: const ValueKey('nv-titre-injoignable'), style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: nv.erreur.fg)),
             const SizedBox(height: 6),
             Text(
@@ -104,10 +106,13 @@ class _NvServeurInjoignableScreenState extends State<NvServeurInjoignableScreen>
                     ? 'Le serveur Prestige ($adresse) a répondu, mais son certificat de sécurité (HTTPS) n\'est pas reconnu par le '
                         'téléphone. Votre licence n\'est pas en cause : vérifiez l\'adresse dans la Configuration ou faites '
                         'installer un certificat valide sur le serveur.'
-                    : 'Le téléphone ne joint pas le serveur Prestige ($adresse). Votre licence n\'est pas en cause : '
-                        'vérifiez le Wi-Fi, que le serveur est allumé et l\'adresse dans la Configuration.',
+                    : indisponible
+                        ? 'Serveur indisponible, veuillez réessayer. Le serveur Prestige ($adresse) ne répond pas pour le moment '
+                            '(redémarrage ou mise à jour en cours). Votre licence n\'est pas en cause.'
+                        : 'Le téléphone ne joint pas le serveur Prestige ($adresse). Votre licence n\'est pas en cause : '
+                            'vérifiez le Wi-Fi, que le serveur est allumé et l\'adresse dans la Configuration.',
                 style: TextStyle(color: nv.erreur.fg, fontSize: 14.5)),
-            if (licence.error != null && !certificat) ...[
+            if (licence.error != null && !certificat && !indisponible) ...[
               const SizedBox(height: 6),
               Text(licence.error!, style: TextStyle(color: nv.erreur.fg, fontSize: 12.5)),
             ],

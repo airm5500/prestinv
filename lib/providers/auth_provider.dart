@@ -93,6 +93,10 @@ class AuthProvider with ChangeNotifier {
         } else {
           _errorMessage = "Identifiant ou mot de passe incorrect.";
         }
+      } else if (ApiService.serveurIndisponible(response)) {
+        // 4.15.2 (retour du pharmacien) : Prestige en cours de redéploiement (404 sans réponse de Prestige),
+        // 502 / 503 / 504 — et non « erreur 404 ».
+        _errorMessage = ApiService.messageIndisponible;
       } else {
         _errorMessage = "Erreur serveur (${response.statusCode})";
       }
@@ -100,7 +104,11 @@ class AuthProvider with ChangeNotifier {
       _errorMessage = "Le serveur ne répond pas (délai dépassé). Vérifiez le réseau et l'adresse du serveur.";
     } catch (e) {
       // 4.14.2 : certificat HTTPS refusé ≠ réseau.
-      _errorMessage = ApiService.estCertificatRefuse(e) ? ApiService.messageCertificat : "Erreur de connexion. Vérifiez le réseau et l'adresse du serveur.";
+      _errorMessage = ApiService.estCertificatRefuse(e)
+          ? ApiService.messageCertificat
+          : ApiService.connexionRefusee(e)
+              ? ApiService.messageIndisponible
+              : "Erreur de connexion. Vérifiez le réseau et l'adresse du serveur.";
     }
 
     _isLoading = false;
