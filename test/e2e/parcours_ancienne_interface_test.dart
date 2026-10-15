@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/collecte/collecte_store.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/interface_version.dart';
+import 'package:prestinv/models/collected_item.dart';
 import 'package:prestinv/saisie/rappel_envoi.dart';
 import 'package:prestinv/screens/a_envoyer_screen.dart';
 import 'package:prestinv/screens/collection_screen.dart';
@@ -140,6 +141,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(app.serveur.catalogue.produit(5).saisi, 30);
     expect((await CollecteStore.lire()).single.versee, isTrue);
+    await fermerApplication(tester);
+  });
+
+  // 4.15 (décision du pharmacien) : « Nouvel inventaire… » depuis le versement de la collecte crée
+  // l'inventaire des SEULS produits collectés, sur leurs emplacements (avant : tous les produits de tous
+  // les emplacements).
+  testWidgets('collecte (2 produits, 2 emplacements) → « Nouvel inventaire… » → inventaire de ces produits → versement', (tester) async {
+    ecran(tester);
+    final app = await lancerApplication(tester, nouvelleInterface: false);
+    await seConnecter(tester);
+    await CollecteStore.ecrire([
+      CollectedItem(code: '3400938000004', quantity: 30, dateScan: DateTime(2026, 10, 15, 9)),
+      CollectedItem(code: '3400935959001', quantity: 5, dateScan: DateTime(2026, 10, 15, 9, 1)),
+    ]);
+    await tester.tap(find.text('COLLECTE LIBRE\n(Mode Hors-ligne)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('verser-collecte')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('versement-nouvel-inventaire')));
+    await tester.pumpAndSettle();
+    expect(find.text('2 produits, 2 emplacements'), findsOneWidget);
+    expect(find.byKey(const ValueKey('type-famille')), findsNothing, reason: 'plus de choix du type');
+    await tester.enterText(find.byKey(const ValueKey('libelle-inventaire')), 'Collecte origine');
+    await tester.ensureVisible(find.byKey(const ValueKey('bouton-creer')));
+    await tester.tap(find.byKey(const ValueKey('bouton-creer')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirmer-creation')));
+    await tester.pumpAndSettle();
+    final cat = app.serveur.catalogue;
+    expect(cat.creationsValeurs.single!.toSet(), {'S1A0T2', 'S2B2'});
+    expect(cat.creationsRetenue.single, 0);
+    // Proposé au versement.
+    await tester.tap(find.byKey(const ValueKey('confirmer-versement')));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+    await tester.pumpAndSettle();
+    final inv = cat.crees['NEW1']!;
+    expect({for (final l in inv.lignesRetenues) l.cip: l.saisi}, {'3400938000004': 30, '3400935959001': 5});
+    expect(inv.lignes.map((l) => l.rayon).toSet(), {'S1A0T2', 'S2B2'}, reason: 'à l\'ouverture : ces 2 emplacements');
+    expect((await CollecteStore.lire()).every((i) => i.versee), isTrue);
     await fermerApplication(tester);
   });
 

@@ -114,8 +114,8 @@ class CalculsListe extends ChangeNotifier {
 /// Crée un inventaire depuis la nouvelle interface : droit de création (profil, réglage, code
 /// administrateur), écran de création, puis relecture de la liste des inventaires (InventoryProvider)
 /// pour renvoyer l'inventaire avec son identifiant (retrouvé par son libellé si le serveur ne l'a pas
-/// donné). null : rien de créé. [codesCollectes] (création depuis la collecte, 4.14.1) : inventaire
-/// limité à l'emplacement des produits collectés (choisi dans l'écran de création).
+/// donné). null : rien de créé. [codesCollectes] (création depuis la collecte, 4.15) : inventaire des
+/// seuls produits collectés, sur leurs emplacements.
 Future<Inventory?> creerInventaireNv(BuildContext context, {String libelleInitial = '', List<String>? codesCollectes}) async {
   if (!await verifierDroitCreation(context) || !context.mounted) return null;
   final cree = await Navigator.of(context)
@@ -151,8 +151,10 @@ Future<bool> verifierDroitCreation(BuildContext context) async {
       await nvDialogue<void>(context,
           icone: Icons.lock_outline,
           titre: 'Création réservée',
-          message: 'La création d\'un inventaire est réservée à l\'administrateur et au pharmacien '
-              '(réglage « Autoriser la création d\'inventaire aux autres comptes »).',
+          message: context.read<AuthProvider>().user?.droitCreation == false
+              ? 'Votre compte n\'a pas le droit « Créer un inventaire » dans Prestige. Demandez-le au pharmacien.'
+              : 'La création d\'un inventaire est réservée à l\'administrateur et au pharmacien '
+                  '(réglage « Autoriser la création d\'inventaire aux autres comptes »).',
           boutons: const [NvBouton('OK', null, genre: NvGenre.principal)]);
       return false;
   }
@@ -161,6 +163,7 @@ Future<bool> verifierDroitCreation(BuildContext context) async {
 AccesCreation accesCreationDe(BuildContext context) => accesCreation(
       adminOuPharmacien: context.read<AuthProvider>().user?.adminOuPharmacien,
       autresComptesAutorises: context.read<AppConfig>().creationAutresComptes,
+      droitServeur: context.read<AuthProvider>().user?.droitCreation,
     );
 
 class NvAccueilScreen extends StatefulWidget {
@@ -351,7 +354,8 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
     final officine = (user?.officine ?? '').trim();
     final local = config.apiMode == ApiMode.local;
     final jours = licence.daysRemaining;
-    final acces = accesCreation(adminOuPharmacien: user?.adminOuPharmacien, autresComptesAutorises: config.creationAutresComptes);
+    final acces = accesCreation(
+        adminOuPharmacien: user?.adminOuPharmacien, autresComptesAutorises: config.creationAutresComptes, droitServeur: user?.droitCreation);
 
     final enTete = <Widget>[
       Wrap(spacing: 8, runSpacing: 8, children: [

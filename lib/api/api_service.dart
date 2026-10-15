@@ -84,8 +84,11 @@ class ApiService implements SaisieServeur {
       final response = await _httpPut(url, jsonEncode({'id': ligneId, 'quantite': quantite})).timeout(const Duration(seconds: 15));
       final code = response.statusCode;
       if (code >= 200 && code < 300) return ReponseEnvoi.ok;
+      // Droit manquant (403 « interdit », serveurs récents) : refus visible, pas de reconnexion en boucle.
+      if (droitManquant(response) != null) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
+      // Session absente (PUT exige une session depuis le 12/10) : la saisie reste sur l'appareil.
       if (code == 401 || code == 403) return ReponseEnvoi(ResultatEnvoi.session, 'Session expirée ou accès refusé (code $code).');
-      if (code >= 400 && code < 500) return ReponseEnvoi(ResultatEnvoi.refus, 'Le serveur a refusé la quantité (code $code).');
+      if (code >= 400 && code < 500) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
       return ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Erreur du serveur (code $code).');
     } on TimeoutException {
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Le serveur met trop de temps à répondre.');
@@ -100,8 +103,65 @@ class ApiService implements SaisieServeur {
   /// Prestige) : la route habituelle est utilisée directement.
   static final Set<String> _sansRouteSession = {};
 
-  /// Tests : oublie les serveurs mémorisés sans route « avec auteur ».
-  static void oublierRoutesAbsentes() => _sansRouteSession.clear();
+  /// Tests : oublie les serveurs mémorisés sans route « avec auteur », les routes absentes et les
+  /// serveurs reconnus récents.
+  static void oublierRoutesAbsentes() {
+    _sansRouteSession.clear();
+    _routesAbsentes.clear();
+    _routesPresentes.clear();
+    _serveursRecents.clear();
+  }
+
+  // --- 4.15 : ROUTES RÉCENTES (réponse du serveur aux demandes mobiles du 15/10/2026) ---
+  //
+  // Les nouvelles routes (état des rayons, versement en lot) n'existent que sur les serveurs à jour. Un
+  // serveur récent se reconnaît SANS requête de plus : sa réponse de connexion porte `role` et `droits`
+  // (demande 10). Ancien serveur : les anciennes routes, exactement comme avant (aucune requête en plus).
+  // Une route absente malgré tout (404 / 405) est mémorisée pour ce serveur : l'ancien chemin est pris.
+
+  static final Set<String> _serveursRecents = {};
+  static final Map<String, Set<String>> _routesAbsentes = {};
+  static final Map<String, Set<String>> _routesPresentes = {};
+
+  /// Après la connexion : ce serveur ([baseUrl]) a-t-il les routes récentes ?
+  static void noterServeur(String baseUrl, {required bool recent}) {
+    if (recent) {
+      _serveursRecents.add(baseUrl);
+    } else {
+      _serveursRecents.remove(baseUrl);
+    }
+  }
+
+  /// Serveur reconnu récent à la connexion (réponse avec `role` / `droits`).
+  bool get serveurRecent => _serveursRecents.contains(baseUrl);
+
+  bool _absente(String route) => _routesAbsentes[route]?.contains(baseUrl) ?? false;
+  void _marquerAbsente(String route) => _routesAbsentes.putIfAbsent(route, () => {}).add(baseUrl);
+
+  /// Message lisible d'un refus de la saisie par un serveur récent (demande 8 : 404 LIGNE_INCONNUE,
+  /// 409 INVENTAIRE_CLOTURE, 400 QUANTITE_INVALIDE ; 403 droit manquant).
+  static String _refusSaisie(http.Response r) {
+    final interdit = droitManquant(r);
+    if (interdit != null) return interdit;
+    var code = '';
+    var message = '';
+    try {
+      final d = json.decode(utf8.decode(r.bodyBytes));
+      if (d is Map) {
+        code = '${d['code'] ?? ''}';
+        message = '${d['message'] ?? d['msg'] ?? d['errors'] ?? ''}'.trim();
+      }
+    } catch (_) {}
+    switch (code) {
+      case 'INVENTAIRE_CLOTURE':
+        return 'Inventaire clôturé sur le serveur : quantité non enregistrée.';
+      case 'LIGNE_INCONNUE':
+        return 'Cette ligne n\'existe plus dans l\'inventaire : quantité non enregistrée.';
+      case 'QUANTITE_INVALIDE':
+        return 'Quantité refusée par le serveur (invalide).';
+    }
+    return message.isEmpty ? 'Le serveur a refusé la quantité (code ${r.statusCode}).' : message;
+  }
 
   /// Pose la quantité TOTALE par `POST /inventaire/ligne/quantite` {lg_INVENTAIRE_FAMILLE_ID, int_NUMBER} :
   /// session exigée, AUTEUR enregistré par le serveur (str_UPDATED_ID). Réponses du serveur :
@@ -120,9 +180,10 @@ class ApiService implements SaisieServeur {
         _sansRouteSession.add(baseUrl);
         return poserQuantite(ligneId, quantite);
       }
+      if (droitManquant(response) != null) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
       if (code == 401 || code == 403) return ReponseEnvoi(ResultatEnvoi.session, 'Session expirée ou accès refusé (code $code).');
       if (code >= 500) return ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Erreur du serveur (code $code).');
-      if (code >= 400) return ReponseEnvoi(ResultatEnvoi.refus, 'Le serveur a refusé la quantité (code $code).');
+      if (code >= 400) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
       final dynamic data;
       try {
         data = json.decode(utf8.decode(response.bodyBytes));
@@ -193,6 +254,8 @@ class ApiService implements SaisieServeur {
     if (code == 401 || code == 403) {
       throw ApiLoadException('Session expirée ($quoi non chargés) : reconnectez-vous.', TypeErreurChargement.session);
     }
+    // Demande 21 : une lecture en échec côté serveur répond 500 (jamais `[]`) — jamais une liste vide ici.
+    if (code >= 500) throw ApiLoadException('Erreur du serveur (code $code) : $quoi non chargés. Réessayez dans un instant.');
     if (code != 200) throw ApiLoadException('Le serveur a refusé le chargement des $quoi (code $code).');
     final dynamic data;
     try {
@@ -233,15 +296,20 @@ class ApiService implements SaisieServeur {
   /// sinon) ; libellé et type obligatoires (refus lisible {"success":0,"message":…}) ; types
   /// reconnus : Emplacement, Famille, Grossiste. Sans valeurs choisies, l'inventaire est PRÉ-REMPLI
   /// avec TOUS les produits actifs de l'officine (une ligne par produit, stock théorique = stock
-  /// disponible, non comptée) ; aucun produit → aucun inventaire. Réponse : {"success":1,"lignes":N}.
-  /// La réponse ne donne pas l'identifiant : il est relu dans la liste des inventaires ouverts.
+  /// disponible, non comptée) ; aucun produit → aucun inventaire. Réponse : {"success":1,"lignes":N}
+  /// (+ `lgInventaireId` et `libelle` sur les serveurs récents, demande 20 ; sinon l'identifiant est
+  /// relu dans la liste des inventaires ouverts). Droit manquant (serveurs récents, demande 10) :
+  /// 403 {interdit:true, msg:"Droit manquant : Créer un inventaire"} → refus (≠ session expirée).
   ///
-  /// 4.14.1 : [valeurs] = identifiants cochés sur l'axe du type (pour « Emplacement » : les
-  /// lg_ZONE_GEO_ID des rayons). Le serveur ne met alors QUE les produits actifs de ces emplacements
-  /// (createInventaireMultiCriteres : un appel de la procédure par valeur). Absent ou vide : TOUS les
-  /// produits (comportement d'origine). Le serveur n'accepte pas de liste de produits (voir
-  /// docs/DEMANDE_SERVEUR_COMPTAGE.md).
-  Future<ResultatCreationServeur> creerInventaire(String libelle, String type, {List<String>? valeurs}) async {
+  /// [valeurs] = identifiants cochés sur l'axe du type (pour « Emplacement » : les lg_ZONE_GEO_ID des
+  /// rayons) : le serveur ne met QUE les produits actifs de ces emplacements (createInventaireMultiCriteres,
+  /// un appel de la procédure par valeur). Absent ou vide : TOUS les produits (comportement d'origine).
+  ///
+  /// 4.15 — [nonRetenues] : `bool_INVENTAIRE = 0`, comme l'inventaire « unitaire » de Prestige : les
+  /// lignes sont créées mais NON retenues (invisibles des lectures ws/inventaires, de la saisie et de la
+  /// clôture) jusqu'à [retenirProduits]. C'est ainsi que Prestige crée un inventaire limité à une liste
+  /// de produits (écran web « Inventaire unitaire » puis « Ajouter des articles »).
+  Future<ResultatCreationServeur> creerInventaire(String libelle, String type, {List<String>? valeurs, bool nonRetenues = false}) async {
     final url = Uri.parse('$baseUrl/api/v1/inventaire/creation');
     final http.Response response;
     try {
@@ -251,6 +319,7 @@ class ApiService implements SaisieServeur {
                 'str_NAME': libelle,
                 'str_TYPE_TRANSACTION': type,
                 if (valeurs != null && valeurs.isNotEmpty) 'valeurs': valeurs,
+                if (nonRetenues) 'bool_INVENTAIRE': 0,
               }))
           // Plusieurs milliers de produits : la création peut prendre du temps.
           .timeout(const Duration(seconds: 180));
@@ -263,6 +332,8 @@ class ApiService implements SaisieServeur {
       return ResultatCreationServeur.incertain(_estErreurReseau(e) ? 'Serveur injoignable.' : 'Création impossible : $e');
     }
     final code = response.statusCode;
+    final interdit = droitManquant(response);
+    if (interdit != null) return ResultatCreationServeur.refus(interdit);
     if (code == 401 || code == 403) return const ResultatCreationServeur.session();
     dynamic data;
     try {
@@ -277,9 +348,27 @@ class ApiService implements SaisieServeur {
     }
     if (code != 200 || data is! Map) return ResultatCreationServeur.refus('Le serveur a refusé la création (code $code).');
     final succes = m['success'];
-    if (succes == 1 || succes == true) return ResultatCreationServeur.ok((m['lignes'] as num?)?.toInt());
+    if (succes == 1 || succes == true) {
+      final id = '${m['lgInventaireId'] ?? ''}'.trim();
+      return ResultatCreationServeur.ok((m['lignes'] as num?)?.toInt(), inventaireId: id.isEmpty ? null : id);
+    }
     if (message.toLowerCase().contains('connecter')) return const ResultatCreationServeur.session();
     return ResultatCreationServeur.refus(message.isEmpty ? 'Création refusée par le serveur.' : message);
+  }
+
+  /// Serveurs récents (réponse aux demandes mobiles) : un DROIT manquant répond 403
+  /// {interdit:true, msg:"Droit manquant : …"} — l'application ne doit pas demander de reconnexion.
+  /// Renvoie le message à afficher, ou null si la réponse n'est pas un refus de droit.
+  static String? droitManquant(http.Response r) {
+    if (r.statusCode != 403) return null;
+    try {
+      final d = json.decode(utf8.decode(r.bodyBytes, allowMalformed: true));
+      if (d is Map && d['interdit'] == true) {
+        final m = '${d['msg'] ?? d['message'] ?? ''}'.trim();
+        return m.isEmpty ? 'Droit manquant dans Prestige pour cette opération.' : m;
+      }
+    } catch (_) {}
+    return null;
   }
 
   // --- EMPLACEMENTS DE L'OFFICINE (création d'un inventaire depuis la collecte, 4.14.1) ---
@@ -321,44 +410,129 @@ class ApiService implements SaisieServeur {
     return data;
   }
 
-  /// Tous les emplacements (rayons, zones géographiques) de l'officine, hors de tout inventaire :
-  /// `GET /api/v1/referentiel-article/zones-geographiques` → {total, results:[{lg_ZONE_GEO_ID,
-  /// str_CODE, str_LIBELLEE}]}. Mêmes identifiants que les rayons d'un inventaire (lg_ZONE_GEO_ID).
-  Future<List<Rayon>> fetchEmplacementsOfficine() async {
-    final url = Uri.parse('$baseUrl/api/v1/referentiel-article/zones-geographiques')
-        .replace(queryParameters: {'start': '0', 'limit': '2000'});
-    final data = await _loadJson('emplacements', url);
-    final liste = data is Map ? data['results'] : data;
-    if (liste is! List) throw const ApiLoadException('Réponse inattendue du serveur pour les emplacements.', TypeErreurChargement.donnees);
-    final out = <Rayon>[];
-    for (final e in liste) {
-      if (e is! Map) continue;
-      final id = '${e['lg_ZONE_GEO_ID'] ?? e['id'] ?? ''}'.trim();
-      if (id.isEmpty) continue;
-      out.add(Rayon(id: id, code: '${e['str_CODE'] ?? e['code'] ?? ''}'.trim(), libelle: '${e['str_LIBELLEE'] ?? e['libelle'] ?? ''}'.trim()));
-    }
-    return out;
-  }
-
-  /// Emplacement (rayon) d'un produit de l'officine, retrouvé par son code (CIP, EAN-13, code article) :
-  /// `GET /api/v1/produit-search/fiche?search_value=…` (recherche de la fiche article) → results:[{int_CIP,
-  /// lg_ZONE_GEO_ID (libellé), lg_ZONE_GEO_ID_REEL (identifiant)}]. null : produit inconnu ou sans
-  /// emplacement. Lève [ApiLoadException] (réseau, session, refus).
-  Future<Rayon?> emplacementDuProduit(String code) async {
+  /// Produit de l'officine retrouvé par un code tel que scanné (CIP, EAN-13, EAN fabricant, code article
+  /// grossiste) : `GET /api/v1/produit-search/fiche?search_value=…` (recherche de la fiche article, « commence
+  /// par » pour un code numérique) → results:[{lg_FAMILLE_ID, int_CIP, int_EAN13, str_NAME,
+  /// lg_ZONE_GEO_ID (libellé de l'emplacement), lg_ZONE_GEO_ID_REEL (son identifiant)}].
+  ///
+  /// Correspondance SÛRE (jamais un produit voisin) : CIP ou EAN-13 identique au code, en un seul
+  /// produit ; sinon un résultat unique trouvé par un AUTRE code que le début de son CIP / EAN (code
+  /// article, EAN fabricant). Plusieurs produits possibles ou correspondance partielle : null.
+  /// Lève [ApiLoadException] (réseau, session, refus) — jamais « inconnu » sur une panne.
+  Future<ProduitServeur?> produitParCode(String code) async {
     final c = code.trim();
     if (c.isEmpty) return null;
-    final url = Uri.parse('$baseUrl/api/v1/produit-search/fiche')
-        .replace(queryParameters: {'search_value': c, 'start': '0', 'limit': '5'});
-    final data = await _loadJson('emplacements des produits', url, delai: const Duration(seconds: 15));
+    final url = Uri.parse('$baseUrl/api/v1/produit-search/fiche').replace(queryParameters: {'search_value': c, 'start': '0', 'limit': '5'});
+    final data = await _loadJson('produits de la collecte', url, delai: const Duration(seconds: 15));
     final liste = data is Map ? data['results'] : data;
     if (liste is! List) return null;
-    final lignes = liste.whereType<Map>().toList();
+    final lignes = [for (final l in liste.whereType<Map>()) if ('${l['lg_FAMILLE_ID'] ?? ''}'.trim().isNotEmpty) l];
     if (lignes.isEmpty) return null;
-    // CIP identique en priorité ; sinon le premier résultat (trouvé par EAN-13 / code article).
-    final ligne = lignes.where((l) => '${l['int_CIP'] ?? l['CIP'] ?? ''}' == c).firstOrNull ?? lignes.first;
-    final id = '${ligne['lg_ZONE_GEO_ID_REEL'] ?? ''}'.trim();
-    if (id.isEmpty) return null;
-    return Rayon(id: id, code: '', libelle: '${ligne['lg_ZONE_GEO_ID'] ?? ''}'.trim());
+    String champ(Map l, String k) => '${l[k] ?? ''}'.trim();
+    final exacts = lignes.where((l) => champ(l, 'int_CIP') == c || champ(l, 'CIP') == c || champ(l, 'int_EAN13') == c).toList();
+    final ids = exacts.map((l) => champ(l, 'lg_FAMILLE_ID')).toSet();
+    Map? retenu;
+    if (ids.length == 1) {
+      retenu = exacts.first;
+    } else if (ids.isEmpty && lignes.length == 1) {
+      final l = lignes.first;
+      // Trouvé par le DÉBUT de son CIP / EAN seulement : correspondance partielle, refusée.
+      final partiel = champ(l, 'int_CIP').startsWith(c) || champ(l, 'int_EAN13').startsWith(c);
+      if (!partiel) retenu = l;
+    }
+    if (retenu == null) return null;
+    final zone = champ(retenu, 'lg_ZONE_GEO_ID_REEL');
+    return ProduitServeur(
+      id: champ(retenu, 'lg_FAMILLE_ID'),
+      cip: champ(retenu, 'int_CIP'),
+      nom: champ(retenu, 'str_NAME'),
+      emplacement: zone.isEmpty ? null : Rayon(id: zone, code: '', libelle: champ(retenu, 'lg_ZONE_GEO_ID')),
+    );
+  }
+
+  // --- 4.15 : INVENTAIRE LIMITÉ AUX PRODUITS COLLECTÉS (lignes retenues, comme Prestige) ---
+
+  /// La route `POST /inventaire/lignes/retenue` existe-t-elle ? Essai SANS effet : aucun identifiant
+  /// envoyé, le serveur répond {"success":0,"errors":"Aucun article a traiter."}. 404 / 405 : serveur plus
+  /// ancien (faux). Lève [ApiLoadException] (réseau, session, erreur du serveur).
+  Future<bool> routeRetenueDisponible() async {
+    if (_absente('lignes/retenue')) return false;
+    if (serveurRecent || (_routesPresentes['lignes/retenue']?.contains(baseUrl) ?? false)) return true;
+    final r = await _envoyerJson('création de l\'inventaire', 'inventaire/lignes/retenue', {'lg_INVENTAIRE_ID': '', 'ids': <String>[]});
+    if (r.statusCode == 404 || r.statusCode == 405) {
+      _marquerAbsente('lignes/retenue');
+      return false;
+    }
+    _controlerReponse(r, 'création de l\'inventaire');
+    _routesPresentes.putIfAbsent('lignes/retenue', () => {}).add(baseUrl);
+    return true;
+  }
+
+  /// Nombre maximal de produits retenus par requête.
+  static const int retenueParLot = 200;
+
+  /// RETIENT les lignes des produits [produitIds] (lg_FAMILLE_ID) dans l'inventaire [inventaireId] :
+  /// `POST /inventaire/lignes/retenue` {lg_INVENTAIRE_ID, produits, retenue:true} → {success, count}
+  /// (route de l'écran web « Ajouter des articles » d'un inventaire unitaire). Idempotent : une ligne
+  /// déjà retenue le reste. Renvoie le nombre de lignes retenues (0 : aucun de ces produits dans
+  /// l'inventaire). Lève [ApiLoadException] (réseau, session, refus, route absente : refus).
+  Future<int> retenirProduits(String inventaireId, List<String> produitIds) async {
+    final ids = produitIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet().toList();
+    var total = 0;
+    for (var i = 0; i < ids.length; i += retenueParLot) {
+      final lot = ids.sublist(i, (i + retenueParLot).clamp(0, ids.length));
+      final r = await _envoyerJson('produits de l\'inventaire', 'inventaire/lignes/retenue',
+          {'lg_INVENTAIRE_ID': inventaireId, 'produits': lot, 'retenue': true});
+      if (r.statusCode == 404 || r.statusCode == 405) {
+        _marquerAbsente('lignes/retenue');
+        throw const ApiLoadException('Ce serveur Prestige ne sait pas limiter un inventaire à une liste de produits.');
+      }
+      final m = _controlerReponse(r, 'produits de l\'inventaire');
+      final n = (m['count'] as num?)?.toInt() ?? 0;
+      final succes = m['success'] == 1 || m['success'] == true;
+      final message = '${m['errors'] ?? m['message'] ?? m['msg'] ?? ''}'.trim();
+      if (!succes && n == 0 && message.isNotEmpty && !message.toLowerCase().contains('aucun article')) throw ApiLoadException(message);
+      total += n;
+    }
+    return total;
+  }
+
+  /// POST JSON : erreurs réseau traduites en [ApiLoadException] (jamais un résultat trompeur).
+  Future<http.Response> _envoyerJson(String quoi, String route, Object corps, {Duration delai = const Duration(seconds: 30)}) async {
+    final url = Uri.parse('$baseUrl/api/v1/$route');
+    try {
+      return await _httpPost(url, jsonEncode(corps)).timeout(delai);
+    } on TimeoutException {
+      throw ApiLoadException('Le serveur met trop de temps à répondre ($quoi). Vérifiez le réseau puis réessayez.', TypeErreurChargement.reseau);
+    } catch (e) {
+      if (estCertificatRefuse(e)) throw ApiLoadException('$messageCertificat ($quoi)', TypeErreurChargement.reseau);
+      if (_estErreurReseau(e)) {
+        throw ApiLoadException('Serveur injoignable ($quoi). Vérifiez le Wi-Fi et l\'adresse du serveur puis réessayez.', TypeErreurChargement.reseau);
+      }
+      throw ApiLoadException('Envoi impossible ($quoi) : $e', TypeErreurChargement.reseau);
+    }
+  }
+
+  /// Contrôle commun d'une réponse JSON objet : droit manquant, session, erreur du serveur, illisible.
+  Map<dynamic, dynamic> _controlerReponse(http.Response r, String quoi) {
+    final interdit = droitManquant(r);
+    if (interdit != null) throw ApiLoadException(interdit);
+    final code = r.statusCode;
+    if (code == 401 || code == 403) throw ApiLoadException('Session expirée ($quoi) : reconnectez-vous.', TypeErreurChargement.session);
+    if (code >= 500) throw ApiLoadException('Erreur du serveur (code $code, $quoi). Réessayez dans un instant.');
+    if (code != 200) throw ApiLoadException('Le serveur a refusé la demande ($quoi, code $code).');
+    final dynamic d;
+    try {
+      d = json.decode(utf8.decode(r.bodyBytes));
+    } catch (_) {
+      throw ApiLoadException('Réponse illisible du serveur ($quoi).', TypeErreurChargement.donnees);
+    }
+    if (d is! Map) throw ApiLoadException('Réponse inattendue du serveur ($quoi).', TypeErreurChargement.donnees);
+    final m = '${d['errors'] ?? d['message'] ?? d['msg'] ?? ''}';
+    if ((d['success'] == false || d['success'] == 0) && m.toLowerCase().contains('connecter')) {
+      throw ApiLoadException('Session expirée ($quoi) : reconnectez-vous.', TypeErreurChargement.session);
+    }
+    return d;
   }
 
   // --- CUMUL / VERIFICATION ---
@@ -418,8 +592,69 @@ class ApiService implements SaisieServeur {
 
   // --- RAYONS & PRODUITS ---
 
-  Future<List<Rayon>> fetchRayons(String idInventaire) =>
-      _loadList('emplacements', _uri('/rayons', {'idInventaire': idInventaire}), Rayon.fromJson);
+  /// Rayons (emplacements) d'un inventaire, du moins au plus récent : seulement ceux qui ont des produits
+  /// À COMPTER. Serveur récent : `GET /ws/inventaires/{id}/rayons/etat` (une requête, comme avant) dont
+  /// on garde les rayons à au moins un produit retenu — un inventaire limité à quelques produits (créé
+  /// depuis la collecte, ou « unitaire » dans Prestige) n'affiche que leurs emplacements. Sinon (ou route
+  /// absente / en erreur) : `GET /ws/inventaires/rayons`, comme avant.
+  Future<List<Rayon>> fetchRayons(String idInventaire) async {
+    List<EtatRayon>? etat;
+    try {
+      etat = await etatRayons(idInventaire);
+    } on ApiLoadException catch (e) {
+      // Session expirée, réseau : l'ancienne route échouerait de même. Autre refus : ancienne route.
+      if (e.sessionExpiree || e.reseau) rethrow;
+      etat = null;
+    }
+    if (etat != null) return [for (final e in etat) if (e.totalProduits > 0) e.rayon];
+    return _loadList('emplacements', _uri('/rayons', {'idInventaire': idInventaire}), Rayon.fromJson);
+  }
+
+  /// Demande 30 — état de comptage de TOUS les rayons en une requête :
+  /// `GET /ws/inventaires/{id}/rayons/etat` → [{rayonId, code, libelle, totalProduits, comptes, restants,
+  /// derniereSaisie}] (lignes retenues seulement). null : serveur ancien ou route absente (404 / 405,
+  /// mémorisé) — l'appelant prend l'ancien chemin. 410 : inventaire inconnu (clôturé, supprimé).
+  /// Lève [ApiLoadException] (réseau, session, erreur, réponse illisible ou tronquée) : jamais une
+  /// liste vide trompeuse.
+  Future<List<EtatRayon>?> etatRayons(String idInventaire) async {
+    if (!serveurRecent || _absente('rayons/etat') || idInventaire.isEmpty) return null;
+    final url = Uri.parse('$baseUrl/api/v1/ws/inventaires/${Uri.encodeComponent(idInventaire)}/rayons/etat');
+    const quoi = 'emplacements';
+    final http.Response response;
+    try {
+      response = await _httpGet(url).timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      throw const ApiLoadException('Le serveur met trop de temps à répondre ($quoi non chargés). Vérifiez le réseau puis réessayez.',
+          TypeErreurChargement.reseau);
+    } catch (e) {
+      if (estCertificatRefuse(e)) throw const ApiLoadException('$messageCertificat ($quoi non chargés)', TypeErreurChargement.reseau);
+      throw const ApiLoadException('Serveur injoignable ($quoi non chargés). Vérifiez le Wi-Fi et l\'adresse du serveur puis réessayez.',
+          TypeErreurChargement.reseau);
+    }
+    final code = response.statusCode;
+    if (code == 404 || code == 405) {
+      _marquerAbsente('rayons/etat');
+      return null;
+    }
+    if (code == 410) throw const ApiLoadException('Inventaire introuvable sur le serveur (clôturé ou supprimé).');
+    if (code == 401 || (code == 403 && droitManquant(response) == null)) {
+      throw const ApiLoadException('Session expirée ($quoi non chargés) : reconnectez-vous.', TypeErreurChargement.session);
+    }
+    if (code >= 500) throw ApiLoadException('Erreur du serveur (code $code) : $quoi non chargés. Réessayez dans un instant.');
+    if (code != 200) throw ApiLoadException('Le serveur a refusé le chargement des $quoi (code $code).');
+    final dynamic data;
+    try {
+      data = json.decode(utf8.decode(response.bodyBytes));
+    } catch (_) {
+      throw const ApiLoadException('Réponse illisible du serveur pour les $quoi.', TypeErreurChargement.donnees);
+    }
+    if (data is! List) throw const ApiLoadException('Réponse inattendue du serveur pour les $quoi.', TypeErreurChargement.donnees);
+    try {
+      return [for (final e in data) EtatRayon.fromJson(Map<String, dynamic>.from(e as Map))];
+    } catch (_) {
+      throw const ApiLoadException('Données des $quoi illisibles.', TypeErreurChargement.donnees);
+    }
+  }
 
   /// Récupère les produits.
   /// - [idRayon] vide : 'detailsAll' (Mode Global / Saisie Rapide)
@@ -498,6 +733,80 @@ class ApiService implements SaisieServeur {
               delai: const Duration(seconds: 8)))
           .isNotEmpty;
 
+  // --- 4.15 : VERSEMENT DE LA COLLECTE EN LOT (demande 37) ---
+
+  /// Lignes au plus par versement (le serveur en accepte 500).
+  static const int versementParLot = 200;
+
+  /// La route du versement en lot peut-elle être essayée sur ce serveur ?
+  bool get versementLotPossible => serveurRecent && !_absente('versement');
+
+  /// `POST /inventaire/{id}/versement` {cle, mode:"ajouter"|"remplacer", lignes:[{code, quantite}]} →
+  /// rapport par ligne (ok + ligneId + quantiteFinale, inconnu, ambigu, refuse). Même [cle] et même
+  /// contenu → le serveur rend le rapport d'origine sans rien refaire (`dejaTraite`) : une reprise après
+  /// coupure ne compte jamais deux fois. Ne lève jamais : l'issue est classée.
+  ///
+  /// [reprise] : lot DÉJÀ envoyé dont la réponse s'est perdue — renvoyé même si le serveur n'est plus
+  /// reconnu récent (seul un 404 / 405 prouve que rien n'a été enregistré).
+  Future<ResultatVersementLot> verserLot(String inventaireId,
+      {required String cle, required bool ajouter, required List<(String, int)> lignes, bool reprise = false}) async {
+    if (_absente('versement') || (!reprise && !serveurRecent)) return const ResultatVersementLot(IssueVersementLot.routeAbsente);
+    final url = Uri.parse('$baseUrl/api/v1/inventaire/${Uri.encodeComponent(inventaireId)}/versement');
+    final http.Response response;
+    try {
+      response = await _httpPost(
+              url,
+              jsonEncode({
+                'cle': cle,
+                'mode': ajouter ? 'ajouter' : 'remplacer',
+                'lignes': [for (final (code, q) in lignes) {'code': code, 'quantite': q}],
+              }))
+          .timeout(const Duration(seconds: 60));
+    } on TimeoutException {
+      return const ResultatVersementLot(IssueVersementLot.incertain, 'Le serveur met trop de temps à répondre.');
+    } catch (e) {
+      if (estCertificatRefuse(e)) return const ResultatVersementLot(IssueVersementLot.reseau, messageCertificat);
+      return ResultatVersementLot(IssueVersementLot.incertain, _estErreurReseau(e) ? 'Serveur injoignable.' : 'Envoi impossible.');
+    }
+    final code = response.statusCode;
+    if (code == 404 || code == 405) {
+      _marquerAbsente('versement');
+      return const ResultatVersementLot(IssueVersementLot.routeAbsente);
+    }
+    if (code == 401 || code == 403) return const ResultatVersementLot(IssueVersementLot.session, 'Session expirée : reconnectez-vous.');
+    Map? m;
+    try {
+      final d = json.decode(utf8.decode(response.bodyBytes));
+      if (d is Map) m = d;
+    } catch (_) {}
+    final codeMetier = '${m?['code'] ?? ''}';
+    final message = '${m?['message'] ?? m?['msg'] ?? ''}'.trim();
+    if (code == 409 && codeMetier == 'INVENTAIRE_CLOTURE') {
+      return ResultatVersementLot(IssueVersementLot.refuse, message.isEmpty ? 'Inventaire clôturé : rien n\'a été enregistré.' : message);
+    }
+    if (code == 410) return const ResultatVersementLot(IssueVersementLot.refuse, 'Inventaire introuvable sur le serveur (clôturé ou supprimé).');
+    if (code == 409) return const ResultatVersementLot(IssueVersementLot.cleReutilisee, 'Versement déjà enregistré avec un autre contenu : vérifiez les quantités dans Prestige.');
+    // 400 / 413 : rien n'a été enregistré, l'ancien chemin (produit par produit) prend le relais.
+    if (code == 400 || code == 413) return ResultatVersementLot(IssueVersementLot.nonTraite, 'Versement en lot refusé (code $code).');
+    // 5xx, réponse illisible ou tronquée : a PEUT-ÊTRE été enregistré → même clé à la reprise.
+    if (code != 200 || m == null || m['lignes'] is! List) {
+      return ResultatVersementLot(IssueVersementLot.incertain, code >= 500 ? 'Erreur du serveur (code $code).' : 'Réponse illisible du serveur.');
+    }
+    final out = <LigneRapportLot>[];
+    for (final e in (m['lignes'] as List).whereType<Map>()) {
+      final index = (e['index'] as num?)?.toInt();
+      if (index == null) continue;
+      out.add(LigneRapportLot(
+        index: index,
+        statut: '${e['statut'] ?? ''}',
+        ligneId: int.tryParse('${e['ligneId'] ?? ''}'),
+        quantiteFinale: (e['quantiteFinale'] is num) ? (e['quantiteFinale'] as num).toInt() : int.tryParse('${e['quantiteFinale'] ?? ''}'),
+        motif: '${e['motif'] ?? ''}',
+      ));
+    }
+    return ResultatVersementLot.rapport(dejaTraite: m['dejaTraite'] == true, lignes: out);
+  }
+
   // --- GESTION LICENCE ---
 
   /// Enregistre une nouvelle licence.
@@ -564,7 +873,11 @@ class ResultatCreationServeur {
   final bool incertain;
   final String message;
 
-  const ResultatCreationServeur.ok(this.lignes)
+  /// Identifiant de l'inventaire créé (`lgInventaireId`, serveurs récents, demande 20) ; null : à
+  /// retrouver dans la liste des inventaires ouverts.
+  final String? inventaireId;
+
+  const ResultatCreationServeur.ok(this.lignes, {this.inventaireId})
       : succes = true,
         session = false,
         incertain = false,
@@ -573,16 +886,83 @@ class ResultatCreationServeur {
       : succes = false,
         lignes = null,
         session = false,
-        incertain = false;
+        incertain = false,
+        inventaireId = null;
   const ResultatCreationServeur.session()
       : succes = false,
         lignes = null,
         session = true,
         incertain = false,
+        inventaireId = null,
         message = 'Session expirée : reconnectez-vous.';
   const ResultatCreationServeur.incertain(this.message)
       : succes = false,
         lignes = null,
         session = false,
-        incertain = true;
+        incertain = true,
+        inventaireId = null;
+}
+
+/// Produit de l'officine retrouvé par son code (fiche article).
+class ProduitServeur {
+  /// lg_FAMILLE_ID.
+  final String id;
+  final String cip;
+  final String nom;
+
+  /// Emplacement (rayon) du produit ; null : sans emplacement.
+  final Rayon? emplacement;
+  const ProduitServeur({required this.id, required this.cip, required this.nom, this.emplacement});
+}
+
+/// Issue d'un versement en lot.
+enum IssueVersementLot {
+  /// Rapport reçu (lignes classées).
+  traite,
+
+  /// Serveur sans cette route : ancien chemin (produit par produit).
+  routeAbsente,
+
+  /// Demande refusée AVANT tout enregistrement (400, 413) : ancien chemin.
+  nonTraite,
+
+  /// Session expirée : rien n'a été enregistré.
+  session,
+
+  /// Certificat refusé : rien n'est parti.
+  reseau,
+
+  /// Pas de réponse lisible : a PEUT-ÊTRE été enregistré — renvoyer la MÊME clé à la reprise.
+  incertain,
+
+  /// Inventaire clôturé ou inconnu : rien n'a été enregistré.
+  refuse,
+
+  /// La clé a déjà servi pour un autre contenu (ne devrait jamais arriver).
+  cleReutilisee,
+}
+
+class LigneRapportLot {
+  /// Rang de la ligne dans la demande.
+  final int index;
+
+  /// ok, inconnu, ambigu, refuse.
+  final String statut;
+  final int? ligneId;
+  final int? quantiteFinale;
+  final String motif;
+  const LigneRapportLot({required this.index, required this.statut, this.ligneId, this.quantiteFinale, this.motif = ''});
+}
+
+class ResultatVersementLot {
+  final IssueVersementLot issue;
+  final String message;
+  final bool dejaTraite;
+  final List<LigneRapportLot> lignes;
+  const ResultatVersementLot(this.issue, [this.message = ''])
+      : dejaTraite = false,
+        lignes = const [];
+  const ResultatVersementLot.rapport({required this.dejaTraite, required this.lignes})
+      : issue = IssueVersementLot.traite,
+        message = '';
 }

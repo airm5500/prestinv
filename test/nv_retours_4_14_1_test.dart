@@ -1,16 +1,12 @@
 // 4.14.1 — Retours de test du pharmacien (nouvelle interface, widgets contre le faux serveur) :
 //  1. saisie guidée : bouton d'envoi = icône SEULE (sans fond ni contour, comme le nuage voisin),
 //     orange, pastille rouge du nombre, zone de toucher ≥ 48 dp ;
-//  2. création d'un inventaire depuis la collecte : l'emplacement des produits collectés est
-//     présélectionné, modifiable (autre emplacement trouvé, « Autre emplacement… »), et SEUL cet
-//     emplacement est envoyé au serveur (avant : tous) ; rien n'est créé sans emplacement ;
-//     panne → message et « Réessayer ».
+//  2. (création d'un inventaire depuis la collecte limitée à UN emplacement : remplacée en 4.15 par
+//     l'inventaire des seuls produits collectés — test/creation_collecte_4_15_test.dart).
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/models/inventory.dart';
-import 'package:prestinv/ui/ecrans/creation_inventaire_screen.dart';
 import 'package:prestinv/ui/ecrans/saisie_guidee_screen.dart';
-import 'package:prestinv/ui/presentation_style.dart';
 import 'package:prestinv/ui/theme.dart';
 
 import 'helpers/banc_essai.dart';
@@ -23,18 +19,7 @@ Future<Banc> banc() async {
   return b;
 }
 
-/// ANTIBIOTIQUES ×2 (AMOXICILLINE, SPASFON), RÉSERVE ×1 (DOLIPRANE).
-const codesCollecte = ['3400935959001', '3400937000003', '3400930000001'];
 
-Future<void> creerEtConfirmer(WidgetTester tester) async {
-  await toucher(tester, find.byKey(const ValueKey('bouton-creer')));
-  await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const ValueKey('confirmer-creation')));
-  await tester.pumpAndSettle();
-}
-
-bool choisi(WidgetTester tester, String id) =>
-    tester.widget<SoftCard>(find.byKey(ValueKey('emplacement-$id'))).semantique!.endsWith(', choisi');
 
 void main() {
   setUpAll(chargerPolicesReelles);
@@ -104,89 +89,6 @@ void main() {
       await demonter(tester);
     });
   });
-
-  group('Création d\'inventaire depuis la collecte', () {
-    testWidgets('emplacement le plus fréquent présélectionné ; un seul emplacement envoyé', (tester) async {
-      tailleEcran(tester, telephone360);
-      final b = await banc();
-      await tester.pumpWidget(monterNv(b, const NvCreationInventaireScreen(libelleInitial: 'Collecte du 15-10-2026', codesCollectes: codesCollecte)));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('type-famille')), findsNothing, reason: 'pas de choix du type depuis la collecte');
-      expect(choisi(tester, 'S2B2'), isTrue);
-      expect(choisi(tester, 'S3'), isFalse);
-      expect(find.text('2 produit(s) de la collecte'), findsOneWidget);
-      expect(find.textContaining('1 produit(s) de la collecte rangé(s) ailleurs'), findsOneWidget);
-      await creerEtConfirmer(tester);
-      expect(b.serveur.creations.single, ('Collecte du 15-10-2026', 'Emplacement'));
-      expect(b.serveur.creationsValeurs.single, ['S2B2']);
-      await demonter(tester);
-    });
-
-    testWidgets('emplacement modifiable : autre emplacement trouvé, puis « Autre emplacement… » (recherche)', (tester) async {
-      tailleEcran(tester, telephone360);
-      final b = await banc();
-      await tester.pumpWidget(monterNv(b, const NvCreationInventaireScreen(libelleInitial: 'Collecte du 15-10-2026', codesCollectes: codesCollecte)));
-      await tester.pumpAndSettle();
-      await toucher(tester, find.byKey(const ValueKey('emplacement-S3')));
-      await tester.pumpAndSettle();
-      expect(choisi(tester, 'S3'), isTrue);
-      expect(choisi(tester, 'S2B2'), isFalse);
-
-      await toucher(tester, find.byKey(const ValueKey('autre-emplacement')));
-      await tester.pumpAndSettle();
-      expect(find.text('Choisir l\'emplacement'), findsOneWidget);
-      expect(find.byKey(const ValueKey('choix-emplacement-R3')), findsOneWidget, reason: 'tous les emplacements de l\'officine');
-      await tester.enterText(find.byKey(const ValueKey('recherche-emplacement')), 'cann');
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('choix-emplacement-S2B2')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('choix-emplacement-S1A0T2')));
-      await tester.pumpAndSettle();
-      expect(choisi(tester, 'S1A0T2'), isTrue);
-      expect(find.text('Choisi dans la liste des emplacements'), findsOneWidget);
-      await creerEtConfirmer(tester);
-      expect(b.serveur.creationsValeurs.single, ['S1A0T2']);
-      await demonter(tester);
-    });
-
-    testWidgets('aucun produit retrouvé : rien de présélectionné, création impossible sans emplacement', (tester) async {
-      tailleEcran(tester, telephone360);
-      final b = await banc();
-      await tester.pumpWidget(monterNv(b, const NvCreationInventaireScreen(libelleInitial: 'Collecte du 15-10-2026', codesCollectes: ['9999999999999'])));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('emplacements-aucun')), findsOneWidget);
-      expect(tester.widget<ButtonStyleButton>(find.byKey(const ValueKey('bouton-creer'))).onPressed, isNull);
-      expect(b.serveur.creations, isEmpty);
-      await demonter(tester);
-    });
-
-    testWidgets('serveur en panne pendant la recherche : message, Réessayer, puis présélection', (tester) async {
-      tailleEcran(tester, telephone360);
-      final b = await banc();
-      b.serveur.codes['fiche'] = 500;
-      await tester.pumpWidget(monterNv(b, const NvCreationInventaireScreen(libelleInitial: 'Collecte du 15-10-2026', codesCollectes: codesCollecte)));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('emplacements-erreur')), findsOneWidget);
-      expect(tester.widget<ButtonStyleButton>(find.byKey(const ValueKey('bouton-creer'))).onPressed, isNull);
-      b.serveur.codes.remove('fiche');
-      await toucher(tester, find.byKey(const ValueKey('emplacements-reessayer')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('emplacements-erreur')), findsNothing);
-      expect(choisi(tester, 'S2B2'), isTrue);
-      await demonter(tester);
-    });
-
-    testWidgets('création classique (accueil) : inchangée, type au choix, aucun emplacement envoyé', (tester) async {
-      tailleEcran(tester, telephone360);
-      final b = await banc();
-      await tester.pumpWidget(monterNv(b, const NvCreationInventaireScreen()));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('type-famille')), findsOneWidget);
-      expect(find.byKey(const ValueKey('autre-emplacement')), findsNothing);
-      await tester.enterText(find.byKey(const ValueKey('libelle-inventaire')), 'Réserve novembre');
-      await creerEtConfirmer(tester);
-      expect(b.serveur.creations.single, ('Réserve novembre', 'Emplacement'));
-      expect(b.serveur.creationsValeurs.single, isNull);
-      await demonter(tester);
-    });
-  });
+  // Création d'un inventaire depuis la collecte : remplacée en 4.15 (inventaire des seuls produits
+  // collectés, sur leurs emplacements) — voir test/creation_collecte_4_15_test.dart.
 }

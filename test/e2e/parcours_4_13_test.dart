@@ -270,23 +270,25 @@ void main() {
     });
   });
 
-  testWidgets('collecte → « Créer un inventaire avec ces produits » → versement → rapport (non reconnus)', (tester) async {
+  testWidgets('collecte → « Créer un inventaire avec ces produits » → inventaire de CES produits → versement → rapport', (tester) async {
     tailleEcran(tester, telephone360);
     final app = await lancerApplication(tester);
     await seConnecter(tester);
+    // 4.15 (décision du pharmacien) : 3 produits de 3 emplacements différents + un code inconnu.
     await CollecteStore.ecrire([
       CollectedItem(code: '3400930000001', quantity: 12, dateScan: DateTime(2026, 10, 13, 9)),
-      CollectedItem(code: '9999999999999', quantity: 3, dateScan: DateTime(2026, 10, 13, 9, 1)),
+      CollectedItem(code: '3400935959001', quantity: 4, dateScan: DateTime(2026, 10, 13, 9, 1)),
+      CollectedItem(code: '3400938000004', quantity: 7, dateScan: DateTime(2026, 10, 13, 9, 2)),
+      CollectedItem(code: '9999999999999', quantity: 3, dateScan: DateTime(2026, 10, 13, 9, 3)),
     ]);
     await toucherCle(tester, 'nv-tuile-collecte');
     await tester.pumpAndSettle();
     await toucherCle(tester, 'creer-avec-collecte');
     await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(find.byKey(const ValueKey('libelle-inventaire'))).controller!.text, startsWith('Collecte du '));
-    // 4.14.1 : l'emplacement des produits collectés (DOLIPRANE → RÉSERVE) est présélectionné.
-    expect(find.byKey(const ValueKey('emplacement-S3')), findsOneWidget);
-    expect(find.textContaining('1 produit(s) de la collecte'), findsOneWidget);
-    expect(find.text('Seulement « RÉSERVE »'), findsOneWidget);
+    // Plus de choix d'emplacement : récapitulatif des produits et de LEURS emplacements.
+    expect(find.text('3 produits, 3 emplacements'), findsOneWidget);
+    expect(find.byKey(const ValueKey('recap-non-retrouves')), findsOneWidget);
     await toucherCle(tester, 'bouton-creer');
     await tester.pumpAndSettle();
     await toucherCle(tester, 'confirmer-creation');
@@ -294,13 +296,19 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
     }
     await tester.pumpAndSettle();
-    expect(app.serveur.catalogue.creations.single.$1, startsWith('Collecte du '));
-    // 4.14.1 (retour du pharmacien) : UN SEUL emplacement envoyé, et non tous.
-    expect(app.serveur.catalogue.creations.single.$2, 'Emplacement');
-    expect(app.serveur.catalogue.creationsValeurs.single, ['S3']);
+    final cat = app.serveur.catalogue;
+    expect(cat.creations.single.$1, startsWith('Collecte du '));
+    expect(cat.creations.single.$2, 'Emplacement');
+    expect(cat.creationsValeurs.single!.toSet(), {'S1A0T2', 'S2B2', 'S3'}, reason: 'emplacements des produits, pas toute l\'officine');
+    expect(cat.creationsRetenue.single, 0);
     expect(find.byType(NvRapportVersementScreen), findsOneWidget);
     expect(find.text('codes non reconnus'), findsOneWidget);
-    expect(app.serveur.catalogue.produit(1).saisi, 12);
+    // L'inventaire créé : SEULEMENT ces produits, comptés par le versement ; seuls leurs emplacements.
+    final inv = cat.crees['NEW1']!;
+    expect({for (final l in inv.lignesRetenues) l.cip: l.saisi}, {'3400930000001': 12, '3400935959001': 4, '3400938000004': 7});
+    expect(inv.lignes.map((l) => l.rayon).toSet(), {'S1A0T2', 'S2B2', 'S3'}, reason: 'à l\'ouverture : ces 3 emplacements');
+    expect(inv.lignesRetenues.where((l) => l.rayon == 'S2B2'), hasLength(1), reason: 'AMOXICILLINE seule, pas le reste du rayon');
+    expect(cat.produit(1).saisi, 24, reason: 'l\'inventaire d\'origine n\'est pas touché');
     await fermerApplication(tester);
   });
 

@@ -15,7 +15,10 @@ import 'faux_prestige_http.dart';
 /// Produit avec un prix d'achat réaliste (le faux serveur d'origine renvoie 100 F pour tous).
 class FauxProduitPrix extends FauxProduit {
   final double prixAchat;
-  FauxProduitPrix(super.id, super.cip, super.nom, super.rayon, super.theorique, {super.saisi, this.prixAchat = 1000});
+  FauxProduitPrix(super.id, super.cip, super.nom, super.rayon, super.theorique, {super.saisi, super.ean, this.prixAchat = 1000});
+
+  @override
+  FauxProduit copie(int nouvelId) => FauxProduitPrix(nouvelId, cip, nom, rayon, theorique, ean: ean, prixAchat: prixAchat);
 
   @override
   Map<String, dynamic> toJson() => {...super.toJson(), 'produitPrixAchat': prixAchat, 'produitPrixUni': (prixAchat * 1.3).roundToDouble()};

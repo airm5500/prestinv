@@ -12,8 +12,10 @@
 //                                      (mauvais identifiants : {success:false})
 //   POST /api/v1/user/logout           invalide la session
 //   GET  /api/v1/licence/find          licence fictive (fin relative à aujourd'hui) ; publique
-//   tout le reste (/ws/inventaires/*, /inventaire/creation, /inventaire/ligne/quantite) : catalogue
-//   en mémoire de [FauxPrestige] (test/helpers/faux_prestige_http.dart), quantités modifiables.
+//   tout le reste (/ws/inventaires/*, /inventaire/creation, /inventaire/ligne/quantite,
+//   /inventaire/lignes/retenue ; serveur à jour [serveurRecent] : /ws/inventaires/{id}/rayons/etat,
+//   /inventaire/{id}/versement) : catalogue en mémoire de [FauxPrestige]
+//   (test/helpers/faux_prestige_http.dart), quantités modifiables.
 //
 // Scénarios scriptables, par route (fin de chemin, ex. 'inventaires', 'licence/find', 'details') :
 //   [scripter] → 200 JSON, `success:false`, 401, 403, 500, délai, coupure réseau, réponse tronquée
@@ -118,6 +120,16 @@ class FauxServeurPrestige {
   /// défaut ; 'mainmenumanager' (autre profil) ; null : champ absent (serveur plus ancien).
   String? typeAccueil = 'dashboard';
 
+  /// 4.15 — Droit « Créer un inventaire » envoyé à la connexion par un serveur à jour (null : non envoyé).
+  /// Par défaut : envoyé (vrai) si le catalogue a les routes récentes.
+  bool? droitCreation;
+
+  /// Serveur à jour (réponse aux demandes mobiles) : routes récentes + `role` / `droits` à la connexion.
+  set serveurRecent(bool v) {
+    catalogue.routesRecentes = v;
+    droitCreation = v ? (droitCreation ?? true) : null;
+  }
+
   /// Si vrai, toute route protégée exige un cookie JSESSIONID délivré par /user/auth (401 sinon).
   bool exigerSession;
 
@@ -218,6 +230,10 @@ class FauxServeurPrestige {
       await r.response.close();
     } on _Coupure {
       // Fermeture brutale, sans réponse : le client voit une connexion coupée.
+      final socket = await r.response.detachSocket(writeHeaders: false);
+      socket.destroy();
+    } on SocketException {
+      // Réponse perdue APRÈS traitement (catalogue : création, versement) : connexion coupée de même.
       final socket = await r.response.detachSocket(writeHeaders: false);
       socket.destroy();
     } on _Troncature catch (t) {
@@ -323,6 +339,7 @@ class FauxServeurPrestige {
     }
     final session = 'JSESSIONID=essai-${++_numeroSession}';
     _sessions.add(session);
-    return _json(utilisateurFictif(login, typeAccueil: typeAccueil), entetes: {'set-cookie': '$session; Path=/prestige; HttpOnly'});
+    return _json(utilisateurFictif(login, typeAccueil: typeAccueil, droitCreation: droitCreation),
+        entetes: {'set-cookie': '$session; Path=/prestige; HttpOnly'});
   }
 }

@@ -69,12 +69,18 @@ class _VersementScreenState extends State<VersementScreen> {
 
   List<CollectedItem> get _aVerser => _collecte.where((i) => !i.versee).toList();
 
+  /// « Nouvel inventaire… » : 4.15, l'inventaire créé ne contient QUE les produits à verser, sur leurs
+  /// emplacements (avant : tous les produits de tous les emplacements), puis il est proposé au versement.
   Future<void> _nouvelInventaire() async {
+    final codes = [for (final i in _aVerser) i.code];
     final cree = await Navigator.of(context).push<Inventory>(MaterialPageRoute(
-        builder: (_) => const CreationInventaireScreen()));
+        builder: (_) => CreationInventaireScreen(codesCollectes: codes.isEmpty ? null : codes)));
     if (!mounted || cree == null) return;
     await _charger();
-    final trouve = _inventaires?.where((i) => i.id == cree.id).firstOrNull ?? (cree.id.isEmpty ? null : cree);
+    String cle(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+    final trouve = _inventaires?.where((i) => i.id == cree.id && cree.id.isNotEmpty).firstOrNull ??
+        _inventaires?.where((i) => cle(i.libelle) == cle(cree.libelle)).firstOrNull ??
+        (cree.id.isEmpty ? null : cree);
     if (trouve != null && mounted) await _choisir(trouve);
   }
 

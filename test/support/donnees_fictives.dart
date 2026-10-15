@@ -21,9 +21,14 @@ const adresseServeurFictive = 'serveur-essai.invalid';
 /// Réponse de /user/auth pour [login] (même forme que AccountResource.auth : « xtypeuser » vaut
 /// « dashboard » pour l'administrateur / le pharmacien, « mainmenumanager » pour les autres profils).
 /// [typeAccueil] null : serveur plus ancien qui n'envoie pas « xtypeuser » (profil inconnu).
-Map<String, dynamic> utilisateurFictif(String login, {String? typeAccueil = 'dashboard'}) => {
+///
+/// [droitCreation] (4.15, serveur à jour) : ajoute `role` et `droits.creerInventaire` (demande 10) ;
+/// null : serveur plus ancien (champs absents).
+Map<String, dynamic> utilisateurFictif(String login, {String? typeAccueil = 'dashboard', bool? droitCreation}) => {
       'success': true,
       if (typeAccueil != null) 'xtypeuser': typeAccueil,
+      if (droitCreation != null) 'role': {'code': droitCreation ? 'PHARMACIEN' : 'VENDEUR', 'libelle': droitCreation ? 'Pharmacien' : 'Vendeur'},
+      if (droitCreation != null) 'droits': {'creerInventaire': droitCreation},
       'str_USER_ID': 'U-ESSAI-1',
       'str_LOGIN': login,
       'str_FIRST_NAME': CompteFictif.prenom,

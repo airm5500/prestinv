@@ -318,6 +318,21 @@ class EntryProvider with ChangeNotifier {
   Future<void> loadRayonStatuses(ApiService api, String inventoryId) async {
     if (_isLoadingStatuses || _rayons.isEmpty) return;
     _isLoadingStatuses = true;
+    // 4.15 (demande 30) : serveur récent → l'état de TOUS les rayons en une requête (au lieu d'une ou
+    // deux par rayon). Indisponible ou en échec : l'ancien chemin, rayon par rayon.
+    try {
+      final etat = await api.etatRayons(inventoryId);
+      if (etat != null) {
+        for (final e in etat) {
+          if (_rayons.any((r) => r.id == e.rayon.id)) _rayonStatuses[e.rayon.id] = e.statut;
+        }
+        _isLoadingStatuses = false;
+        notifyListeners();
+        return;
+      }
+    } on ApiLoadException {
+      // Erreur : état inconnu → ancien chemin (chaque rayon garde son état précédent en cas d'échec).
+    }
     for (var rayon in _rayons) {
       // Erreur réseau : état INCONNU (on garde l'état précédent) — avant, une erreur affichait
       // « pas commencé » ou « reste à faire » à tort.

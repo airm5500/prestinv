@@ -23,6 +23,9 @@ class FauxProduit {
   String? auteur;
   FauxProduit(this.id, this.cip, this.nom, this.rayon, this.theorique, {int? saisi, this.ean}) : saisi = saisi ?? theorique;
 
+  /// Même produit dans un AUTRE inventaire (ligne [nouvelId], jamais comptée).
+  FauxProduit copie(int nouvelId) => FauxProduit(nouvelId, cip, nom, rayon, theorique, ean: ean);
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'produitCip': cip,
@@ -33,6 +36,21 @@ class FauxProduit {
         'quantiteSaisie': saisi,
         'dtUpdated': dtUpdated,
       };
+}
+
+/// 4.15 — Inventaire créé pendant le test : ses propres lignes (copies des produits du catalogue, jamais
+/// comptées), retenues ou non (bool_INVENTAIRE), comme sur le serveur.
+class FauxInventaireCree {
+  final List<FauxProduit> lignes;
+
+  /// Ligne d'inventaire → produit du catalogue (lg_FAMILLE_ID « F<id> »).
+  final Map<int, int> produitDe;
+
+  /// Lignes retenues (bool_INVENTAIRE = 1).
+  final Set<int> retenues;
+  FauxInventaireCree(this.lignes, this.produitDe, this.retenues);
+
+  List<FauxProduit> get lignesRetenues => lignes.where((l) => retenues.contains(l.id)).toList();
 }
 
 class FauxPrestige {
@@ -84,6 +102,47 @@ class FauxPrestige {
   /// Création : la réponse se perd (réseau coupé APRÈS que le serveur a créé l'inventaire).
   bool creationReponsePerdue = false;
 
+  // --- 4.15 : routes récentes et inventaires limités aux produits ---
+
+  /// Serveur à jour (branche des demandes mobiles) : `rayons/etat`, versement en lot, `lgInventaireId`
+  /// dans la réponse de création, `droits` / `role` dans la réponse de connexion.
+  bool routesRecentes = false;
+
+  /// Ancien serveur sans `POST /inventaire/lignes/retenue` (404).
+  bool sansRouteRetenue = false;
+
+  /// Inventaires créés pendant le test (identifiant → lignes propres).
+  final Map<String, FauxInventaireCree> crees = {};
+
+  /// `bool_INVENTAIRE` de chaque demande de création (null : absent → 1).
+  final List<int?> creationsRetenue = [];
+
+  /// Demandes reçues par `POST /inventaire/lignes/retenue` (inventaire, produits).
+  final List<(String, List<String>)> retenues = [];
+
+  /// Demandes reçues par `POST /inventaire/{id}/versement` (corps décodé).
+  final List<Map<String, dynamic>> versementsLot = [];
+
+  /// Versement en lot : les N prochaines réponses se perdent APRÈS l'enregistrement (réseau coupé).
+  int versementsReponsePerdue = 0;
+
+  /// Clés de versement déjà vues : (inventaire, empreinte du contenu, rapport).
+  final Map<String, (String, String, Map<String, dynamic>)> _cles = {};
+
+  /// Lignes RETENUES d'un inventaire (celles que lisent la saisie, les écarts, la clôture).
+  List<FauxProduit> lignesDe(String? inventaire) => crees[inventaire]?.lignesRetenues ?? produits;
+
+  FauxProduit? _ligne(int? id) {
+    if (id == null) return null;
+    final p = produits.where((p) => p.id == id).firstOrNull;
+    if (p != null) return p;
+    for (final c in crees.values) {
+      final l = c.lignes.where((l) => l.id == id).firstOrNull;
+      if (l != null) return l;
+    }
+    return null;
+  }
+
   FauxPrestige({int nombre = 60}) {
     for (var i = 1; i <= nombre; i++) {
       produits.add(FauxProduit(1000 + i, '3400${i.toString().padLeft(9, '0')}', 'PRODUIT ${i.toString().padLeft(3, '0')}', i.isEven ? 'R2' : 'R1', i % 7));
@@ -108,7 +167,8 @@ class FauxPrestige {
     final query = (q['query'] ?? '').toLowerCase();
     bool correspond(FauxProduit p) =>
         query.isEmpty || p.cip.contains(query) || p.nom.toLowerCase().contains(query) || (p.ean != null && p.ean!.startsWith(query));
-    List<FauxProduit> touches() => produits.where((p) => p.dtUpdated != null).toList();
+    final lignes = lignesDe(q['idInventaire']);
+    List<FauxProduit> touches() => lignes.where((p) => p.dtUpdated != null).toList();
     http.Response liste(Iterable<FauxProduit> ps) =>
         http.Response.bytes(utf8.encode(json.encode(ps.map((p) => p.toJson()).toList())), 200, headers: {'content-type': 'application/json; charset=utf-8'});
 
@@ -119,7 +179,7 @@ class FauxPrestige {
       final id = int.tryParse('${b['lg_INVENTAIRE_FAMILLE_ID']}');
       final quantite = (b['int_NUMBER'] as num?)?.toInt();
       if (quantite == null || quantite < 0) return http.Response(json.encode({'success': 0, 'errors': 'Quantite invalide.'}), 200);
-      final p = produits.where((p) => p.id == id).firstOrNull;
+      final p = _ligne(id);
       if (p == null) return http.Response(json.encode({'success': 0, 'errors': "Cette ligne d'inventaire n'existe plus."}), 200);
       postsQuantite.add((p.id, quantite));
       p
@@ -136,16 +196,138 @@ class FauxPrestige {
       final brut = b['valeurs'];
       final valeurs = brut is List ? [for (final v in brut) '$v'] : null;
       creationsValeurs.add(valeurs);
+      final retenue = (b['bool_INVENTAIRE'] as num?)?.toInt();
+      creationsRetenue.add(retenue);
       if (reponseCreation != null) return http.Response.bytes(utf8.encode(json.encode(reponseCreation)), 200);
       if (nom.isEmpty) return http.Response(json.encode({'success': 0, 'message': 'Indiquez un libelle pour cet inventaire.'}), 200);
       if (type.isEmpty) return http.Response(json.encode({'success': 0, 'message': "Choisissez un type d'inventaire."}), 200);
-      // Le plus récent en tête (ORDER BY dtCREATED DESC).
-      inventaires = {'NEW${creations.length}': nom, ...inventaires};
-      if (creationReponsePerdue) throw const SocketException('Connection reset');
       // Comme createInventaireMultiCriteres : sans valeur → tous les produits ; sinon ceux des emplacements.
       final filtre = valeurs?.where((v) => v.isNotEmpty && v != '0' && v != '%%').toSet() ?? const <String>{};
-      final lignes = filtre.isEmpty ? produits.length : produits.where((p) => filtre.contains(p.rayon)).length;
-      return http.Response(json.encode({'success': 1, 'lignes': lignes, 'nombre': '$lignes article(s) inventorie(s)'}), 200);
+      final inclus = filtre.isEmpty ? produits : produits.where((p) => filtre.contains(p.rayon)).toList();
+      if (inclus.isEmpty) return http.Response(json.encode({'success': 0, 'message': "Aucun inventaire n'a ete cree."}), 200);
+      // Le plus récent en tête (ORDER BY dtCREATED DESC).
+      final id = 'NEW${creations.length}';
+      inventaires = {id: nom, ...inventaires};
+      final base = 100000 * creations.length;
+      final copies = [for (final p in inclus) p.copie(base + p.id)];
+      crees[id] = FauxInventaireCree(copies, {for (final p in inclus) base + p.id: p.id}, retenue == 0 ? {} : {for (final c in copies) c.id});
+      if (creationReponsePerdue) throw const SocketException('Connection reset');
+      return http.Response.bytes(
+          utf8.encode(json.encode({
+            'success': 1,
+            'lignes': inclus.length,
+            'nombre': '${inclus.length} article(s) inventorie(s)',
+            if (routesRecentes) 'lgInventaireId': id,
+            if (routesRecentes) 'libelle': nom,
+          })),
+          200);
+    }
+    if (req.method == 'POST' && fin == 'retenue' && chemin.endsWith('lignes/retenue')) {
+      if (sansRouteRetenue) return http.Response('', 404);
+      final b = json.decode(req.body) as Map<String, dynamic>;
+      final inv = '${b['lg_INVENTAIRE_ID'] ?? ''}';
+      final ps = [for (final e in (b['produits'] as List? ?? const [])) '$e'];
+      final ids = [for (final e in (b['ids'] as List? ?? const [])) '$e'];
+      if (ps.isNotEmpty || inv.isNotEmpty) retenues.add((inv, ps));
+      final c = crees[inv];
+      var count = 0;
+      if (c != null) {
+        for (final e in c.produitDe.entries) {
+          if (ps.contains('F${e.value}') || ids.contains('${e.key}')) {
+            c.retenues.add(e.key);
+            count++;
+          }
+        }
+      } else if (inventaires.containsKey(inv)) {
+        count = produits.where((p) => ps.contains('F${p.id}') || ids.contains('${p.id}')).length;
+      }
+      if (count == 0) return http.Response(json.encode({'success': 0, 'errors': 'Aucun article a traiter.'}), 200);
+      return http.Response(json.encode({'success': 1, 'count': count, 'errors': "$count article(s) ajoute(s) a l'inventaire."}), 200);
+    }
+    if (req.method == 'GET' && fin == 'etat' && chemin.endsWith('/rayons/etat')) {
+      if (!routesRecentes) return http.Response('', 404);
+      final segs = req.url.pathSegments;
+      final inv = segs[segs.length - 3];
+      if (!inventaires.containsKey(inv) && !crees.containsKey(inv)) {
+        return http.Response(json.encode({'success': 0, 'code': 'INVENTAIRE_INCONNU'}), 410);
+      }
+      final c = crees[inv];
+      final toutes = c?.lignes ?? produits;
+      final retenuesInv = lignesDe(inv).map((p) => p.id).toSet();
+      final ids = <String>[];
+      for (final p in toutes) {
+        if (!ids.contains(p.rayon)) ids.add(p.rayon);
+      }
+      ids.sort((a, b) => (rayons[a] ?? a).compareTo(rayons[b] ?? b));
+      return http.Response.bytes(
+          utf8.encode(json.encode([
+            for (final r in ids)
+              () {
+                final ls = toutes.where((p) => p.rayon == r && retenuesInv.contains(p.id)).toList();
+                final comptes = ls.where((p) => p.dtUpdated != null).length;
+                return {'rayonId': r, 'code': r, 'libelle': rayons[r] ?? autresEmplacements[r] ?? r, 'totalProduits': ls.length, 'comptes': comptes, 'restants': ls.length - comptes, 'derniereSaisie': null};
+              }(),
+          ])),
+          200);
+    }
+    if (req.method == 'POST' && fin == 'versement') {
+      if (!routesRecentes) return http.Response('', 404);
+      final segs = req.url.pathSegments;
+      final inv = segs[segs.length - 2];
+      Map<String, dynamic> b;
+      try {
+        b = Map<String, dynamic>.from(json.decode(req.body) as Map);
+      } catch (_) {
+        return http.Response(json.encode({'success': 0, 'code': 'REQUETE_INVALIDE'}), 400);
+      }
+      versementsLot.add(b);
+      final cle = '${b['cle'] ?? ''}';
+      final mode = '${b['mode'] ?? ''}';
+      final ls = b['lignes'];
+      if (cle.isEmpty || ls is! List || (mode != 'ajouter' && mode != 'remplacer')) {
+        return http.Response(json.encode({'success': 0, 'code': 'REQUETE_INVALIDE'}), 400);
+      }
+      if (ls.length > 500) return http.Response(json.encode({'success': 0, 'code': 'TROP_DE_LIGNES'}), 413);
+      if (!inventaires.containsKey(inv) && !crees.containsKey(inv)) return http.Response(json.encode({'success': 0, 'code': 'INVENTAIRE_INCONNU'}), 410);
+      final empreinte = '$mode|${json.encode(ls)}';
+      final deja = _cles[cle];
+      if (deja != null) {
+        if (deja.$1 != inv || deja.$2 != empreinte) return http.Response(json.encode({'success': 0, 'code': 'CLE_REUTILISEE'}), 409);
+        return http.Response.bytes(utf8.encode(json.encode({...deja.$3, 'dejaTraite': true})), 200);
+      }
+      final lignesInv = lignesDe(inv);
+      final sortie = <Map<String, dynamic>>[];
+      for (var i = 0; i < ls.length; i++) {
+        final e = ls[i] as Map;
+        final code = '${e['code'] ?? ''}'.trim();
+        final q = e['quantite'];
+        final r = <String, dynamic>{'index': i, 'code': code, 'quantite': q};
+        if (code.isEmpty || q is! int || q < 0) {
+          sortie.add({...r, 'statut': 'refuse', 'motif': 'Quantité invalide.'});
+          continue;
+        }
+        final trouvees = lignesInv.where((p) => p.cip == code || p.ean == code).toList();
+        if (trouvees.isEmpty) {
+          sortie.add({...r, 'statut': 'inconnu'});
+          continue;
+        }
+        if (trouvees.length > 1) {
+          sortie.add({...r, 'statut': 'ambigu', 'lignesPossibles': [for (final t in trouvees) {'id': '${t.id}', 'cip': t.cip, 'libelle': t.nom}]});
+          continue;
+        }
+        final p = trouvees.single;
+        p.saisi = mode == 'ajouter' && p.dtUpdated != null ? p.saisi + q : q;
+        p.dtUpdated = '2026-10-15T10:00:00';
+        p.auteur = 'admin';
+        sortie.add({...r, 'statut': 'ok', 'ligneId': '${p.id}', 'quantiteFinale': p.saisi});
+      }
+      final rapport = {'success': 1, 'dejaTraite': false, 'mode': mode, 'total': ls.length, 'lignes': sortie};
+      _cles[cle] = (inv, empreinte, rapport);
+      if (versementsReponsePerdue > 0) {
+        versementsReponsePerdue--;
+        throw const SocketException('Connection reset');
+      }
+      return http.Response.bytes(utf8.encode(json.encode(rapport)), 200);
     }
     if (req.method == 'PUT' && fin == 'details') {
       if (verrouPut != null) await verrouPut!.future;
@@ -153,7 +335,7 @@ class FauxPrestige {
       final id = (b['id'] as num).toInt();
       final quantite = (b['quantite'] as num).toInt();
       puts.add((id, quantite));
-      final p = produits.where((p) => p.id == id).firstOrNull;
+      final p = _ligne(id);
       if (p == null) return http.Response('', 500); // comme le serveur : NPE → 500
       p.saisi = quantite;
       p.dtUpdated = '2026-10-13T10:00:00';
@@ -163,19 +345,22 @@ class FauxPrestige {
       case 'inventaires':
         return http.Response.bytes(utf8.encode(json.encode([for (final e in inventaires.entries) {'id': e.key, 'libelle': e.value}])), 200);
       case 'rayons':
-        return http.Response.bytes(utf8.encode(json.encode([for (final e in rayons.entries) {'id': e.key, 'code': e.key, 'libelle': e.value}])), 200);
+        // Comme fetchRayon : les rayons de TOUTES les lignes de l'inventaire (retenues ou non).
+        final c = crees[q['idInventaire']];
+        final ids = c == null ? rayons.keys.toList() : [for (final r in rayons.keys) if (c.lignes.any((l) => l.rayon == r)) r];
+        return http.Response.bytes(utf8.encode(json.encode([for (final r in ids) {'id': r, 'code': r, 'libelle': rayons[r]}])), 200);
       case 'details':
-        return liste(produits.where((p) => p.rayon == q['idRayon'] && correspond(p)));
+        return liste(lignes.where((p) => p.rayon == q['idRayon'] && correspond(p)));
       case 'detailsAll':
-        return liste(produits.where(correspond));
+        return liste(lignes.where(correspond));
       case 'detailsAllTouched':
         return liste(touches().where(correspond));
       case 'detailsTouchedRayon':
         return liste(touches().where((p) => p.rayon == q['idRayon'] && correspond(p)));
       case 'detailsAllUntouched':
-        return liste(produits.where((p) => p.dtUpdated == null && correspond(p)));
+        return liste(lignes.where((p) => p.dtUpdated == null && correspond(p)));
       case 'detailsUntouchedRayon':
-        return liste(produits.where((p) => p.dtUpdated == null && p.rayon == q['idRayon'] && correspond(p)));
+        return liste(lignes.where((p) => p.dtUpdated == null && p.rayon == q['idRayon'] && correspond(p)));
       case 'detailsAllEcarts':
         return liste(touches().where((p) => p.saisi != p.theorique && correspond(p)));
       case 'zones-geographiques':
@@ -195,7 +380,14 @@ class FauxPrestige {
               'total': ps.length,
               'results': [
                 for (final p in ps.take(int.tryParse(q['limit'] ?? '') ?? 20))
-                  {'lg_FAMILLE_ID': 'F${p.id}', 'int_CIP': p.cip, 'str_NAME': p.nom, 'lg_ZONE_GEO_ID': rayons[p.rayon] ?? '', 'lg_ZONE_GEO_ID_REEL': p.rayon},
+                  {
+                    'lg_FAMILLE_ID': 'F${p.id}',
+                    'int_CIP': p.cip,
+                    'int_EAN13': p.ean ?? '',
+                    'str_NAME': p.nom,
+                    'lg_ZONE_GEO_ID': rayons[p.rayon] ?? '',
+                    'lg_ZONE_GEO_ID_REEL': p.rayon,
+                  },
               ],
             })),
             200);
@@ -204,7 +396,16 @@ class FauxPrestige {
         final fin = DateTime.now().add(const Duration(days: 400)).toIso8601String().substring(0, 10);
         return http.Response(json.encode({'id': 'L1', 'dateStart': '2026-01-01', 'dateEnd': fin, 'typeLicence': 'ANNUELLE'}), 200);
       case 'auth':
-        return http.Response(json.encode({'success': true, 'str_LOGIN': 'admin', 'str_FIRST_NAME': 'Test'}), 200, headers: {'set-cookie': 'JSESSIONID=abc; Path=/'});
+        return http.Response(
+            json.encode({
+              'success': true,
+              'str_LOGIN': 'admin',
+              'str_FIRST_NAME': 'Test',
+              if (routesRecentes) 'role': {'code': 'PHARMACIEN', 'libelle': 'Pharmacien'},
+              if (routesRecentes) 'droits': {'creerInventaire': true},
+            }),
+            200,
+            headers: {'set-cookie': 'JSESSIONID=abc; Path=/'});
     }
     return http.Response('', 404);
   }

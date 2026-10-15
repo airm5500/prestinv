@@ -23,7 +23,13 @@ enum AccesCreation {
 }
 
 /// [adminOuPharmacien] : null si le serveur n'a pas donné le profil.
-AccesCreation accesCreation({required bool? adminOuPharmacien, required bool autresComptesAutorises}) {
+///
+/// 4.15 — [droitServeur] : droit « Créer un inventaire » donné par le serveur à la connexion
+/// (`droits.creerInventaire`, privilège P_CREER_INVENTAIRE, demande 10). Quand il est connu, c'est LUI
+/// qui décide (le serveur refuserait de toute façon la création, 403) : vrai → création directe ;
+/// faux → refusée, quel que soit le réglage du terminal. Inconnu (serveur ancien) : règles de la 4.13.
+AccesCreation accesCreation({required bool? adminOuPharmacien, required bool autresComptesAutorises, bool? droitServeur}) {
+  if (droitServeur != null) return droitServeur ? AccesCreation.autorise : AccesCreation.refuse;
   if (adminOuPharmacien == true || autresComptesAutorises) return AccesCreation.autorise;
   if (adminOuPharmacien == null) return AccesCreation.codeAdmin;
   return AccesCreation.refuse;

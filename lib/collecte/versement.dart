@@ -13,6 +13,13 @@
 //    une reprise après coupure renvoie la même valeur (aucun doublon, même en « Ajouter »).
 // 3. Envoi par la file persistante des saisies (écrite sur disque avant l'envoi, envoi idempotent,
 //    reprise automatique), par la route qui enregistre l'auteur (POST /inventaire/ligne/quantite).
+// 3 bis. 4.15 (demande 37) — serveur récent et aucune saisie de cet inventaire en attente sur l'appareil :
+//    les lignes sont d'abord versées EN LOT (`POST /inventaire/{id}/versement`, 200 lignes par requête,
+//    clé anti-doublon gardée AVANT l'envoi : une reprise après coupure renvoie la même clé et le même
+//    contenu, le serveur ne compte jamais deux fois). « Ajouter » est fait par le serveur en une
+//    instruction (deux terminaux en même temps : somme exacte). Les codes que le serveur ne reconnaît pas
+//    (inconnu, ambigu) repassent par les étapes 1 à 3 ci-dessus (formes du code, recherche) ; route
+//    absente ou refusée avant tout enregistrement : étapes 1 à 3 pour tout.
 // 4. Rapport : versés, déjà comptés (remplacés / ajoutés), codes non reconnus (code, quantité, raison),
 //    erreurs. Une ligne de la collecte n'est marquée « versée » qu'une fois confirmée par le serveur ;
 //    les lignes en erreur restent à reverser. Annulation sûre : ce qui est envoyé reste envoyé, le reste
@@ -140,6 +147,13 @@ class Versement {
   String? interruption;
   final List<LigneVersement> lignes;
 
+  /// 4.15 — Lot envoyé au serveur dont la réponse n'est pas (encore) arrivée : {cle, idx:[rang des
+  /// lignes], codes:[…], q:[…]}. Renvoyé TEL QUEL à la reprise (même clé, même contenu).
+  Map<String, dynamic>? lotEnCours;
+
+  /// Lots déjà envoyés (numérote les clés).
+  int lots;
+
   Versement({
     required this.id,
     required this.inventaireId,
@@ -150,6 +164,8 @@ class Versement {
     this.statut = StatutVersement.enCours,
     this.interruption,
     required this.lignes,
+    this.lotEnCours,
+    this.lots = 0,
   });
 
   Iterable<LigneVersement> _en(EtatLigneVersement e) => lignes.where((l) => l.etat == e);
@@ -165,8 +181,8 @@ class Versement {
   /// Lignes à (re)traiter : pas encore versées, en erreur.
   List<LigneVersement> get aReprendre => lignes.where((l) => l.etat == EtatLigneVersement.aVerser || l.etat == EtatLigneVersement.erreur).toList();
 
-  /// Tout ce qui pouvait être versé l'a été (aucune ligne à verser ni en erreur).
-  bool get complet => aReprendre.isEmpty;
+  /// Tout ce qui pouvait être versé l'a été (aucune ligne à verser ni en erreur, aucun lot sans réponse).
+  bool get complet => aReprendre.isEmpty && lotEnCours == null;
 
   int get total => lignes.where((l) => l.etat != EtatLigneVersement.regroupee).length;
 
@@ -180,6 +196,8 @@ class Versement {
         'statut': statut.name,
         'interruption': interruption,
         'lignes': lignes.map((l) => l.toJson()).toList(),
+        if (lotEnCours != null) 'lot': lotEnCours,
+        'lots': lots,
       };
 
   factory Versement.fromJson(Map<String, dynamic> j) => Versement(
@@ -192,6 +210,8 @@ class Versement {
         statut: StatutVersement.values.where((s) => s.name == j['statut']).firstOrNull ?? StatutVersement.interrompu,
         interruption: j['interruption'] as String?,
         lignes: [for (final l in (j['lignes'] as List? ?? const [])) LigneVersement.fromJson(Map<String, dynamic>.from(l as Map))],
+        lotEnCours: j['lot'] is Map ? Map<String, dynamic>.from(j['lot'] as Map) : null,
+        lots: (j['lots'] as num?)?.toInt() ?? 0,
       );
 
   /// Prépare un versement des lignes NON versées de la collecte (regroupées par code).
@@ -351,8 +371,24 @@ class MoteurVersement {
       return _interrompre(v, 'Lignes de l\'inventaire non lues : ${e.message}');
     }
 
+    // 1 bis. Versement en lot (serveur récent), ou reprise d'un lot resté sans réponse.
+    // Lignes déjà versées de ce versement, par ligne d'inventaire : un AUTRE code du même produit s'y ajoute.
+    final verseesLot = <int, LigneVersement>{
+      for (final l in v.lignes)
+        if (l.etat == EtatLigneVersement.versee && l.ligneId != null) l.ligneId!: l,
+    };
+    // Lignes refusées par le serveur pendant le lot : pas renvoyées une seconde fois dans ce passage.
+    final refuseesLot = <LigneVersement>{};
+    if (v.lotEnCours != null || (api.versementLotPossible && queue.estAJour(v.inventaireId))) {
+      final arret = await _verserEnLots(v, parId, verseesLot, refuseesLot, (f, etape) {
+        fait = f;
+        avancer(etape);
+      });
+      if (arret != null) return arret;
+    }
+
     // 2. Correspondance de chaque code (sans rien envoyer).
-    for (final l in aTraiter) {
+    for (final l in v.aReprendre.where((l) => !refuseesLot.contains(l))) {
       if (_annule) return _interrompre(v, 'Versement annulé : le reste est à reprendre.');
       if (l.ligneId != null) continue; // déjà trouvée (reprise)
       avancer('Recherche du code ${CodeScan.affichage(l.code)}…');
@@ -396,7 +432,7 @@ class MoteurVersement {
     await enregistrer(v);
 
     // 3. Envoi (quantité TOTALE, par la file persistante).
-    final aEnvoyer = v.aReprendre.where((l) => l.ligneId != null).toList();
+    final aEnvoyer = v.aReprendre.where((l) => l.ligneId != null && !refuseesLot.contains(l)).toList();
     fait = total - aEnvoyer.length;
     for (final l in aEnvoyer) {
       if (_annule) return _interrompre(v, 'Versement annulé : ce qui est envoyé reste envoyé, le reste est à reprendre.');
@@ -408,18 +444,27 @@ class MoteurVersement {
       if (l.quantiteCible == null) {
         final p = parId[ligneId];
         int? existante;
-        if (locale != null && locale.enAttente) {
+        final parLot = verseesLot[ligneId];
+        if (parLot != null && !identical(parLot, l)) {
+          // Même produit déjà versé EN LOT dans ce versement (autre forme du code) : on s'y ajoute.
+          l
+            ..quantiteExistante = parLot.quantiteCible
+            ..quantiteCible = (parLot.quantiteCible ?? 0) + l.quantiteCollectee;
+          await enregistrer(v);
+        } else if (locale != null && locale.enAttente) {
           existante = locale.quantite; // saisie encore sur l'appareil : plus récente que le serveur
         } else if (p != null && p.dtUpdated != null) {
           existante = p.quantiteSaisie;
         } else if (locale != null && locale.envoyee) {
           existante = locale.quantite;
         }
-        final cible = v.mode == ModeDejaCompte.ajouter ? (existante ?? 0) + l.quantiteCollectee : l.quantiteCollectee;
-        l
-          ..quantiteExistante = existante
-          ..quantiteCible = cible;
-        await enregistrer(v);
+        if (l.quantiteCible == null) {
+          final cible = v.mode == ModeDejaCompte.ajouter ? (existante ?? 0) + l.quantiteCollectee : l.quantiteCollectee;
+          l
+            ..quantiteExistante = existante
+            ..quantiteCible = cible;
+          await enregistrer(v);
+        }
       }
       final cible = l.quantiteCible!;
       if (cible > SaisieInput.maxQuantite) {
@@ -481,6 +526,150 @@ class MoteurVersement {
       ..fin = _horloge();
     await enregistrer(v);
     return v;
+  }
+
+  /// Étape 1 bis : lots de [ApiService.versementParLot] lignes. Renvoie le versement interrompu, ou null
+  /// pour continuer par l'ancien chemin (lignes non reconnues par le serveur, route absente…).
+  Future<Versement?> _verserEnLots(Versement v, Map<int, Product> parId, Map<int, LigneVersement> verseesLot, Set<LigneVersement> refusees,
+      void Function(int fait, String etape) avancer) async {
+    final total = v.aReprendre.length;
+    // Lignes jamais traitées par l'ancien chemin (sans ligne trouvée ni quantité calculée).
+    final dejaEssayees = <LigneVersement>{};
+    while (true) {
+      if (_annule) return _interrompre(v, 'Versement annulé : ce qui est envoyé reste envoyé, le reste est à reprendre.');
+      var lot = v.lotEnCours;
+      final reprise = lot != null;
+      if (lot == null) {
+        final candidates = [
+          for (var i = 0; i < v.lignes.length; i++)
+            if (v.lignes[i].etat == EtatLigneVersement.aVerser &&
+                v.lignes[i].ligneId == null &&
+                v.lignes[i].quantiteCible == null &&
+                v.lignes[i].quantiteCollectee <= SaisieInput.maxQuantite &&
+                !dejaEssayees.contains(v.lignes[i]))
+              i
+        ].take(ApiService.versementParLot).toList();
+        if (candidates.isEmpty) return null;
+        lot = {
+          'cle': '${v.id}-L${v.lots + 1}',
+          'idx': candidates,
+          'codes': [for (final i in candidates) CodeScan.candidats(v.lignes[i].code).firstOrNull ?? v.lignes[i].code],
+          'q': [for (final i in candidates) v.lignes[i].quantiteCollectee],
+        };
+        // Clé et contenu gardés AVANT l'envoi : une coupure pendant l'envoi est reprise à l'identique.
+        v.lotEnCours = lot;
+        await enregistrer(v);
+      }
+      final idx = [for (final e in lot['idx'] as List) (e as num).toInt()];
+      final codes = [for (final e in lot['codes'] as List) '$e'];
+      final qs = [for (final e in lot['q'] as List) (e as num).toInt()];
+      if (idx.length != codes.length || idx.length != qs.length || idx.any((i) => i < 0 || i >= v.lignes.length)) {
+        // Lot illisible (ne devrait jamais arriver) : abandonné sans rien supposer.
+        v.lotEnCours = null;
+        await enregistrer(v);
+        return _interrompre(v, 'Versement à vérifier dans Prestige (lot illisible sur l\'appareil).');
+      }
+      avancer(total - v.aReprendre.length, 'Versement en lot (${idx.length} produit(s))…');
+      final r = await api.verserLot(v.inventaireId,
+          cle: '${lot['cle']}', ajouter: v.mode == ModeDejaCompte.ajouter, lignes: [for (var k = 0; k < idx.length; k++) (codes[k], qs[k])], reprise: reprise);
+      switch (r.issue) {
+        case IssueVersementLot.routeAbsente:
+        case IssueVersementLot.nonTraite:
+          // Rien n'a été enregistré : ancien chemin pour tout.
+          v.lotEnCours = null;
+          await enregistrer(v);
+          return null;
+        case IssueVersementLot.session:
+        case IssueVersementLot.reseau:
+        case IssueVersementLot.refuse:
+          // Rien n'a été enregistré (refus avant tout traitement).
+          v.lotEnCours = null;
+          await enregistrer(v);
+          return _interrompre(v, r.issue == IssueVersementLot.session ? 'Session expirée : reconnectez-vous puis reprenez le versement.' : r.message);
+        case IssueVersementLot.incertain:
+          // A PEUT-ÊTRE été enregistré : le lot est gardé, la reprise renverra la même clé.
+          return _interrompre(v, '${r.message} Reprenez le versement : rien ne sera compté deux fois.');
+        case IssueVersementLot.cleReutilisee:
+          for (final i in idx) {
+            v.lignes[i]
+              ..etat = EtatLigneVersement.nonReconnue
+              ..raison = 'versement en lot à vérifier dans Prestige (clé déjà utilisée)';
+          }
+          v.lotEnCours = null;
+          await enregistrer(v);
+          continue;
+        case IssueVersementLot.traite:
+          break;
+      }
+      final traitees = <int>{};
+      for (final rl in r.lignes) {
+        if (rl.index < 0 || rl.index >= idx.length) continue;
+        final l = v.lignes[idx[rl.index]];
+        traitees.add(rl.index);
+        switch (rl.statut) {
+          case 'ok':
+            final id = rl.ligneId;
+            if (id == null) break;
+            final p = parId[id];
+            final existante = p != null && p.dtUpdated != null ? p.quantiteSaisie : null;
+            final premiere = verseesLot[id];
+            if (premiere != null && v.mode == ModeDejaCompte.remplacer) {
+              // Deux codes du même produit dans le lot : le second a REMPLACÉ le premier → total renvoyé
+              // (somme des deux) par l'ancien chemin.
+              premiere
+                ..quantiteCollectee += l.quantiteCollectee
+                ..codes.addAll(l.codes.where((c) => !premiere.codes.contains(c)))
+                ..quantiteCible = premiere.quantiteCollectee
+                ..etat = EtatLigneVersement.aVerser;
+              l
+                ..ligneId = id
+                ..etat = EtatLigneVersement.regroupee
+                ..raison = 'regroupée avec ${CodeScan.affichage(premiere.code)} (même produit)';
+              break;
+            }
+            if (premiere != null) {
+              // « Ajouter » : le serveur a déjà additionné les deux.
+              premiere
+                ..quantiteCollectee += l.quantiteCollectee
+                ..codes.addAll(l.codes.where((c) => !premiere.codes.contains(c)))
+                ..quantiteCible = rl.quantiteFinale ?? premiere.quantiteCible;
+              l
+                ..ligneId = id
+                ..etat = EtatLigneVersement.regroupee
+                ..raison = 'regroupée avec ${CodeScan.affichage(premiere.code)} (même produit)';
+              await surLigneVersee?.call(premiere, v);
+              break;
+            }
+            l
+              ..ligneId = id
+              ..cip = p?.produitCip ?? l.cip
+              ..nom = p?.produitName ?? l.nom
+              ..quantiteExistante = existante
+              ..quantiteCible = rl.quantiteFinale ?? l.quantiteCollectee
+              ..etat = EtatLigneVersement.versee
+              ..raison = null
+              ..verseeLe = _horloge();
+            verseesLot[id] = l;
+            await surLigneVersee?.call(l, v);
+          case 'refuse':
+            l
+              ..etat = EtatLigneVersement.erreur
+              ..raison = rl.motif.isEmpty ? 'refusée par le serveur' : rl.motif;
+            refusees.add(l);
+          default:
+            // inconnu, ambigu : l'ancien chemin essaie les autres formes du code (rien n'a été enregistré).
+            dejaEssayees.add(l);
+        }
+      }
+      // Ligne absente du rapport : rien n'a été enregistré pour elle, l'ancien chemin la reprend.
+      for (var k = 0; k < idx.length; k++) {
+        if (!traitees.contains(k)) dejaEssayees.add(v.lignes[idx[k]]);
+      }
+      v
+        ..lotEnCours = null
+        ..lots = v.lots + 1;
+      await enregistrer(v);
+    }
   }
 
   Future<Versement> _interrompre(Versement v, String raison) async {

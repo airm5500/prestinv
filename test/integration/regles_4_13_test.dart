@@ -87,7 +87,9 @@ void main() {
     ], inventaireId: cree.id, inventaireLibelle: cree.libelle, mode: ModeDejaCompte.remplacer);
     final fini = await MoteurVersement(api: api, queue: q, auteur: CompteFictif.login, enregistrer: (_) async {}).executer(v);
     expect(fini.statut, StatutVersement.termine);
-    expect(serveur.catalogue.produit(1).saisi, 12);
+    // Le nouvel inventaire a ses propres lignes (comme sur le serveur) : la quantité y est posée.
+    expect(serveur.catalogue.crees[cree.id]!.lignes.firstWhere((l) => l.cip == '3400930000001').saisi, 12);
+    expect(serveur.catalogue.produit(1).saisi, 24, reason: 'l\'inventaire INV1 n\'est pas touché');
     expect(fini.nonReconnues.single.code, '9999999999999', reason: 'rapport des codes non reconnus');
     expect(serveur.recues('ligne/quantite', methode: 'POST').every((p) => p.cookie == auth.sessionCookie), isTrue);
   });

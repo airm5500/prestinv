@@ -13,6 +13,10 @@ class AppUser {
   /// null : serveur qui ne l'envoie pas (profil inconnu).
   final String? typeAccueil;
 
+  /// 4.15 — Droit de CRÉER un inventaire donné par le serveur (`droits.creerInventaire` de la réponse de
+  /// connexion, privilège P_CREER_INVENTAIRE, demande 10). null : serveur qui ne l'envoie pas (ancien).
+  final bool? droitCreation;
+
   AppUser({
     required this.id,
     required this.login,
@@ -20,6 +24,7 @@ class AppUser {
     required this.lastName,
     required this.officine,
     this.typeAccueil,
+    this.droitCreation,
   });
 
   /// Administrateur ou pharmacien ? null : le serveur ne l'a pas dit (voir [typeAccueil]).
@@ -43,6 +48,7 @@ class AppUser {
       lastName: json['str_LAST_NAME'] ?? '',
       officine: json['OFFICINE'] ?? '',
       typeAccueil: json['xtypeuser'] is String ? json['xtypeuser'] as String : null,
+      droitCreation: json['droits'] is Map && (json['droits'] as Map)['creerInventaire'] is bool ? (json['droits'] as Map)['creerInventaire'] as bool : null,
     );
   }
 }

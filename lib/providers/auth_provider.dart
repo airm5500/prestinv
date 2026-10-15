@@ -32,8 +32,15 @@ class AuthProvider with ChangeNotifier {
   /// Tests : session ouverte sans appel réseau.
   @visibleForTesting
   void connecterPourTest(
-      {String login = 'test', String cookie = 'JSESSIONID=test', String? prenom, String nom = '', String officine = '', String? typeAccueil = 'dashboard'}) {
-    _user = AppUser(id: login, login: login, firstName: prenom ?? login, lastName: nom, officine: officine, typeAccueil: typeAccueil);
+      {String login = 'test',
+      String cookie = 'JSESSIONID=test',
+      String? prenom,
+      String nom = '',
+      String officine = '',
+      String? typeAccueil = 'dashboard',
+      bool? droitCreation}) {
+    _user = AppUser(
+        id: login, login: login, firstName: prenom ?? login, lastName: nom, officine: officine, typeAccueil: typeAccueil, droitCreation: droitCreation);
     _sessionCookie = cookie;
     _isLoggedIn = true;
     notifyListeners();
@@ -65,6 +72,8 @@ class AuthProvider with ChangeNotifier {
         if (responseData['success'] == true) {
           _user = AppUser.fromJson(responseData);
           _isLoggedIn = true;
+          // 4.15 : serveur à jour (réponse avec `role` / `droits`, demande 10) → routes récentes essayées.
+          ApiService.noterServeur(appConfig.currentApiUrl, recent: responseData['droits'] is Map || responseData['role'] is Map);
           _parseAndSetCookie(response);
 
           // « Rester connecté » : identifiant dans les préférences, mot de passe dans le stockage

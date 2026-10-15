@@ -8,9 +8,12 @@
 //   est refusé (proposé à l'ouverture) ; si la réponse du serveur se perd (réseau, délai), la liste des
 //   inventaires ouverts est relue avant toute nouvelle tentative : l'inventaire n'est jamais créé deux fois
 //   par un double appui ou une nouvelle tentative.
-// - Le serveur ne renvoie pas l'identifiant du nouvel inventaire : il est retrouvé dans la liste des
-//   inventaires ouverts (le plus récent portant ce libellé).
+// - Identifiant du nouvel inventaire : `lgInventaireId` de la réponse (serveurs récents, demande 20) ;
+//   sinon il est retrouvé dans la liste des inventaires ouverts (le plus récent portant ce libellé).
+// - 4.15, DEPUIS LA COLLECTE ([CreationInventaire.creerDepuisCollecte]) : l'inventaire ne contient que les
+//   produits collectés, sur leurs emplacements (voir lib/inventaire/produits_collecte.dart).
 import 'package:prestinv/api/api_service.dart';
+import 'package:prestinv/inventaire/produits_collecte.dart';
 import 'package:prestinv/models/inventory.dart';
 
 /// Types acceptés par le serveur (str_TYPE_TRANSACTION). Sans valeurs choisies, les trois donnent le
@@ -76,6 +79,10 @@ enum IssueCreation {
 
   /// Pas de réponse après l'envoi, et l'inventaire n'apparaît pas (encore) : à vérifier avant de réessayer.
   incertaine,
+
+  /// 4.15 — Depuis la collecte : inventaire créé, mais les produits collectés n'y sont pas encore retenus
+  /// (réseau, session) : [CreationInventaire.retenir] à refaire (sans rien recréer).
+  produitsNonAjoutes,
 }
 
 class ResultatCreation {
@@ -83,7 +90,11 @@ class ResultatCreation {
   final Inventory? inventaire;
   final int? lignes;
   final String message;
-  const ResultatCreation(this.issue, {this.inventaire, this.lignes, this.message = ''});
+
+  /// 4.15 — Depuis la collecte : lignes retenues (produits collectés mis dans l'inventaire) ; null :
+  /// serveur qui ne sait pas retenir (l'inventaire contient tous les produits de ces emplacements).
+  final int? retenus;
+  const ResultatCreation(this.issue, {this.inventaire, this.lignes, this.message = '', this.retenus});
 
   bool get ok => issue == IssueCreation.creee;
 }
@@ -103,53 +114,134 @@ class CreationInventaire {
     return null;
   }
 
-  /// [valeurs] : identifiants choisis sur l'axe du type (4.14.1, création depuis la collecte : le seul
-  /// emplacement des produits collectés). Absent : tous les produits actifs.
-  Future<ResultatCreation> creer(String libelleSaisi, TypeInventaire type, {List<String>? valeurs}) async {
+  /// [valeurs] : identifiants choisis sur l'axe du type (pour « Emplacement » : les rayons). Absent :
+  /// tous les produits actifs. [nonRetenues] : lignes créées non retenues (voir [creerDepuisCollecte]).
+  Future<ResultatCreation> creer(String libelleSaisi, TypeInventaire type, {List<String>? valeurs, bool nonRetenues = false}) async {
     final erreur = LibelleInventaire.erreur(libelleSaisi);
     if (erreur != null) return ResultatCreation(IssueCreation.libelleInvalide, message: erreur);
     if (_enCours) return const ResultatCreation(IssueCreation.dejaEnCours, message: 'Création déjà en cours : patientez.');
     _enCours = true;
-    final libelle = LibelleInventaire.normaliser(libelleSaisi);
     try {
-      // 1. Doublon parmi les inventaires ouverts (et serveur joignable avant d'envoyer quoi que ce soit).
-      final List<Inventory> avant;
+      return await _creer(LibelleInventaire.normaliser(libelleSaisi), type, valeurs: valeurs, nonRetenues: nonRetenues);
+    } finally {
+      _enCours = false;
+    }
+  }
+
+  Future<ResultatCreation> _creer(String libelle, TypeInventaire type, {List<String>? valeurs, bool nonRetenues = false}) async {
+    // 1. Doublon parmi les inventaires ouverts (et serveur joignable avant d'envoyer quoi que ce soit).
+    final List<Inventory> avant;
+    try {
+      avant = await api.fetchTousInventairesOuverts();
+    } on ApiLoadException catch (e) {
+      return ResultatCreation(e.sessionExpiree ? IssueCreation.session : IssueCreation.reseau, message: e.message);
+    }
+    final existant = _trouver(avant, libelle);
+    if (existant != null) {
+      return ResultatCreation(IssueCreation.doublon,
+          inventaire: existant, message: 'Un inventaire ouvert s\'appelle déjà « ${existant.libelle} ».');
+    }
+
+    // 2. Création.
+    final r = await api.creerInventaire(libelle, type.valeur, valeurs: valeurs, nonRetenues: nonRetenues);
+    if (r.session) return ResultatCreation(IssueCreation.session, message: r.message);
+    if (!r.succes && !r.incertain) return ResultatCreation(IssueCreation.refus, message: r.message);
+    // Identifiant donné par le serveur (demande 20) : pas besoin de relire la liste.
+    if (r.succes && r.inventaireId != null) {
+      return ResultatCreation(IssueCreation.creee, inventaire: Inventory(id: r.inventaireId!, libelle: libelle), lignes: r.lignes);
+    }
+
+    // 3. Identifiant : relu dans la liste (aussi quand la réponse s'est perdue).
+    List<Inventory> apres;
+    try {
+      apres = await api.fetchTousInventairesOuverts();
+    } on ApiLoadException catch (e) {
+      return ResultatCreation(r.succes ? IssueCreation.creee : IssueCreation.incertaine,
+          lignes: r.lignes,
+          message: r.succes
+              ? 'Inventaire créé ; liste non relue (${e.message}).'
+              : 'Pas de réponse du serveur (${r.message}). Vérifiez la liste des inventaires avant de réessayer.');
+    }
+    final cree = _trouver(apres, libelle);
+    if (cree != null) return ResultatCreation(IssueCreation.creee, inventaire: cree, lignes: r.lignes);
+    if (r.succes) {
+      return ResultatCreation(IssueCreation.creee, lignes: r.lignes, message: 'Inventaire créé mais absent de la liste des inventaires ouverts.');
+    }
+    return ResultatCreation(IssueCreation.incertaine,
+        message: 'Pas de réponse du serveur (${r.message}) et l\'inventaire n\'apparaît pas. Vérifiez la liste avant de réessayer.');
+  }
+
+  /// 4.15 — Inventaire des PRODUITS COLLECTÉS ([analyse]), comme Prestige le fait (inventaire « unitaire »
+  /// puis « Ajouter des articles ») :
+  ///  1. le serveur sait-il retenir des lignes (`POST /inventaire/lignes/retenue`) ? (essai sans effet ;
+  ///     inutile sur un serveur reconnu récent) ;
+  ///  2. création sur les EMPLACEMENTS des produits collectés (type Emplacement, `valeurs` = ces
+  ///     emplacements), lignes NON retenues (`bool_INVENTAIRE = 0`) : à l'ouverture, l'inventaire ne
+  ///     propose que ces emplacements ;
+  ///  3. seules les lignes des produits collectés sont retenues ([retenir]) : la saisie, les écarts et la
+  ///     clôture ne voient qu'elles.
+  /// Serveur qui ne sait pas retenir : l'inventaire contient TOUS les produits de ces emplacements
+  /// ([ResultatCreation.retenus] null) — jamais tous les emplacements de l'officine.
+  Future<ResultatCreation> creerDepuisCollecte(String libelleSaisi, AnalyseCollecte analyse) async {
+    final erreur = LibelleInventaire.erreur(libelleSaisi);
+    if (erreur != null) return ResultatCreation(IssueCreation.libelleInvalide, message: erreur);
+    if (!analyse.creationPossible) {
+      return const ResultatCreation(IssueCreation.refus, message: 'Aucun produit de la collecte n\'a été retrouvé sur le serveur : rien à créer.');
+    }
+    if (_enCours) return const ResultatCreation(IssueCreation.dejaEnCours, message: 'Création déjà en cours : patientez.');
+    _enCours = true;
+    try {
+      final bool retenue;
       try {
-        avant = await api.fetchTousInventairesOuverts();
+        retenue = await api.routeRetenueDisponible();
       } on ApiLoadException catch (e) {
         return ResultatCreation(e.sessionExpiree ? IssueCreation.session : IssueCreation.reseau, message: e.message);
       }
-      final existant = _trouver(avant, libelle);
-      if (existant != null) {
-        return ResultatCreation(IssueCreation.doublon,
-            inventaire: existant, message: 'Un inventaire ouvert s\'appelle déjà « ${existant.libelle} ».');
-      }
-
-      // 2. Création.
-      final r = await api.creerInventaire(libelle, type.valeur, valeurs: valeurs);
-      if (r.session) return ResultatCreation(IssueCreation.session, message: r.message);
-      if (!r.succes && !r.incertain) return ResultatCreation(IssueCreation.refus, message: r.message);
-
-      // 3. Identifiant : relu dans la liste (aussi quand la réponse s'est perdue).
-      List<Inventory> apres;
-      try {
-        apres = await api.fetchTousInventairesOuverts();
-      } on ApiLoadException catch (e) {
-        return ResultatCreation(r.succes ? IssueCreation.creee : IssueCreation.incertaine,
+      final r = await _creer(LibelleInventaire.normaliser(libelleSaisi), TypeInventaire.emplacement,
+          valeurs: [for (final e in analyse.emplacements) e.rayon.id], nonRetenues: retenue);
+      if (!r.ok || !retenue) return r;
+      final inv = r.inventaire;
+      if (inv == null || inv.id.isEmpty) {
+        return ResultatCreation(IssueCreation.produitsNonAjoutes,
             lignes: r.lignes,
-            message: r.succes
-                ? 'Inventaire créé ; liste non relue (${e.message}).'
-                : 'Pas de réponse du serveur (${r.message}). Vérifiez la liste des inventaires avant de réessayer.');
+            message: 'Inventaire créé mais introuvable dans la liste : les produits collectés n\'ont pas pu y être ajoutés.');
       }
-      final cree = _trouver(apres, libelle);
-      if (cree != null) return ResultatCreation(IssueCreation.creee, inventaire: cree, lignes: r.lignes);
-      if (r.succes) {
-        return ResultatCreation(IssueCreation.creee, lignes: r.lignes, message: 'Inventaire créé mais absent de la liste des inventaires ouverts.');
-      }
-      return ResultatCreation(IssueCreation.incertaine,
-          message: 'Pas de réponse du serveur (${r.message}) et l\'inventaire n\'apparaît pas. Vérifiez la liste avant de réessayer.');
+      return _retenir(inv, analyse, lignes: r.lignes);
     } finally {
       _enCours = false;
+    }
+  }
+
+  /// Retient (à nouveau) les produits de [analyse] dans [inventaire] : sans rien recréer, idempotent.
+  /// Sert après [IssueCreation.produitsNonAjoutes] (« Réessayer ») et quand un inventaire existant du
+  /// même libellé est choisi depuis la collecte. Serveur qui ne sait pas retenir : rien à faire.
+  Future<ResultatCreation> retenir(Inventory inventaire, AnalyseCollecte analyse) async {
+    if (_enCours) return const ResultatCreation(IssueCreation.dejaEnCours, message: 'Création déjà en cours : patientez.');
+    _enCours = true;
+    try {
+      final bool retenue;
+      try {
+        retenue = await api.routeRetenueDisponible();
+      } on ApiLoadException catch (e) {
+        return ResultatCreation(IssueCreation.produitsNonAjoutes, inventaire: inventaire, message: e.message);
+      }
+      if (!retenue) return ResultatCreation(IssueCreation.creee, inventaire: inventaire);
+      return _retenir(inventaire, analyse);
+    } finally {
+      _enCours = false;
+    }
+  }
+
+  Future<ResultatCreation> _retenir(Inventory inv, AnalyseCollecte analyse, {int? lignes}) async {
+    try {
+      final n = await api.retenirProduits(inv.id, [for (final p in analyse.inclus) p.id]);
+      return ResultatCreation(IssueCreation.creee, inventaire: inv, lignes: lignes, retenus: n);
+    } on ApiLoadException catch (e) {
+      return ResultatCreation(IssueCreation.produitsNonAjoutes,
+          inventaire: inv,
+          lignes: lignes,
+          message: '${e.message}\nL\'inventaire « ${inv.libelle} » est créé mais les produits collectés n\'y sont pas encore : '
+              'touchez « Réessayer » (rien n\'est recréé).');
     }
   }
 }

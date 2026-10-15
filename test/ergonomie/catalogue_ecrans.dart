@@ -8,6 +8,7 @@ import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/screens/a_envoyer_screen.dart';
 import 'package:prestinv/screens/collection_screen.dart';
 import 'package:prestinv/screens/config_screen.dart';
+import 'package:prestinv/screens/creation_inventaire_screen.dart';
 import 'package:prestinv/screens/global_variance_screen.dart';
 import 'package:prestinv/screens/home_screen.dart';
 import 'package:prestinv/screens/inventory_entry_screen.dart';
@@ -111,9 +112,9 @@ final ecransNouvelleInterface = <EcranControle>[
   EcranControle('Collecte', nouvelle: true, construire: () => const NvCollecteScreen()),
   EcranControle('À envoyer', nouvelle: true, construire: () => const NvAEnvoyerScreen()),
   EcranControle('Création d\'inventaire', nouvelle: true, construire: () => const NvCreationInventaireScreen()),
-  // 4.14.1 : depuis la collecte, emplacement des produits collectés présélectionné (deux emplacements trouvés).
+  // 4.15 : depuis la collecte, récapitulatif « N produits, M emplacements » et codes non retrouvés.
   EcranControle('Création d\'inventaire depuis la collecte', nouvelle: true,
-      construire: () => const NvCreationInventaireScreen(libelleInitial: 'Collecte du 15-10-2026 09.30', codesCollectes: ['3400935959001', '3400937000003', '3400930000001'])),
+      construire: () => const NvCreationInventaireScreen(libelleInitial: 'Collecte du 15-10-2026 09.30', codesCollectes: ['3400935959001', '3400937000003', '3400930000001', '3400938000004', '9999999999999'])),
   EcranControle('Réglages', nouvelle: true, construire: () => const NvConfigScreen()),
   // 4.13 (maquette validée) :
   EcranControle('Inventaire choisi', nouvelle: true, construire: () => NvInventaireScreen(inventaire: inventaireEssai), apres: actualiserAvancement),
@@ -207,5 +208,8 @@ final ecransAncienneInterface = <EcranControle>[
   EcranControle('Restants (origine)', nouvelle: false, construire: () => UncountedScreen(inventoryId: 'INV1', inventoryName: inventaireEssai.libelle), exemptions: _contrasteOrigine),
   EcranControle('Collecte (origine)', nouvelle: false, construire: () => const CollectionScreen(), exemptions: _contrasteOrigine),
   EcranControle('À envoyer (origine)', nouvelle: false, construire: () => const AEnvoyerScreen()),
+  // 4.15 : création depuis la collecte (« Verser la collecte » › « Nouvel inventaire… ») : récapitulatif.
+  EcranControle('Création d\'inventaire depuis la collecte (origine)', nouvelle: false,
+      construire: () => const CreationInventaireScreen(libelleInitial: 'Collecte du 15-10-2026 09.30', codesCollectes: ['3400935959001', '3400937000003', '3400930000001', '3400938000004', '9999999999999'])),
   EcranControle('Configuration (origine)', nouvelle: false, construire: () => const ConfigScreen(), exemptions: _contrasteOrigine),
 ];
