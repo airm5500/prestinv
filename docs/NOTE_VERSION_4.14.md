@@ -1,6 +1,79 @@
-# Prestige Inventaire 4.14.0 — Note de version
+# Prestige Inventaire 4.14 — Note de version
 
 *Pour le pharmacien et l'équipe qui compte.*
+
+# 4.14.1 (code 12) — Retours de test du pharmacien
+
+Elle s'installe par-dessus la 4.14.0 sans désinstaller ; rien n'est perdu (réglages, saisies en attente,
+collecte, rapports).
+
+## 1. Saisie guidée : bouton d'envoi plus discret
+
+En envoi manuel, l'icône d'envoi à droite du nuage n'est plus un **carré orange** : c'est une **icône
+seule** (avion en papier « envoyer »), **orange**, sans fond ni contour, comme le nuage voisin. La
+**pastille rouge** indique toujours le nombre de saisies non envoyées ; la zone à toucher reste de
+**48 × 48 dp** ; le toucher envoie comme avant.
+
+## 2. « Créer un inventaire » depuis la collecte : un seul emplacement
+
+**Problème constaté** : un produit scanné en collecte, puis « Créer un inventaire avec ces produits » →
+l'inventaire contenait **tous les emplacements** de l'officine.
+
+**Cause** : l'application demandait la création au serveur (`POST /inventaire/creation`) avec le libellé
+et le type seulement, **sans préciser d'emplacement** ; dans ce cas le serveur met tous les produits
+actifs de l'officine.
+
+**Correction** : depuis la collecte (bouton « Créer un inventaire avec ces produits », ou « Nouvel
+inventaire… » de l'écran de versement), l'écran de création ne propose plus le type mais
+l'**emplacement** :
+
+- l'application recherche l'emplacement des produits collectés et **présélectionne le plus fréquent**
+  (« ANTIBIOTIQUES — 2 produit(s) de la collecte ») ;
+- les autres emplacements trouvés sont proposés juste en dessous (un toucher pour changer) ;
+  **« Autre emplacement… »** ouvre la liste de tous les emplacements de l'officine, avec recherche ;
+- le bandeau rappelle ce qui sera créé (« Seulement « ANTIBIOTIQUES » ») et combien de produits de la
+  collecte sont rangés ailleurs (ils seront signalés « non reconnus » au versement, comme avant) ;
+- le serveur ne reçoit que **cet emplacement** : l'inventaire contient ses produits actifs, puis la
+  collecte y est versée et le rapport s'affiche ;
+- sans emplacement choisi (produits introuvables, serveur injoignable), « Créer l'inventaire » reste
+  grisé : message clair et **Réessayer** ; session expirée → « Se reconnecter ».
+
+La création depuis l'accueil est **inchangée** (tous les produits actifs, type au choix).
+
+**Limite actuelle du serveur** : il ne sait pas encore créer un inventaire limité à une **liste de
+produits** ; l'inventaire contient donc tout l'emplacement choisi. La demande est décrite pour l'équipe
+serveur (`docs/DEMANDE_SERVEUR_COMPTAGE.md`, section H) ; l'application l'utilisera dès qu'elle existera.
+
+## 3. Scan par l'appareil photo : plus de formats de codes-barres
+
+Un « simple code-barre » (étiquette interne, certains fournisseurs) n'était pas lu alors que l'EAN
+l'était. Formats lus désormais : **EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, Code 93, ITF
+(2 parmi 5 entrelacé), Codabar, DataMatrix, QR**.
+
+Le code lu est remis en forme avant la recherche (puis suit le même chemin que la douchette) :
+UPC-A et **UPC-E → EAN-13** ; astérisques de début et de fin du Code 39 et lettres de début et de fin
+(A à D) du Codabar retirées ; caractères de contrôle et espaces retirés (le séparateur des DataMatrix
+GS1 est conservé). L'aperçu affiche un conseil : **« Approchez le code, bien éclairé »** (avec la place
+de la lampe torche quand le téléphone en a une).
+
+## Tests ajoutés (4.14.1)
+
+- `test/integration/creation_collecte_test.dart` (vrai HTTP) : paramètres reçus par le serveur —
+  création classique sans `valeurs`, création depuis la collecte avec `valeurs = [emplacement]` ;
+  emplacement d'un produit, liste des emplacements, regroupement et présélection, 40 codes au plus ;
+  session expirée, 500, coupure, refus lisible.
+- `test/nv_retours_4_14_1_test.dart` : icône d'envoi sans fond ni contour (48 dp, pastille) ;
+  présélection, changement d'emplacement (trouvé ou « Autre emplacement… » avec recherche), création
+  impossible sans emplacement, panne puis Réessayer, création classique inchangée.
+- `test/e2e/parcours_4_13_test.dart` : collecte → création → un seul emplacement reçu par le serveur.
+- `test/unitaires/scan_camera_test.dart` : formats, UPC-E → EAN-13 (quatre règles, clé), délimiteurs,
+  caractères de contrôle, mêmes candidats que la douchette ; `test/scan_camera_test.dart` : conseil affiché.
+- Ergonomie : « Création d'inventaire depuis la collecte » ajoutée au catalogue (4 appareils × 2 échelles
+  × 3 tailles).
+
+---
+
+# 4.14.0 (code 11)
 
 Version : **4.14.0** (code 11). Elle s'installe par-dessus la 4.13.1 sans désinstaller. Rien n'est
 perdu : réglages, saisies en attente, collecte et rapports sont repris tels quels.
