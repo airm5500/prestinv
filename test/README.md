@@ -124,23 +124,24 @@ peinture) ; défilement par pas de 120 dp (doigt rapide, ≈ 7 000 dp/s à 60 im
 (code compilé à la volée) puis un 2e passage mesuré contre le budget. CI : `flutter test -j 1` (un fichier à la
 fois).
 
-| Mesure | Seuil | Mesuré (PC Linux de dév., chargé) | Mesuré (CI GitHub) |
+| Mesure | Seuil | Mesuré sur la CI GitHub (ubuntu-latest, `-j 1`) | Marge |
 |---|---:|---:|---:|
-| Démarrage → connexion, à froid (nouvelle interface) | 2 500 ms | 1 730 ms | CI_DEM |
-| Démarrage → connexion — images rendues / requêtes | 30 / 1 | 3 / 1 | 3 / 1 |
-| Ouverture d'un écran sur longue liste, à froid | 3 000 ms | 190–1 380 ms | CI_OUV |
-| Pire image d'un 1er défilement (à froid) | 400 ms | 14–95 ms | CI_FROID |
-| Pire image d'un défilement (2e passage) | 64 ms | 15–36 ms | CI_DEF |
-| Image courante (p90) d'un défilement | 32 ms | 4–17 ms | CI_P90 |
-| Pire image « Suivant » (saisie guidée, écran entier) / p90 | 120 / 64 ms | 56–96 / 36–69 ms | CI_SUIV |
-| File de 5 000 saisies : enregistrement / envoi, par saisie | 10 / 10 ms | 2,0–2,6 / 1,7–2,3 ms | CI_FILE |
-| File de 5 000 saisies : relecture | 3 000 ms | 230 ms | CI_REL |
-| Normalisation de 10 000 codes | 2 500 ms | 210–280 ms | CI_NORM |
-| Requêtes : démarrage / connexion + accueil (nouvelle ; ancienne) | 1 / 2 ; 1 | 1 / 2 ; 1 | idem |
-| Requêtes : déroulé de la liste | inventaires × (1 + 2 × emplacements) = 14 | 14 | idem |
-| Requêtes : ouverture d'un inventaire (avancement connu) / choix de l'emplacement / saisie guidée | 0 / 1 + 2 × emplacements = 7 / 1 | 0 / 7 / 1 | idem |
-| Requêtes : saisie de 50 quantités (Collecte) / envoi des 50 | 0 / 50 + 1 | 0 / 51 | idem |
-| Requêtes : recherche par nom tapée vite (7 lettres, 120 ms entre deux) | 1 | 1 | idem |
+| Démarrage → connexion, à froid (nouvelle interface ; ancienne) | 2 500 ms | 813 ms ; 95 ms | ×3,1 |
+| Démarrage → connexion — images rendues / requêtes | 10 / 1 | 3 / 1 | ×3,3 / — |
+| Accueil : 200 inventaires, ouverture + déroulé (avancement de chacun) | 6 000 ms | 2 075 ms | ×2,9 |
+| Ouverture d'un écran sur longue liste, à froid (saisie guidée 2 000, écarts 2 000, collecte 1 000, analyse 50) | 1 500 ms | 91–421 ms | ×3,6 |
+| Pire image d'un 1er défilement (à froid) | 200 ms | 6–59 ms | ×3,4 |
+| Pire image d'un défilement (2e passage) — aucune image au-dessus | 64 ms | 5–24 ms | ×2,7 |
+| Image courante (p90) d'un défilement | 16 ms | 1,9–4,7 ms | ×3,4 |
+| « Suivant » de la saisie guidée (écran entier) : pire image / p90 | 50 / 40 ms | 16,9 / 13,5 ms | ×3 |
+| File de 5 000 saisies (vrai fichier) : enregistrement / envoi, par saisie | 5 / 5 ms | 1,3 / 1,3 ms | ×3,8 |
+| File de 5 000 saisies : relecture au redémarrage | 500 ms | 113 ms | ×4,4 |
+| Normalisation de 10 000 codes scannés | 500 ms | 107 ms | ×4,7 |
+| Requêtes : démarrage / connexion + accueil (nouvelle ; ancienne) | 1 / 2 ; 1 | 1 / 2 ; 1 | aucune |
+| Requêtes : déroulé de la liste | inventaires × (1 + 2 × emplacements) = 14 | 14 | aucune |
+| Requêtes : ouverture d'un inventaire (avancement connu) / choix de l'emplacement / saisie guidée | 0 / 1 + 2 × emplacements = 7 / 1 | 0 / 7 / 1 | aucune |
+| Requêtes : saisie de 50 quantités (Collecte) / envoi des 50 | 0 / 50 + 1 | 0 / 51 | aucune |
+| Requêtes : recherche par nom tapée vite (7 lettres, 120 ms entre deux) | 1 | 1 | aucune |
 
 Un seuil ne se relève **jamais** pour faire passer un test : seulement après une analyse écrite ici (nouvelle
 fonction plus lourde voulue, machine de CI changée), en gardant une marge d'environ ×2 sur la plus lente des

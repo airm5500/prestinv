@@ -19,9 +19,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../helpers/faux_prestige_http.dart';
 
-/// Seuils de performance et de nombre de requêtes. Calibrés sur la CI GitHub (ubuntu-latest, 4 cœurs)
-/// et sur un PC Linux de développement, avec une marge d'environ ×3 sur le temps mesuré le plus lent
-/// (temps) et une marge nulle sur les requêtes (plafond = nombre attendu par le fonctionnement voulu).
+/// Seuils de performance et de nombre de requêtes. Calibrés sur la CI GitHub (ubuntu-latest, run
+/// 38675865785, `flutter test -j 1`) avec une marge d'environ ×3 sur la mesure la plus lente (temps) et
+/// une marge nulle sur les requêtes (plafond = nombre attendu par le fonctionnement voulu). Sur un PC
+/// chargé (autres tests en parallèle), lancer `flutter test -j 1 test/performance`.
 /// Valeurs mesurées et marge : test/README.md (« Seuils de performance »). Un seuil ne se relève
 /// qu'avec une justification écrite dans le README (jamais pour faire passer un test).
 class Seuils {
@@ -33,7 +34,7 @@ class Seuils {
   static const demarrageMs = 2500;
 
   /// Images rendues pendant ce démarrage (animations d'entrée comprises).
-  static const demarrageImages = 30;
+  static const demarrageImages = 10;
 
   /// Requêtes au démarrage (avant connexion) : la licence seulement.
   static const demarrageRequetes = 1;
@@ -44,33 +45,36 @@ class Seuils {
   static const imageDefilementMs = 64;
 
   /// 90 % des images de défilement en dessous (image « courante »).
-  static const imageCouranteMs = 32;
+  static const imageCouranteMs = 16;
 
   /// Pire image d'un changement de produit (« Suivant » : tout l'écran de saisie reconstruit).
-  static const imageEcranMs = 120;
+  static const imageEcranMs = 50;
 
   /// 90 % des changements de produit en dessous.
-  static const imageEcranCouranteMs = 64;
+  static const imageEcranCouranteMs = 40;
 
   /// Pire image (première apparition d'un écran, à froid, ou défilement d'une très longue liste).
-  static const imageFroideMs = 400;
+  static const imageFroideMs = 200;
 
   /// Ouverture d'un écran sur une longue liste (lecture du faux serveur, tri, première image), à froid.
-  static const ouvertureListeMs = 3000;
+  static const ouvertureListeMs = 1500;
+
+  /// Accueil : 200 inventaires déroulés, avancement de chacun calculé (1 400 réponses du faux serveur lues).
+  static const accueil200Ms = 6000;
 
   // --- Traitement local ---
   /// File d'envoi de 5 000 saisies sur un VRAI fichier : chaque saisie est écrite sur le disque (et
   /// forcée sur le support, `flush`) avant d'être confirmée — durée par saisie enregistrée.
-  static const enregistrementParSaisieMs = 10;
+  static const enregistrementParSaisieMs = 5;
 
   /// Relecture des 5 000 saisies au redémarrage de l'application.
-  static const relecture5000Ms = 3000;
+  static const relecture5000Ms = 500;
 
   /// Envoi des 5 000 saisies à un serveur instantané (une écriture disque par confirmation) — par saisie.
-  static const envoiParSaisieMs = 10;
+  static const envoiParSaisieMs = 5;
 
   /// Normaliser 10 000 codes scannés (appareil photo + recherche : EAN-13, UPC-A/E, Code 39, Codabar, DataMatrix).
-  static const normalisation10000Ms = 2500;
+  static const normalisation10000Ms = 500;
 }
 
 /// Mesure enregistrée (pour le rapport) et comparée à son seuil.

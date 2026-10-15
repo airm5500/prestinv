@@ -54,8 +54,8 @@ Future<double> ouvrir(WidgetTester tester, Banc b, Widget ecran, {int pompes = 0
 
 /// Deux passages de défilement complets sur la plus grande liste : le 1er à froid, le 2e chronométré
 /// image par image contre le budget.
-Future<void> deuxPassages(WidgetTester tester, String nom, {int minPas = 5}) async {
-  final liste = plusGrandeListe(tester);
+Future<void> deuxPassages(WidgetTester tester, String nom, {int minPas = 5, Finder? scrollable}) async {
+  final liste = scrollable ?? plusGrandeListe(tester);
   final froid = ChronoImages();
   final pas1 = await defilerJusquEnBas(tester, liste, froid);
   expect(pas1, greaterThanOrEqualTo(minPas), reason: '$nom : la liste doit être longue (pas de défilement : $pas1)');
@@ -85,7 +85,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
     }
     await tester.pumpAndSettle();
-    mesurer('Accueil, 200 inventaires — ouverture + déroulé', sw.elapsedMicroseconds / 1000, seuil: Seuils.ouvertureListeMs * 2, unite: 'ms');
+    mesurer('Accueil, 200 inventaires — ouverture + déroulé', sw.elapsedMicroseconds / 1000, seuil: Seuils.accueil200Ms, unite: 'ms');
     expect(find.byKey(const ValueKey('nv-ouvrir-INV1')), findsOneWidget);
     await deuxPassages(tester, 'Accueil, 200 inventaires');
     expect(find.byKey(const ValueKey('nv-ouvrir-INV200')), findsOneWidget, reason: 'dernier inventaire atteint');
@@ -110,12 +110,15 @@ void main() {
     mesurer('Saisie guidée, 2 000 produits — pire image « Suivant »', chaud.max, seuil: Seuils.imageEcranMs, unite: 'ms', detail: chaud.resume);
     mesurer('Saisie guidée, 2 000 produits — image courante (p90) « Suivant »', chaud.p90, seuil: Seuils.imageEcranCouranteMs, unite: 'ms');
 
-    // Recherche par nom qui renvoie tout le rayon : liste de 2 000 résultats.
+    // Recherche par nom (mini-clavier « chercher par nom ») qui renvoie tout le rayon : 2 000 résultats.
+    await tester.tap(find.byTooltip('Clavier (chercher par nom)'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('champ-scan')), 'PRODUIT');
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pumpAndSettle();
     expect(find.byType(ListeResultats), findsOneWidget);
-    await deuxPassages(tester, 'Saisie guidée, 2 000 résultats de recherche');
+    await deuxPassages(tester, 'Saisie guidée, 2 000 résultats de recherche',
+        scrollable: find.descendant(of: find.byType(ListeResultats), matching: find.byType(Scrollable)).first);
     await demonter(tester);
   });
 

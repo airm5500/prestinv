@@ -141,6 +141,9 @@ void main() {
     await lancerApplication(tester, serveur: serveur);
     await seConnecter(tester);
     await ouvrirSaisieAntibiotiques(tester);
+    // Mini-clavier « chercher par nom » (sinon le texte est lu comme un code de douchette).
+    await tester.tap(find.byTooltip('Clavier (chercher par nom)'));
+    await tester.pumpAndSettle();
     final recherche = await compter(serveur, () async {
       var texte = '';
       for (final c in 'AMOXICI'.split('')) {
