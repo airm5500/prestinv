@@ -2,6 +2,45 @@
 
 *Pour le pharmacien et l'équipe qui compte.*
 
+# 4.14.2 (code 13) — Tests de livraison : performance et réseau
+
+Elle s'installe par-dessus la 4.14.1 sans désinstaller ; rien n'est perdu (réglages, saisies en attente,
+collecte, rapports). Aucun écran ne change d'aspect ; deux défauts relevés par les nouveaux tests sont
+corrigés.
+
+## 1. Connexion : la liste des inventaires n'est plus lue deux fois
+
+**Constaté par les tests de nombre de requêtes** : à la première connexion après le lancement, l'accueil
+était construit **deux fois** (par l'application elle-même, puis par l'écran de connexion), et la liste
+des inventaires était donc demandée **deux fois** au serveur. **Correction** : l'écran de connexion
+n'ouvre plus un second accueil quand l'application l'affiche déjà. Après une déconnexion, la reconnexion
+ouvre l'accueil comme avant.
+
+## 2. Adresse « https:// » : certificat refusé ≠ serveur injoignable
+
+**Constaté par les tests réseau** : si le serveur est configuré en `https://…` et que son certificat de
+sécurité n'est pas reconnu par le téléphone (certificat auto-signé, expiré, autre nom), l'application
+annonçait « Serveur injoignable » / « Erreur de connexion. Vérifiez le réseau… », ce qui orientait vers
+le Wi-Fi alors que le serveur répondait. **Correction** : message dédié **« Certificat du serveur refusé :
+connexion sécurisée (HTTPS) impossible… »** à la connexion, au lancement (écran de la nouvelle
+interface titré « Certificat du serveur refusé »), au chargement des listes, à l'envoi des saisies
+(gardées sur l'appareil) et à la création d'un inventaire. Un serveur réellement éteint reste annoncé
+« Serveur injoignable ». Écran de lancement de l'**ancienne** interface : le motif « certificat » est
+affiché sous le titre d'origine « Serveur injoignable » (écran gelé, anomalie A7 de `test/README.md`).
+
+## 3. Rapport de tests de livraison
+
+Chaque livraison est accompagnée d'un **rapport de tests** : par catégorie (unitaires et
+non-régression, intégration, bout en bout, ergonomie, **performance**, **réseau**), nombre de tests,
+réussis, sautés, échecs et durée, et toutes les **mesures de performance** avec leur seuil. Il est
+affiché dans le résumé de la CI GitHub et téléchargeable (artefact `rapport-tests`, à côté de l'APK).
+Nouveaux contrôles : démarrage, longues listes (2 000 produits, 1 000 lignes de collecte, 200
+inventaires, 50 emplacements), nombre de requêtes des parcours clés, file de 5 000 saisies, serveur lent
+(2, 5, 8 s), réponses tronquées, coupures répétées, passage local ↔ distant, HTTPS. Détail et seuils :
+`test/README.md`.
+
+---
+
 # 4.14.1 (code 12) — Retours de test du pharmacien
 
 Elle s'installe par-dessus la 4.14.0 sans désinstaller ; rien n'est perdu (réglages, saisies en attente,

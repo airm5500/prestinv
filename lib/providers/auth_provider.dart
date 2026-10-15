@@ -90,7 +90,8 @@ class AuthProvider with ChangeNotifier {
     } on TimeoutException {
       _errorMessage = "Le serveur ne répond pas (délai dépassé). Vérifiez le réseau et l'adresse du serveur.";
     } catch (e) {
-      _errorMessage = "Erreur de connexion. Vérifiez le réseau et l'adresse du serveur.";
+      // 4.14.2 : certificat HTTPS refusé ≠ réseau.
+      _errorMessage = ApiService.estCertificatRefuse(e) ? ApiService.messageCertificat : "Erreur de connexion. Vérifiez le réseau et l'adresse du serveur.";
     }
 
     _isLoading = false;

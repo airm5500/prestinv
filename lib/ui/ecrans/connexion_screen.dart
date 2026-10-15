@@ -59,7 +59,7 @@ class _NvConnexionScreenState extends State<NvConnexionScreen> {
     final ok = await auth.login(_login.text.trim(), _motDePasse.text.trim(), config);
     if (!mounted) return;
     if (ok) {
-      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => InterfaceVersion.home()));
+      InterfaceVersion.allerAccueilApresConnexion(context);
     } else {
       nvMessage(context, auth.errorMessage ?? 'Une erreur est survenue.', ton: context.nv.erreur);
     }

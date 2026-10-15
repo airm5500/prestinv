@@ -62,6 +62,18 @@ class InterfaceVersion {
   /// Écran d'accueil : aiguillage HomeScreen (nouvel accueil ou accueil d'origine).
   static Widget home() => const HomeScreen();
 
+  /// Après une connexion réussie : accueil. 4.14.2 — quand l'écran de connexion est celui de la RACINE
+  /// de l'application (premier lancement), la racine (main.dart) le remplace d'elle-même par l'accueil
+  /// dès que la session est ouverte : on ne pousse pas un SECOND accueil par-dessus (avant : deux
+  /// accueils construits, liste des inventaires lue deux fois). On attend donc la fin de l'image en
+  /// cours : si l'écran de connexion a disparu, l'accueil est déjà là ; sinon (écran de connexion
+  /// poussé après une déconnexion, ou monté seul) il est remplacé par l'accueil, comme avant.
+  static Future<void> allerAccueilApresConnexion(BuildContext context) async {
+    await WidgetsBinding.instance.endOfFrame;
+    if (!context.mounted) return;
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => home()));
+  }
+
   /// Attente de la vérification de la licence au lancement.
   static Widget lancement() =>
       useNew.value ? const NvTheme(child: NvLancementScreen()) : const Scaffold(body: Center(child: CircularProgressIndicator()));

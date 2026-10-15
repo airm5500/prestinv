@@ -65,6 +65,15 @@ class ApiService implements SaisieServeur {
 
   static bool _estErreurReseau(Object e) => e is SocketException || e is TimeoutException || e is http.ClientException || e is HandshakeException;
 
+  /// 4.14.2 — Connexion HTTPS dont le certificat est refusé (auto-signé non reconnu, expiré, autre nom) :
+  /// ce n'est PAS un serveur injoignable (le serveur a répondu) ; message dédié.
+  static bool estCertificatRefuse(Object e) =>
+      e is TlsException || (e is http.ClientException && e.message.contains('CERTIFICATE_VERIFY_FAILED'));
+
+  /// Message affiché quand le certificat du serveur est refusé.
+  static const messageCertificat = 'Certificat du serveur refusé : connexion sécurisée (HTTPS) impossible. '
+      'Vérifiez l\'adresse du serveur ou faites installer un certificat valide sur le serveur.';
+
   // --- FILE DES SAISIES (SaisieServeur) ---
 
   /// Pose la quantité TOTALE sur une ligne (PUT /ws/inventaires/details). Ne lève jamais.
@@ -81,6 +90,7 @@ class ApiService implements SaisieServeur {
     } on TimeoutException {
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Le serveur met trop de temps à répondre.');
     } catch (e) {
+      if (estCertificatRefuse(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageCertificat);
       if (_estErreurReseau(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, 'Serveur injoignable.');
       return ReponseEnvoi(ResultatEnvoi.reseau, 'Envoi impossible : $e');
     }
@@ -129,6 +139,7 @@ class ApiService implements SaisieServeur {
     } on TimeoutException {
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Le serveur met trop de temps à répondre.');
     } catch (e) {
+      if (estCertificatRefuse(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageCertificat);
       if (_estErreurReseau(e)) return const ReponseEnvoi(ResultatEnvoi.reseau, 'Serveur injoignable.');
       return ReponseEnvoi(ResultatEnvoi.reseau, 'Envoi impossible : $e');
     }
@@ -171,6 +182,7 @@ class ApiService implements SaisieServeur {
       throw ApiLoadException('Le serveur met trop de temps à répondre ($quoi non chargés). Vérifiez le réseau puis réessayez.',
           TypeErreurChargement.reseau);
     } catch (e) {
+      if (estCertificatRefuse(e)) throw ApiLoadException('$messageCertificat ($quoi non chargés)', TypeErreurChargement.reseau);
       if (_estErreurReseau(e)) {
         throw ApiLoadException('Serveur injoignable ($quoi non chargés). Vérifiez le Wi-Fi et l\'adresse du serveur puis réessayez.',
             TypeErreurChargement.reseau);
@@ -245,6 +257,8 @@ class ApiService implements SaisieServeur {
     } on TimeoutException {
       return const ResultatCreationServeur.incertain('Le serveur met trop de temps à répondre.');
     } catch (e) {
+      // Certificat refusé : la demande n'est jamais partie (poignée de main HTTPS refusée).
+      if (estCertificatRefuse(e)) return const ResultatCreationServeur.refus(messageCertificat);
       // La demande a pu partir avant la coupure : on ne sait pas si l'inventaire existe.
       return ResultatCreationServeur.incertain(_estErreurReseau(e) ? 'Serveur injoignable.' : 'Création impossible : $e');
     }
@@ -279,6 +293,7 @@ class ApiService implements SaisieServeur {
       throw ApiLoadException('Le serveur met trop de temps à répondre ($quoi non chargés). Vérifiez le réseau puis réessayez.',
           TypeErreurChargement.reseau);
     } catch (e) {
+      if (estCertificatRefuse(e)) throw ApiLoadException('$messageCertificat ($quoi non chargés)', TypeErreurChargement.reseau);
       if (_estErreurReseau(e)) {
         throw ApiLoadException('Serveur injoignable ($quoi non chargés). Vérifiez le Wi-Fi et l\'adresse du serveur puis réessayez.',
             TypeErreurChargement.reseau);
@@ -366,6 +381,7 @@ class ApiService implements SaisieServeur {
     } on TimeoutException {
       throw const ApiLoadException('Le serveur met trop de temps à répondre : impossible de savoir si ce produit est déjà compté.', TypeErreurChargement.reseau);
     } catch (e) {
+      if (estCertificatRefuse(e)) throw const ApiLoadException(messageCertificat, TypeErreurChargement.reseau);
       throw const ApiLoadException('Serveur injoignable : impossible de savoir si ce produit est déjà compté.', TypeErreurChargement.reseau);
     }
     if (response.statusCode == 401 || response.statusCode == 403) {
@@ -497,7 +513,9 @@ class ApiService implements SaisieServeur {
           .timeout(const Duration(seconds: 15));
       return response.statusCode == 200;
     } catch (e) {
-      throw Exception(_estErreurReseau(e) ? 'Serveur injoignable.' : 'Enregistrement de la licence impossible.');
+      throw Exception(estCertificatRefuse(e)
+          ? messageCertificat
+          : (_estErreurReseau(e) ? 'Serveur injoignable.' : 'Enregistrement de la licence impossible.'));
     }
   }
 
@@ -510,6 +528,7 @@ class ApiService implements SaisieServeur {
     try {
       response = await _httpGet(url).timeout(const Duration(seconds: 10));
     } catch (e) {
+      if (estCertificatRefuse(e)) throw const ApiLoadException(messageCertificat, TypeErreurChargement.reseau);
       throw const ApiLoadException('Serveur injoignable : impossible de vérifier la licence.', TypeErreurChargement.reseau);
     }
     // Erreur du serveur (5xx) ou réponse d'accès inattendue : le serveur n'a pas pu répondre,

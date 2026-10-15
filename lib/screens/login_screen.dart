@@ -79,9 +79,7 @@ class _LoginScreenState extends State<AncienLoginScreen> {
     if (!mounted) return;
 
     if (success) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => InterfaceVersion.home()),
-      );
+      InterfaceVersion.allerAccueilApresConnexion(context);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
