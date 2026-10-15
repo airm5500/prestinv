@@ -89,7 +89,8 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
   /// versement de la collecte dans ce nouvel inventaire et rapport (codes non reconnus listés).
   Future<void> _creerAvecCollecte() async {
     final libelle = 'Collecte du ${DateFormat('dd-MM-yyyy HH.mm').format(DateTime.now())}';
-    final inv = await creerInventaireNv(context, libelleInitial: libelle);
+    // 4.14.1 : limité à l'emplacement des produits collectés (avant : tous les emplacements).
+    final inv = await creerInventaireNv(context, libelleInitial: libelle, codesCollectes: [for (final i in _nonVersees) i.code]);
     if (!mounted || inv == null) return;
     if (inv.id.isEmpty) {
       nvMessage(context, 'Inventaire créé mais introuvable dans la liste : versez la collecte depuis « Verser dans un inventaire ».',

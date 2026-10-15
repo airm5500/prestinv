@@ -223,11 +223,23 @@ class ApiService implements SaisieServeur {
   /// avec TOUS les produits actifs de l'officine (une ligne par produit, stock théorique = stock
   /// disponible, non comptée) ; aucun produit → aucun inventaire. Réponse : {"success":1,"lignes":N}.
   /// La réponse ne donne pas l'identifiant : il est relu dans la liste des inventaires ouverts.
-  Future<ResultatCreationServeur> creerInventaire(String libelle, String type) async {
+  ///
+  /// 4.14.1 : [valeurs] = identifiants cochés sur l'axe du type (pour « Emplacement » : les
+  /// lg_ZONE_GEO_ID des rayons). Le serveur ne met alors QUE les produits actifs de ces emplacements
+  /// (createInventaireMultiCriteres : un appel de la procédure par valeur). Absent ou vide : TOUS les
+  /// produits (comportement d'origine). Le serveur n'accepte pas de liste de produits (voir
+  /// docs/DEMANDE_SERVEUR_COMPTAGE.md).
+  Future<ResultatCreationServeur> creerInventaire(String libelle, String type, {List<String>? valeurs}) async {
     final url = Uri.parse('$baseUrl/api/v1/inventaire/creation');
     final http.Response response;
     try {
-      response = await _httpPost(url, jsonEncode({'str_NAME': libelle, 'str_TYPE_TRANSACTION': type}))
+      response = await _httpPost(
+              url,
+              jsonEncode({
+                'str_NAME': libelle,
+                'str_TYPE_TRANSACTION': type,
+                if (valeurs != null && valeurs.isNotEmpty) 'valeurs': valeurs,
+              }))
           // Plusieurs milliers de produits : la création peut prendre du temps.
           .timeout(const Duration(seconds: 180));
     } on TimeoutException {
@@ -254,6 +266,84 @@ class ApiService implements SaisieServeur {
     if (succes == 1 || succes == true) return ResultatCreationServeur.ok((m['lignes'] as num?)?.toInt());
     if (message.toLowerCase().contains('connecter')) return const ResultatCreationServeur.session();
     return ResultatCreationServeur.refus(message.isEmpty ? 'Création refusée par le serveur.' : message);
+  }
+
+  // --- EMPLACEMENTS DE L'OFFICINE (création d'un inventaire depuis la collecte, 4.14.1) ---
+
+  /// GET JSON (objet ou liste). Mêmes erreurs que [_loadList] : jamais une réponse vide trompeuse.
+  Future<dynamic> _loadJson(String quoi, Uri url, {Duration delai = const Duration(seconds: 20)}) async {
+    final http.Response response;
+    try {
+      response = await _httpGet(url).timeout(delai);
+    } on TimeoutException {
+      throw ApiLoadException('Le serveur met trop de temps à répondre ($quoi non chargés). Vérifiez le réseau puis réessayez.',
+          TypeErreurChargement.reseau);
+    } catch (e) {
+      if (_estErreurReseau(e)) {
+        throw ApiLoadException('Serveur injoignable ($quoi non chargés). Vérifiez le Wi-Fi et l\'adresse du serveur puis réessayez.',
+            TypeErreurChargement.reseau);
+      }
+      throw ApiLoadException('Impossible de charger les $quoi : $e', TypeErreurChargement.reseau);
+    }
+    final code = response.statusCode;
+    if (code == 401 || code == 403) {
+      throw ApiLoadException('Session expirée ($quoi non chargés) : reconnectez-vous.', TypeErreurChargement.session);
+    }
+    if (code != 200) throw ApiLoadException('Le serveur a refusé le chargement des $quoi (code $code).');
+    final dynamic data;
+    try {
+      data = json.decode(utf8.decode(response.bodyBytes));
+    } catch (_) {
+      throw ApiLoadException('Réponse illisible du serveur pour les $quoi.', TypeErreurChargement.donnees);
+    }
+    if (data is Map && data['success'] == false) {
+      final m = '${data['message'] ?? data['msg'] ?? ''}';
+      if (m.toLowerCase().contains('connecter')) {
+        throw ApiLoadException('Session expirée ($quoi non chargés) : reconnectez-vous.', TypeErreurChargement.session);
+      }
+      throw ApiLoadException(m.isEmpty ? 'Le serveur a refusé le chargement des $quoi.' : m);
+    }
+    return data;
+  }
+
+  /// Tous les emplacements (rayons, zones géographiques) de l'officine, hors de tout inventaire :
+  /// `GET /api/v1/referentiel-article/zones-geographiques` → {total, results:[{lg_ZONE_GEO_ID,
+  /// str_CODE, str_LIBELLEE}]}. Mêmes identifiants que les rayons d'un inventaire (lg_ZONE_GEO_ID).
+  Future<List<Rayon>> fetchEmplacementsOfficine() async {
+    final url = Uri.parse('$baseUrl/api/v1/referentiel-article/zones-geographiques')
+        .replace(queryParameters: {'start': '0', 'limit': '2000'});
+    final data = await _loadJson('emplacements', url);
+    final liste = data is Map ? data['results'] : data;
+    if (liste is! List) throw const ApiLoadException('Réponse inattendue du serveur pour les emplacements.', TypeErreurChargement.donnees);
+    final out = <Rayon>[];
+    for (final e in liste) {
+      if (e is! Map) continue;
+      final id = '${e['lg_ZONE_GEO_ID'] ?? e['id'] ?? ''}'.trim();
+      if (id.isEmpty) continue;
+      out.add(Rayon(id: id, code: '${e['str_CODE'] ?? e['code'] ?? ''}'.trim(), libelle: '${e['str_LIBELLEE'] ?? e['libelle'] ?? ''}'.trim()));
+    }
+    return out;
+  }
+
+  /// Emplacement (rayon) d'un produit de l'officine, retrouvé par son code (CIP, EAN-13, code article) :
+  /// `GET /api/v1/produit-search/fiche?search_value=…` (recherche de la fiche article) → results:[{int_CIP,
+  /// lg_ZONE_GEO_ID (libellé), lg_ZONE_GEO_ID_REEL (identifiant)}]. null : produit inconnu ou sans
+  /// emplacement. Lève [ApiLoadException] (réseau, session, refus).
+  Future<Rayon?> emplacementDuProduit(String code) async {
+    final c = code.trim();
+    if (c.isEmpty) return null;
+    final url = Uri.parse('$baseUrl/api/v1/produit-search/fiche')
+        .replace(queryParameters: {'search_value': c, 'start': '0', 'limit': '5'});
+    final data = await _loadJson('emplacements des produits', url, delai: const Duration(seconds: 15));
+    final liste = data is Map ? data['results'] : data;
+    if (liste is! List) return null;
+    final lignes = liste.whereType<Map>().toList();
+    if (lignes.isEmpty) return null;
+    // CIP identique en priorité ; sinon le premier résultat (trouvé par EAN-13 / code article).
+    final ligne = lignes.where((l) => '${l['int_CIP'] ?? l['CIP'] ?? ''}' == c).firstOrNull ?? lignes.first;
+    final id = '${ligne['lg_ZONE_GEO_ID_REEL'] ?? ''}'.trim();
+    if (id.isEmpty) return null;
+    return Rayon(id: id, code: '', libelle: '${ligne['lg_ZONE_GEO_ID'] ?? ''}'.trim());
   }
 
   // --- CUMUL / VERIFICATION ---

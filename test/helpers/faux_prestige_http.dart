@@ -69,6 +69,12 @@ class FauxPrestige {
   /// Demandes de création reçues (libellé, type).
   final List<(String, String)> creations = [];
 
+  /// 4.14.1 : `valeurs` de chaque demande de création (null : absentes = tous les produits).
+  final List<List<String>?> creationsValeurs = [];
+
+  /// Emplacements de l'officine (GET /referentiel-article/zones-geographiques) en plus des rayons.
+  final Map<String, String> autresEmplacements = {'R3': 'RESERVE'};
+
   /// Route POST /inventaire/ligne/quantite absente (ancien serveur : 404).
   bool sansRouteLigneQuantite = false;
 
@@ -127,13 +133,19 @@ class FauxPrestige {
       final nom = '${b['str_NAME'] ?? ''}'.trim();
       final type = '${b['str_TYPE_TRANSACTION'] ?? ''}'.trim();
       creations.add((nom, type));
+      final brut = b['valeurs'];
+      final valeurs = brut is List ? [for (final v in brut) '$v'] : null;
+      creationsValeurs.add(valeurs);
       if (reponseCreation != null) return http.Response.bytes(utf8.encode(json.encode(reponseCreation)), 200);
       if (nom.isEmpty) return http.Response(json.encode({'success': 0, 'message': 'Indiquez un libelle pour cet inventaire.'}), 200);
       if (type.isEmpty) return http.Response(json.encode({'success': 0, 'message': "Choisissez un type d'inventaire."}), 200);
       // Le plus récent en tête (ORDER BY dtCREATED DESC).
       inventaires = {'NEW${creations.length}': nom, ...inventaires};
       if (creationReponsePerdue) throw const SocketException('Connection reset');
-      return http.Response(json.encode({'success': 1, 'lignes': produits.length, 'nombre': '${produits.length} article(s) inventorie(s)'}), 200);
+      // Comme createInventaireMultiCriteres : sans valeur → tous les produits ; sinon ceux des emplacements.
+      final filtre = valeurs?.where((v) => v.isNotEmpty && v != '0' && v != '%%').toSet() ?? const <String>{};
+      final lignes = filtre.isEmpty ? produits.length : produits.where((p) => filtre.contains(p.rayon)).length;
+      return http.Response(json.encode({'success': 1, 'lignes': lignes, 'nombre': '$lignes article(s) inventorie(s)'}), 200);
     }
     if (req.method == 'PUT' && fin == 'details') {
       if (verrouPut != null) await verrouPut!.future;
@@ -166,6 +178,27 @@ class FauxPrestige {
         return liste(produits.where((p) => p.dtUpdated == null && p.rayon == q['idRayon'] && correspond(p)));
       case 'detailsAllEcarts':
         return liste(touches().where((p) => p.saisi != p.theorique && correspond(p)));
+      case 'zones-geographiques':
+        final tous = {...rayons, ...autresEmplacements};
+        return http.Response.bytes(
+            utf8.encode(json.encode({
+              'total': tous.length,
+              'results': [for (final e in tous.entries) {'lg_ZONE_GEO_ID': e.key, 'str_CODE': e.key, 'str_LIBELLEE': e.value}],
+            })),
+            200);
+      case 'fiche':
+        // Recherche de la fiche article (produit-search/fiche) : CIP, EAN-13 ; emplacement en libellé et en identifiant.
+        final cherche = q['search_value'] ?? '';
+        final ps = produits.where((p) => cherche.isNotEmpty && (p.cip.startsWith(cherche) || (p.ean != null && p.ean!.startsWith(cherche))));
+        return http.Response.bytes(
+            utf8.encode(json.encode({
+              'total': ps.length,
+              'results': [
+                for (final p in ps.take(int.tryParse(q['limit'] ?? '') ?? 20))
+                  {'lg_FAMILLE_ID': 'F${p.id}', 'int_CIP': p.cip, 'str_NAME': p.nom, 'lg_ZONE_GEO_ID': rayons[p.rayon] ?? '', 'lg_ZONE_GEO_ID_REEL': p.rayon},
+              ],
+            })),
+            200);
       case 'find':
         // Fin de licence relative à aujourd'hui (une date fixe rendait les tests rouges à son échéance).
         final fin = DateTime.now().add(const Duration(days: 400)).toIso8601String().substring(0, 10);

@@ -15,6 +15,7 @@ Sommaire : [0. Constat](#0-constat-lu-dans-le-code-et-vérifié-sur-le-serveur-d
 [C. Sécuriser l'écriture](#c--sécuriser-put-wsinventairesdetails) · [D. Création](#d--création-dinventaire-v1inventairecreation) ·
 [E. Licence](#e--activation-de-licence-avant-connexion) · [F. Versement en lot](#f--versement-de-collecte-en-lot-optionnel) ·
 [G. Rôle de l'utilisateur](#g--rôle-de-lutilisateur-dans-la-réponse-de-connexion-413) ·
+[H. Inventaire des produits collectés](#h--inventaire-limité-aux-produits-collectés-4141) ·
 [3. Règles communes](#3-règles-communes-à-toutes-les-routes) · [4. Ce que l'app fait déjà](#4-ce-que-lapplication-fait-déjà-sans-attendre)
 
 ---
@@ -545,6 +546,69 @@ comptes » reste prioritaire pour ouvrir l'accès.
 
 ---
 
+## H — Inventaire limité aux produits collectés (4.14.1)
+
+### Constat (retour de test du pharmacien)
+
+Un produit scanné en **collecte**, puis « Créer un inventaire avec ces produits » : l'inventaire créé
+contenait **tous les emplacements** de l'officine. Cause côté application (corrigée en 4.14.1) :
+`POST /v1/inventaire/creation` était envoyé avec `str_NAME` et `str_TYPE_TRANSACTION` seulement, **sans
+`valeurs`** ; `InventaireRessource.creerInventaire` → `createInventaireMultiCriteres` traite alors la
+liste vide comme « tous » (joker `%%`).
+
+Lu dans le serveur (branche `claude/new-session-xm8ptu`, lecture seule) :
+
+| Route | Ce qu'elle permet | Pourquoi l'application ne s'en sert pas pour la collecte |
+|---|---|---|
+| `POST /v1/inventaire/creation` | axe Emplacement / Famille / Grossiste, plusieurs `valeurs` ; `createInventaireFamille` reçoit `lg_FAMILLE_ID = "%%"` en dur : **pas de filtre produit exposé** | utilisée en 4.14.1 avec **un seul emplacement** |
+| `POST /v1/inventaire/import-csv` `{csvContent}` | liste de CIP | libellé figé « INVENTAIRE CSV », type `unitaire`, stock lu sur `lg_EMPLACEMENT_ID='1'` en dur (faux pour un dépôt), identifiant non renvoyé (impossible de retrouver l'inventaire si deux portent ce nom) |
+| `GET /v1/articlemvt/inventaire?ids=…` | liste de `lg_FAMILLE_ID` | libellé imposé « INVENTAIRE ARTICLES EN MOUVEMENT DU … AU … », route de l'écran des mouvements |
+| `POST /v1/reserve/create-inventaire-selection`, `POST /v1/produit-search/create-inventaire` | sélection / recherche | inventaire de **réserve** ou recherche texte unique : autre usage |
+
+Ce que fait l'application en 4.14.1, sans attendre : l'écran de création cherche l'emplacement de chaque
+code collecté (`GET /v1/produit-search/fiche?search_value=<code>` → `lg_ZONE_GEO_ID_REEL`), présélectionne
+le plus fréquent (modifiable, liste complète par `GET /v1/referentiel-article/zones-geographiques`) et
+envoie `str_TYPE_TRANSACTION = "Emplacement"`, `valeurs = [cet emplacement]`. L'inventaire contient donc
+les produits actifs de **cet emplacement** (et non de toute l'officine) ; les produits de la collecte
+rangés ailleurs sont signalés « non reconnus » au versement.
+
+### Demande (ajout, rétrocompatible)
+
+Accepter dans `POST /v1/inventaire/creation` un champ facultatif **`produits`** : liste de codes tels que
+scannés (CIP7, EAN-13 / CIP13, code article — la même recherche que `produit-search/fiche`), ou
+`lg_FAMILLE_ID`. S'il est présent et non vide, l'inventaire ne contient **que ces produits** (une ligne
+par produit et par emplacement de stock de l'utilisateur, stock théorique repris comme aujourd'hui),
+quel que soit l'axe ; `valeurs` reste possible pour restreindre en plus à des emplacements.
+
+```json
+POST /api/v1/inventaire/creation
+{"str_NAME":"Collecte du 15-10-2026 09.30","str_TYPE_TRANSACTION":"Emplacement",
+ "valeurs":["16820161934468646618"],
+ "produits":["3400930000001","3595583","8050457"]}
+→ {"success":1,"lignes":2,"lgInventaireId":"…","nombre":"2 article(s) inventorie(s)",
+   "inconnus":["8050457"]}
+```
+
+- `inconnus` : codes non retrouvés (l'application les affiche dans le rapport de versement) ;
+- aucun produit retrouvé → refus lisible actuel (`success:0`, « Aucun inventaire n'a été créé… ») ;
+- ancien serveur : le champ est ignoré, l'inventaire est celui de l'emplacement (comportement 4.14.1) —
+  l'application détecte la prise en compte par la présence de `inconnus` ou par `lignes` ≤ nombre de codes.
+
+### Impact dans l'application
+
+Dès que la route accepte `produits`, l'écran « Créer un inventaire avec ces produits » les envoie avec
+l'emplacement choisi : l'inventaire ne contient plus que les produits collectés (plus de lignes « non
+comptées » du reste du rayon). Aucune autre évolution d'écran.
+
+### Tests serveur à prévoir
+
+1. `produits` de 1, 50 et 500 codes (CIP7, EAN-13, code article mélangés) → exactement ces lignes.
+2. Code inconnu → dans `inconnus`, rien d'autre créé pour lui ; tous inconnus → refus, aucun inventaire.
+3. `produits` + `valeurs` (emplacement) → intersection ; `produits` absent → comportement actuel inchangé.
+4. Dépôt (`lg_EMPLACEMENT_ID` ≠ 1) : stock repris de l'emplacement de stock de l'utilisateur.
+
+---
+
 ## 3. Règles communes à toutes les routes
 
 1. **404/405 signifient « route absente »** pour l'application (elle bascule alors sur son ancien
@@ -571,6 +635,8 @@ comptes » reste prioritaire pour ouvrir l'accès.
   deux requêtes `detailsTouchedRayon` + `detailsUntouchedRayon` sont faites pour chaque rayon (avant :
   la seconde seulement pour les rayons entamés). La route A ramènerait cela à une requête.
 - Profil (création d'inventaire) lu dans `xtypeuser` en attendant G.
+- Création depuis la collecte (4.14.1) limitée à **un emplacement** (`valeurs`), présélectionné d'après
+  les produits collectés, en attendant H.
 - Saisies gardées sur le terminal avant tout envoi, renvoi automatique, « À envoyer », reconnexion sans
   quitter l'écran (401) : prête pour C2.
 - Versement de la collecte par `POST ligne/quantite` (auteur enregistré), repli sur le PUT si la route

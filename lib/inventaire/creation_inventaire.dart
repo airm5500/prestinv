@@ -103,7 +103,9 @@ class CreationInventaire {
     return null;
   }
 
-  Future<ResultatCreation> creer(String libelleSaisi, TypeInventaire type) async {
+  /// [valeurs] : identifiants choisis sur l'axe du type (4.14.1, création depuis la collecte : le seul
+  /// emplacement des produits collectés). Absent : tous les produits actifs.
+  Future<ResultatCreation> creer(String libelleSaisi, TypeInventaire type, {List<String>? valeurs}) async {
     final erreur = LibelleInventaire.erreur(libelleSaisi);
     if (erreur != null) return ResultatCreation(IssueCreation.libelleInvalide, message: erreur);
     if (_enCours) return const ResultatCreation(IssueCreation.dejaEnCours, message: 'Création déjà en cours : patientez.');
@@ -124,7 +126,7 @@ class CreationInventaire {
       }
 
       // 2. Création.
-      final r = await api.creerInventaire(libelle, type.valeur);
+      final r = await api.creerInventaire(libelle, type.valeur, valeurs: valeurs);
       if (r.session) return ResultatCreation(IssueCreation.session, message: r.message);
       if (!r.succes && !r.incertain) return ResultatCreation(IssueCreation.refus, message: r.message);
 

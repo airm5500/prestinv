@@ -114,10 +114,12 @@ class CalculsListe extends ChangeNotifier {
 /// Crée un inventaire depuis la nouvelle interface : droit de création (profil, réglage, code
 /// administrateur), écran de création, puis relecture de la liste des inventaires (InventoryProvider)
 /// pour renvoyer l'inventaire avec son identifiant (retrouvé par son libellé si le serveur ne l'a pas
-/// donné). null : rien de créé.
-Future<Inventory?> creerInventaireNv(BuildContext context, {String libelleInitial = ''}) async {
+/// donné). null : rien de créé. [codesCollectes] (création depuis la collecte, 4.14.1) : inventaire
+/// limité à l'emplacement des produits collectés (choisi dans l'écran de création).
+Future<Inventory?> creerInventaireNv(BuildContext context, {String libelleInitial = '', List<String>? codesCollectes}) async {
   if (!await verifierDroitCreation(context) || !context.mounted) return null;
-  final cree = await Navigator.of(context).push<Inventory>(nvRoute(NvCreationInventaireScreen(libelleInitial: libelleInitial)));
+  final cree = await Navigator.of(context)
+      .push<Inventory>(nvRoute(NvCreationInventaireScreen(libelleInitial: libelleInitial, codesCollectes: codesCollectes)));
   if (cree == null || !context.mounted) return null;
   return retrouverInventaire(context, cree);
 }

@@ -92,7 +92,9 @@ class _NvVersementScreenState extends State<NvVersementScreen> {
   /// « Nouvel inventaire… » : droit de création, création, puis l'inventaire est retrouvé dans la liste
   /// relue (par son identifiant, sinon par son libellé) et proposé au versement.
   Future<void> _nouvelInventaire() async {
-    final cree = await creerInventaireNv(context);
+    // 4.14.1 : depuis la collecte, l'inventaire créé est limité à l'emplacement des produits à verser.
+    final codes = [for (final i in _aVerser) i.code];
+    final cree = await creerInventaireNv(context, codesCollectes: codes.isEmpty ? null : codes);
     if (!mounted) return;
     await _charger();
     if (cree == null || !mounted) return;

@@ -283,6 +283,10 @@ void main() {
     await toucherCle(tester, 'creer-avec-collecte');
     await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(find.byKey(const ValueKey('libelle-inventaire'))).controller!.text, startsWith('Collecte du '));
+    // 4.14.1 : l'emplacement des produits collectés (DOLIPRANE → RÉSERVE) est présélectionné.
+    expect(find.byKey(const ValueKey('emplacement-S3')), findsOneWidget);
+    expect(find.textContaining('1 produit(s) de la collecte'), findsOneWidget);
+    expect(find.text('Seulement « RÉSERVE »'), findsOneWidget);
     await toucherCle(tester, 'bouton-creer');
     await tester.pumpAndSettle();
     await toucherCle(tester, 'confirmer-creation');
@@ -291,6 +295,9 @@ void main() {
     }
     await tester.pumpAndSettle();
     expect(app.serveur.catalogue.creations.single.$1, startsWith('Collecte du '));
+    // 4.14.1 (retour du pharmacien) : UN SEUL emplacement envoyé, et non tous.
+    expect(app.serveur.catalogue.creations.single.$2, 'Emplacement');
+    expect(app.serveur.catalogue.creationsValeurs.single, ['S3']);
     expect(find.byType(NvRapportVersementScreen), findsOneWidget);
     expect(find.text('codes non reconnus'), findsOneWidget);
     expect(app.serveur.catalogue.produit(1).saisi, 12);

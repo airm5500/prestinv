@@ -111,6 +111,9 @@ final ecransNouvelleInterface = <EcranControle>[
   EcranControle('Collecte', nouvelle: true, construire: () => const NvCollecteScreen()),
   EcranControle('À envoyer', nouvelle: true, construire: () => const NvAEnvoyerScreen()),
   EcranControle('Création d\'inventaire', nouvelle: true, construire: () => const NvCreationInventaireScreen()),
+  // 4.14.1 : depuis la collecte, emplacement des produits collectés présélectionné (deux emplacements trouvés).
+  EcranControle('Création d\'inventaire depuis la collecte', nouvelle: true,
+      construire: () => const NvCreationInventaireScreen(libelleInitial: 'Collecte du 15-10-2026 09.30', codesCollectes: ['3400935959001', '3400937000003', '3400930000001'])),
   EcranControle('Réglages', nouvelle: true, construire: () => const NvConfigScreen()),
   // 4.13 (maquette validée) :
   EcranControle('Inventaire choisi', nouvelle: true, construire: () => NvInventaireScreen(inventaire: inventaireEssai), apres: actualiserAvancement),
