@@ -77,11 +77,8 @@ class _CreationInventaireScreenState extends State<CreationInventaireScreen> {
 
   static String _pluriel(int n, String mot) => '$n $mot${n > 1 ? 's' : ''}';
 
-  String _portee() => _prep?.limiteAuxProduits == false
-      ? 'Ce serveur Prestige ne sait pas limiter un inventaire à une liste de produits : l\'inventaire contiendra TOUS '
-          'les produits actifs de ces emplacements (et seulement eux). La collecte y est ensuite versée.'
-      : 'Comme dans Prestige : l\'inventaire ne contient QUE ces produits ; à l\'ouverture, seuls leurs emplacements '
-          'sont proposés. La collecte y est ensuite versée.';
+  String _portee() => 'Comme dans Prestige : l\'inventaire ne contient QUE ces produits ; à l\'ouverture, seuls leurs '
+      'emplacements sont proposés. La collecte y est ensuite versée.';
 
   Future<void> _creer() async {
     if (_enCours) return; // double appui
@@ -219,12 +216,15 @@ class _CreationInventaireScreenState extends State<CreationInventaireScreen> {
                 'signalés au versement) : ${nonInclus.take(5).join(', ')}${nonInclus.length > 5 ? '…' : ''}'),
             couleur: Colors.orange.shade50,
             key: const ValueKey('recap-non-retrouves')),
-      if (!a.creationPossible)
+      if (prep.limiteAuxProduits == false)
+        _encadre(const Text(CreationInventaire.messageServeurAncien, style: TextStyle(fontWeight: FontWeight.bold)),
+            couleur: Colors.red.shade50, key: const ValueKey('serveur-sans-retenue'))
+      else if (!a.creationPossible)
         _encadre(const Text('Aucun produit de la collecte n\'a été retrouvé sur le serveur : rien à créer.'),
             couleur: Colors.orange.shade50, key: const ValueKey('collecte-aucun'))
       else
         _encadre(Text(_portee(), style: const TextStyle(fontSize: 13)),
-            couleur: prep.limiteAuxProduits == false ? Colors.orange.shade50 : null, key: const ValueKey('recap-portee')),
+            key: const ValueKey('recap-portee')),
       if (prep.sansProduits != null)
         _encadre(Text('Inventaire « ${prep.sansProduits!.libelle} » créé sans ses produits : touchez « Ajouter les produits » (rien n\'est recréé).'),
             couleur: Colors.red.shade50, key: const ValueKey('produits-a-ajouter')),

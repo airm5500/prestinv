@@ -122,11 +122,8 @@ class _NvCreationInventaireScreenState extends State<NvCreationInventaireScreen>
   }
 
   /// Ce que contiendra l'inventaire créé depuis la collecte.
-  static String _portee(PreparationCollecte prep) => prep.limiteAuxProduits == false
-      ? 'Ce serveur Prestige ne sait pas limiter un inventaire à une liste de produits : l\'inventaire contiendra '
-          'TOUS les produits actifs de ces emplacements (et seulement eux). La collecte y est ensuite versée.'
-      : 'Comme dans Prestige : l\'inventaire ne contient QUE ces produits, et à l\'ouverture seuls leurs emplacements '
-          'sont proposés. La collecte y est ensuite versée.';
+  static String _portee(PreparationCollecte prep) => 'Comme dans Prestige : l\'inventaire ne contient QUE ces produits, '
+      'et à l\'ouverture seuls leurs emplacements sont proposés. La collecte y est ensuite versée.';
 
   Future<void> _issue(ResultatCreation r, String libelle) async {
     switch (r.issue) {
@@ -251,7 +248,16 @@ class _NvCreationInventaireScreenState extends State<NvCreationInventaireScreen>
           detail: 'Ils ne sont pas dans cet inventaire : versez-les ensuite dans un inventaire existant.',
         ),
       ],
-      if (!a.creationPossible) ...[
+      if (prep.limiteAuxProduits == false) ...[
+        const SizedBox(height: 8),
+        Bandeau(
+          key: const ValueKey('serveur-sans-retenue'),
+          ton: nv.erreur,
+          icon: Icons.block,
+          texte: 'Création impossible sur ce serveur',
+          detail: CreationInventaire.messageServeurAncien,
+        ),
+      ] else if (!a.creationPossible) ...[
         const SizedBox(height: 8),
         Text('Aucun produit de la collecte n\'a été retrouvé sur le serveur : rien à créer.',
             key: const ValueKey('collecte-aucun'), style: TextStyle(color: nv.gris)),
@@ -259,9 +265,9 @@ class _NvCreationInventaireScreenState extends State<NvCreationInventaireScreen>
         const SizedBox(height: 12),
         Bandeau(
           key: const ValueKey('recap-portee'),
-          ton: prep.limiteAuxProduits == false ? nv.attente : nv.info,
+          ton: nv.info,
           icon: Icons.info_outline,
-          texte: prep.limiteAuxProduits == false ? 'Tous les produits de ces emplacements' : 'Seulement ces produits',
+          texte: 'Seulement ces produits',
           detail: _portee(prep),
         ),
       ],

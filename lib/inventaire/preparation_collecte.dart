@@ -22,13 +22,14 @@ class PreparationCollecte extends ChangeNotifier {
   bool get analyseEnCours => _analyseEnCours;
   AnalyseCollecte? get analyse => _analyse;
 
-  /// Le serveur sait-il limiter l'inventaire aux produits ? null : pas encore su (vérifié à la création).
+  /// Le serveur sait-il limiter l'inventaire aux produits ? null : pas encore su (vérifié à la création) ;
+  /// false : création refusée (4.15.1).
   bool? get limiteAuxProduits => _limiteAuxProduits;
 
   /// Inventaire créé dont les produits collectés ne sont pas encore retenus (« Réessayer »).
   Inventory? get sansProduits => _sansProduits;
 
-  bool get creationPossible => !_analyseEnCours && (_analyse?.creationPossible ?? false);
+  bool get creationPossible => !_analyseEnCours && _limiteAuxProduits != false && (_analyse?.creationPossible ?? false);
 
   Future<void> analyser() async {
     if (_analyseEnCours) return;
@@ -68,6 +69,7 @@ class PreparationCollecte extends ChangeNotifier {
 
   void _apres(ResultatCreation r) {
     if (r.retenus != null) _limiteAuxProduits = true;
+    if (r.issue == IssueCreation.refus && r.message == CreationInventaire.messageServeurAncien) _limiteAuxProduits = false;
     _sansProduits = r.issue == IssueCreation.produitsNonAjoutes ? r.inventaire : null;
     _notifier();
   }

@@ -8,7 +8,7 @@
 //    listés, codes non retrouvés signalés ;
 //  - création : emplacements des produits (`valeurs`), lignes non retenues, puis SEULS les produits
 //    collectés retenus ; le nouvel inventaire n'a que ces emplacements et ces produits ;
-//  - serveur sans la route de retenue : prévenu AVANT de créer (tous les produits de ces emplacements) ;
+//  - serveur sans la route de retenue : création REFUSÉE avec un message clair (4.15.1) ;
 //  - panne pendant la recherche : message, Réessayer ; aucun produit : rien à créer ;
 //  - produits non ajoutés après la création : « Ajouter les produits » (rien n'est recréé) ;
 //  - ancienne interface : « Verser la collecte » › « Nouvel inventaire… » fait de même (avant : tous les
@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/collecte/collecte_store.dart';
+import 'package:prestinv/inventaire/creation_inventaire.dart';
 import 'package:prestinv/models/collected_item.dart';
 import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/screens/creation_inventaire_screen.dart';
@@ -98,17 +99,16 @@ void main() {
       await demonter(tester);
     });
 
-    testWidgets('serveur sans la route de retenue : prévenu AVANT de créer (tous les produits de ces emplacements)', (tester) async {
-      tailleEcran(tester, telephone360);
+    testWidgets('serveur sans la route de retenue : création REFUSÉE, message clair, bouton inactif (4.15.1)', (tester) async {
+      tailleEcran(tester, sunmiV2s); // petit écran : message entier, rien ne déborde
       final b = await banc();
       b.serveur.sansRouteRetenue = true;
       await tester.pumpWidget(monterNv(b, const NvCreationInventaireScreen(libelleInitial: 'Collecte du 15-10-2026', codesCollectes: codesCollecte)));
       await tester.pumpAndSettle();
-      expect(find.text('Tous les produits de ces emplacements'), findsOneWidget);
-      expect(find.textContaining('ne sait pas limiter'), findsOneWidget);
-      await creerEtConfirmer(tester);
-      expect(b.serveur.creationsRetenue.single, isNull, reason: 'lignes retenues d\'office');
-      expect(b.serveur.creationsValeurs.single!.toSet(), {'S2B2', 'S1A0T2', 'S3'}, reason: 'jamais toute l\'officine');
+      expect(find.byKey(const ValueKey('serveur-sans-retenue')), findsOneWidget);
+      expect(find.text(CreationInventaire.messageServeurAncien), findsOneWidget);
+      expect(actif(tester), isFalse);
+      expect(b.serveur.creations, isEmpty, reason: 'plus jamais d\'inventaire avec tous les produits des emplacements');
       await demonter(tester);
     });
 
@@ -217,6 +217,19 @@ void main() {
       await tester.pumpAndSettle();
       final lignes = b.serveur.crees['NEW1']!.lignesRetenues;
       expect(lignes.map((l) => l.saisi).toList(), [2, 2]);
+      await demonter(tester);
+    });
+
+    testWidgets('serveur sans la route de retenue : création REFUSÉE, message clair (4.15.1)', (tester) async {
+      ecranTerminal(tester);
+      final b = await banc();
+      b.serveur.sansRouteRetenue = true;
+      await tester.pumpWidget(monter(b, const CreationInventaireScreen(libelleInitial: 'Collecte ancienne', codesCollectes: codesCollecte)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('serveur-sans-retenue')), findsOneWidget);
+      expect(find.text(CreationInventaire.messageServeurAncien), findsOneWidget);
+      expect(actif(tester), isFalse);
+      expect(b.serveur.creations, isEmpty);
       await demonter(tester);
     });
 

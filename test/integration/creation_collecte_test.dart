@@ -11,8 +11,7 @@
 //    (`POST /inventaire/lignes/retenue`) des seuls produits collectés → l'inventaire ouvert ne propose que
 //    ces emplacements et ces produits ;
 //  - serveur à jour : identifiant `lgInventaireId` (pas de relecture de liste), état des rayons ;
-//  - serveur ancien sans la route de retenue (404) : tous les produits de CES emplacements, jamais de toute
-//    l'officine ;
+//  - serveur ancien sans la route de retenue (404) : création REFUSÉE (4.15.1, décision du pharmacien) ;
 //  - pannes : session, 500, coupure, droit manquant (403 « interdit ») ; échec de la retenue après création
 //    → « Réessayer » ne recrée rien.
 import 'dart:convert';
@@ -23,6 +22,7 @@ import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/inventaire/creation_inventaire.dart';
 import 'package:prestinv/inventaire/produits_collecte.dart';
+import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/providers/auth_provider.dart';
 import 'package:prestinv/services/identifiants_securises.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -194,20 +194,19 @@ void main() {
       expect(serveur.recues('inventaire/creation'), isEmpty);
     });
 
-    test('serveur ANCIEN sans la route de retenue (404) : tous les produits de CES emplacements, pas de toute l\'officine', () async {
+    test('serveur ANCIEN sans la route de retenue (404) : création REFUSÉE, rien n\'est envoyé (4.15.1)', () async {
       serveur.catalogue.sansRouteRetenue = true;
       final (_, api) = await connecte();
       final a = await ProduitsCollecte.analyser(api, ['3400935959001', '3400930000001']);
       final r = await CreationInventaire(api).creerDepuisCollecte('Collecte ancien serveur', a);
-      expect(r.ok, isTrue, reason: r.message);
-      expect(r.retenus, isNull);
-      final corps = corpsCreation();
-      expect(corps.containsKey('bool_INVENTAIRE'), isFalse, reason: 'lignes retenues d\'office');
-      expect((corps['valeurs'] as List).toSet(), {'S2B2', 'S3'});
-      final attendus = serveur.catalogue.produits.where((p) => p.rayon == 'S2B2' || p.rayon == 'S3').length;
-      expect(r.lignes, attendus);
-      expect(await api.fetchProducts(r.inventaire!.id, null), hasLength(attendus));
-      expect(attendus, lessThan(serveur.catalogue.produits.length));
+      expect(r.issue, IssueCreation.refus);
+      expect(r.message, CreationInventaire.messageServeurAncien);
+      expect(r.message, startsWith('Ce serveur Prestige ne permet pas encore de créer un inventaire limité aux produits scannés.'));
+      expect(serveur.recues('inventaire/creation'), isEmpty, reason: 'jamais un inventaire avec tous les produits des emplacements');
+      expect(serveur.catalogue.crees, isEmpty);
+      // Un inventaire existant choisi (« Utiliser celui-ci ») : refus de même, rien n'est modifié.
+      final r2 = await CreationInventaire(api).retenir(Inventory(id: 'INV1', libelle: 'Inventaire annuel 2026'), a);
+      expect(r2.issue, IssueCreation.refus);
     });
 
     test('retenue coupée après la création → « produits non ajoutés », Réessayer ne recrée rien', () async {

@@ -100,6 +100,11 @@ class ResultatCreation {
 }
 
 class CreationInventaire {
+  /// 4.15.1 (décision du pharmacien) : serveur sans `POST /inventaire/lignes/retenue` → création depuis la
+  /// collecte REFUSÉE (plus jamais un inventaire avec tous les produits des emplacements).
+  static const messageServeurAncien = 'Ce serveur Prestige ne permet pas encore de créer un inventaire limité aux '
+      'produits scannés. Mettez le serveur à jour ou versez la collecte dans un inventaire existant.';
+
   final ApiService api;
   CreationInventaire(this.api);
 
@@ -180,8 +185,8 @@ class CreationInventaire {
   ///     propose que ces emplacements ;
   ///  3. seules les lignes des produits collectés sont retenues ([retenir]) : la saisie, les écarts et la
   ///     clôture ne voient qu'elles.
-  /// Serveur qui ne sait pas retenir : l'inventaire contient TOUS les produits de ces emplacements
-  /// ([ResultatCreation.retenus] null) — jamais tous les emplacements de l'officine.
+  /// Serveur qui ne sait pas retenir (404 / 405) : création REFUSÉE ([messageServeurAncien]), rien n'est
+  /// envoyé (4.15.1, décision du pharmacien).
   Future<ResultatCreation> creerDepuisCollecte(String libelleSaisi, AnalyseCollecte analyse) async {
     final erreur = LibelleInventaire.erreur(libelleSaisi);
     if (erreur != null) return ResultatCreation(IssueCreation.libelleInvalide, message: erreur);
@@ -197,9 +202,10 @@ class CreationInventaire {
       } on ApiLoadException catch (e) {
         return ResultatCreation(e.sessionExpiree ? IssueCreation.session : IssueCreation.reseau, message: e.message);
       }
+      if (!retenue) return const ResultatCreation(IssueCreation.refus, message: messageServeurAncien);
       final r = await _creer(LibelleInventaire.normaliser(libelleSaisi), TypeInventaire.emplacement,
-          valeurs: [for (final e in analyse.emplacements) e.rayon.id], nonRetenues: retenue);
-      if (!r.ok || !retenue) return r;
+          valeurs: [for (final e in analyse.emplacements) e.rayon.id], nonRetenues: true);
+      if (!r.ok) return r;
       final inv = r.inventaire;
       if (inv == null || inv.id.isEmpty) {
         return ResultatCreation(IssueCreation.produitsNonAjoutes,
@@ -214,7 +220,7 @@ class CreationInventaire {
 
   /// Retient (à nouveau) les produits de [analyse] dans [inventaire] : sans rien recréer, idempotent.
   /// Sert après [IssueCreation.produitsNonAjoutes] (« Réessayer ») et quand un inventaire existant du
-  /// même libellé est choisi depuis la collecte. Serveur qui ne sait pas retenir : rien à faire.
+  /// même libellé est choisi depuis la collecte. Serveur qui ne sait pas retenir : refus.
   Future<ResultatCreation> retenir(Inventory inventaire, AnalyseCollecte analyse) async {
     if (_enCours) return const ResultatCreation(IssueCreation.dejaEnCours, message: 'Création déjà en cours : patientez.');
     _enCours = true;
@@ -225,7 +231,7 @@ class CreationInventaire {
       } on ApiLoadException catch (e) {
         return ResultatCreation(IssueCreation.produitsNonAjoutes, inventaire: inventaire, message: e.message);
       }
-      if (!retenue) return ResultatCreation(IssueCreation.creee, inventaire: inventaire);
+      if (!retenue) return const ResultatCreation(IssueCreation.refus, message: messageServeurAncien);
       return _retenir(inventaire, analyse);
     } finally {
       _enCours = false;

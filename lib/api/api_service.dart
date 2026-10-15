@@ -485,7 +485,8 @@ class ApiService implements SaisieServeur {
           {'lg_INVENTAIRE_ID': inventaireId, 'produits': lot, 'retenue': true});
       if (r.statusCode == 404 || r.statusCode == 405) {
         _marquerAbsente('lignes/retenue');
-        throw const ApiLoadException('Ce serveur Prestige ne sait pas limiter un inventaire à une liste de produits.');
+        throw const ApiLoadException('Ce serveur Prestige ne permet pas encore de créer un inventaire limité aux produits scannés. '
+            'Mettez le serveur à jour ou versez la collecte dans un inventaire existant.');
       }
       final m = _controlerReponse(r, 'produits de l\'inventaire');
       final n = (m['count'] as num?)?.toInt() ?? 0;

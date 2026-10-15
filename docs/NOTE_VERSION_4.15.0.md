@@ -28,9 +28,8 @@ Collecte › « Verser la collecte » › « Nouvel inventaire… » dans l'anci
 - la collecte y est ensuite versée (nouvelle interface : directement ; ancienne : choix Remplacer /
   Ajouter comme avant), puis le rapport s'affiche.
 
-**Serveur trop ancien** (sans la route qui retient les produits) : l'application le dit **avant** de
-créer ; l'inventaire contient alors tous les produits **de ces emplacements** (jamais de toute
-l'officine).
+**Serveur trop ancien** (sans la route qui retient les produits) : *remplacé en 4.15.1* — la création
+depuis la collecte y est désormais **refusée** (voir `docs/NOTE_VERSION_4.15.1.md`).
 
 **Panne** : recherche des produits en échec → message et « Réessayer » (rien n'est créé) ; si la liaison
 se coupe juste après la création, l'écran l'indique (« Inventaire … créé sans ses produits ») et le bouton
@@ -65,7 +64,7 @@ Si le serveur Prestige est à jour (reconnu à la connexion, sans requête de pl
 
 ## Ce qui reste demandé au serveur
 
-`docs/DEMANDE_SERVEUR_2026-10-15.md` : création d'un inventaire limité à une liste de produits en **une**
+Demandes regroupées dans prestige_vente_app/docs/serveur/TRANSMISSION_SERVEUR_2026-10-15.md (§ 4) : création d'un inventaire limité à une liste de produits en **une**
 requête atomique (aujourd'hui trois requêtes), liste des rayons limitée aux produits retenus, droit sur la
 route qui retient les produits, formes du code dans le versement en lot, lecture de l'auteur des saisies.
 
