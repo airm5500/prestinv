@@ -557,28 +557,25 @@ class _NvSaisieGuideeScreenState extends State<NvSaisieGuideeScreen> with Douche
     );
   }
 
-  /// Envoi manuel : icône orange (flèche d'envoi) à droite du nuage, pastille rouge = saisies non envoyées.
+  /// Envoi manuel (4.14.1) : icône SEULE, comme le nuage voisin (aucun fond ni contour), orange
+  /// (avion en papier « envoyer »), pastille rouge = saisies non envoyées ; zone de toucher 48 × 48 dp.
   Widget _boutonEnvoi(BuildContext context, int nombre) => Semantics(
         button: true,
         label: 'Envoyer les saisies ($nombre en attente)',
         excludeSemantics: true,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 2),
           child: Stack(clipBehavior: Clip.none, children: [
-            Material(
-              color: Pal.amber,
-              borderRadius: BorderRadius.circular(12),
-              child: InkWell(
-                key: const ValueKey('nv-envoyer-badge'),
-                borderRadius: BorderRadius.circular(12),
-                onTap: envoyerInventaire,
-                child: const SizedBox(width: 48, height: 48, child: Icon(Icons.upload_rounded, color: Pal.onAmber, size: 26)),
-              ),
+            InkResponse(
+              key: const ValueKey('nv-envoyer-badge'),
+              radius: 24,
+              onTap: envoyerInventaire,
+              child: const SizedBox(width: 48, height: 48, child: Icon(Icons.send_rounded, color: Pal.amber, size: 26)),
             ),
             if (nombre > 0)
               Positioned(
-                top: -6,
-                right: -6,
+                top: 0,
+                right: -4,
                 child: Container(
                   key: const ValueKey('nv-badge-attente'),
                   constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
