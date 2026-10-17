@@ -12,8 +12,12 @@ minimum_sunmi: 4.8.5+4
 |---|---|---|---|
 | 4.8.5 | 4 | à compléter | dernière version publiée connue |
 
-Version en préparation (pas encore publiée) : **4.15.3+17** (`pubspec.yaml`), au-dessus de 4.8.5 / 4
-(4.15.3 > 4.8.5 nombre par nombre : 15 > 8 ; 17 > 4) et de la livraison de test précédente 4.15.2+16. Images du magasin : `docs/store_sunmi/`.
+Version en préparation (pas encore publiée) : **4.16.0+18** (`pubspec.yaml`), au-dessus de 4.8.5 / 4
+(4.16.0 > 4.8.5 nombre par nombre : 16 > 8 ; 18 > 4) et de la livraison de test précédente 4.15.3+17.
+
+**Google Play (4.16.0)** : le même numéro sert à Google Play (piste « Test interne », `docs/android/README.md`). Le
+`+N` doit rester plus grand que celui de **chaque** canal (Sunmi et Play). L'APK Sunmi, construit sur le PC du
+pharmacien, garde sa signature (clé debug locale) et l'API cible de Flutter ; seul l'App Bundle Play est en API 36. Images du magasin : `docs/store_sunmi/`.
 
 ## Les 3 règles (permanentes)
 

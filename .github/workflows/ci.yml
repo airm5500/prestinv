@@ -112,14 +112,40 @@ jobs:
           if [ "$attendu" != "$apk" ]; then echo "::error title=Version de l'APK::APK $apk ≠ pubspec.yaml $attendu"; exit 1; fi
           echo "::notice title=Version de l'APK::$apk"
 
+      # 4.16.0 : l'APK (terminaux Sunmi, PC du pharmacien) garde l'API cible de Flutter ; seul le build Google Play
+      # passe à 36 (-P prestinvTargetSdk=36, play.yml).
+      - name: API cible de l'APK (inchangée, pas 36)
+        shell: bash
+        run: |
+          manifeste=$(find build/app/intermediates -path '*merged_manifest*' -path '*elease*' -name AndroidManifest.xml | head -1)
+          cible=$(grep -o 'android:targetSdkVersion="[0-9]*"' "$manifeste" | head -1)
+          echo "APK : $cible ($manifeste)"
+          if [ -z "$cible" ] || printf '%s' "$cible" | grep -q '"36"'; then echo "::error title=API cible de l'APK::$cible (attendu : valeur de Flutter, 35)"; exit 1; fi
+          echo "::notice title=API cible de l'APK::$cible"
+
+      # 4.16.0 : le build Google Play (targetSdk / compileSdk 36) est construit ici aussi, SANS clé (signé debug, jamais
+      # publié) : une incompatibilité d'Android 16 (greffon, Gradle) est vue à chaque envoi, même sans les secrets.
+      - name: Contrôle du build Google Play (App Bundle targetSdk 36, sans clé)
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build appbundle --release --android-project-arg=prestinvTargetSdk=36 2>&1 | tee build_aab.log
+          manifeste=$(find build/app/intermediates -path '*merged_manifest*' -path '*elease*' -name AndroidManifest.xml | head -1)
+          grep -q 'android:targetSdkVersion="36"' "$manifeste" || { echo "::error title=Build Google Play::targetSdk 36 non appliqué"; exit 1; }
+          [ -s build/app/outputs/bundle/release/app-release.aab ] || { echo "::error title=Build Google Play::App Bundle absent"; exit 1; }
+          echo "::notice title=Build Google Play::App Bundle targetSdk 36 construit (signé debug, contrôle seulement)"
+
       # En cas d'échec : l'erreur Gradle est remontée en annotation (lisible sans télécharger le journal).
       - name: Résumé de l'erreur de build
         if: failure()
         shell: bash
         run: |
-          [ -f build_apk.log ] || exit 0
-          resume=$(grep -iE -A12 "What went wrong|error:|FAILURE|Exception" build_apk.log | head -80 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
-          echo "::error title=Build APK::${resume}"
+          for journal in build_apk.log build_aab.log; do
+            [ -f "$journal" ] || continue
+            resume=$(grep -iE -A12 "What went wrong|error:|FAILURE|Exception" "$journal" | head -80 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            [ -n "$resume" ] && echo "::error title=Build ($journal)::${resume}"
+          done
+          exit 0
 
       - uses: actions/upload-artifact@v4
         with:

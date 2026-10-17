@@ -13,8 +13,10 @@
     <!-- 4.14 (scan par l'appareil photo, réglage désactivé par défaut) : la permission CAMERA implique
          aussi l'autofocus ; déclaré facultatif pour que l'application reste installable sans lui. -->
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <!-- 4.16.0 (Google Play) : stockage limité à Android 12. À partir d'Android 13, ces autorisations ne sont plus
+         accordées de toute façon (export CSV / PDF écrit directement dans Téléchargements, comme avant). -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
 
     <!-- La balise application contient la configuration principale -->
     <application
