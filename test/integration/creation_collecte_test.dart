@@ -161,6 +161,7 @@ void main() {
       expect(corps['str_TYPE_TRANSACTION'], 'Emplacement');
       expect((corps['valeurs'] as List).toSet(), {'S2B2', 'S1A0T2', 'S3'});
       expect(corps['bool_INVENTAIRE'], 0);
+      expect(corps['produits'], ['F1', 'F2', 'F5', 'F4'], reason: '4.16.1 : envoyés, ignorés par ce serveur (pas d\'`inconnus`)');
       // Essai sans effet de la route, puis retenue des 4 produits.
       final ret = serveur.recues('inventaire/lignes/retenue', methode: 'POST');
       expect(ret, hasLength(2));
@@ -260,7 +261,7 @@ void main() {
       expect(serveur.requetes.map((r) => r.route), ['user/auth']);
     });
 
-    test('identifiant donné par le serveur : pas de relecture de la liste, pas d\'essai de route', () async {
+    test('4.16.1 (demande 46) : création ATOMIQUE des produits (`produits` → `inconnus`), sans retenue ni essai de route', () async {
       final (_, api) = await connecte();
       final a = await ProduitsCollecte.analyser(api, collecte);
       final avant = serveur.requetes.length;
@@ -268,11 +269,18 @@ void main() {
       expect(r.ok, isTrue, reason: r.message);
       expect(r.inventaire?.id, 'NEW1');
       expect(r.retenus, 4);
+      expect(r.inconnus, isEmpty);
       expect(serveur.requetes.skip(avant).map((x) => '${x.methode} ${x.route}'), [
         'GET ws/inventaires', // doublon ?
         'POST inventaire/creation',
-        'POST inventaire/lignes/retenue',
       ]);
+      final corps = corpsCreation();
+      expect(corps['produits'], ['F1', 'F2', 'F5', 'F4'], reason: 'identifiants des produits retrouvés');
+      expect((corps['valeurs'] as List).toSet(), {'S2B2', 'S1A0T2', 'S3'}, reason: 'repli si le serveur ignorait `produits`');
+      expect(corps['bool_INVENTAIRE'], 0);
+      final inv = serveur.catalogue.crees['NEW1']!;
+      expect(inv.lignes, hasLength(4), reason: 'aucune autre ligne créée');
+      expect(inv.lignesRetenues, hasLength(4));
       // Emplacements de l'inventaire : par l'état des rayons (une requête), lignes retenues seulement.
       final avant2 = serveur.requetes.length;
       final rayons = await api.fetchRayons('NEW1');
@@ -293,6 +301,61 @@ void main() {
       serveur.droitCreation = false;
       final (auth, _) = await connecte();
       expect(auth.user?.droitCreation, isFalse);
+    });
+  });
+
+  group('4.16.1 — format réel des demandes 46, 48, 50', () {
+    setUp(() => serveur.serveurRecent = true);
+
+    test('46 : tous les produits inconnus → refus du serveur (`success:0`, `inconnus`), rien de créé', () async {
+      final (_, api) = await connecte();
+      const a = AnalyseCollecte(produits: [ProduitServeur(id: 'F999', cip: '9', nom: 'X', emplacement: null)]);
+      expect(a.creationPossible, isFalse);
+      final r = await api.creerInventaire('Collecte vide', 'Emplacement', valeurs: ['S3'], nonRetenues: true, produits: ['F999']);
+      expect(r.succes, isFalse);
+      expect(r.message, startsWith("Aucun inventaire n'a ete cree"));
+      expect(serveur.catalogue.crees, isEmpty);
+    });
+
+    test('46 : produits partiellement inconnus → créé avec les autres, `inconnus` rendus', () async {
+      final (_, api) = await connecte();
+      final r = await api.creerInventaire('Collecte partielle', 'Emplacement', valeurs: ['S3'], nonRetenues: true, produits: ['F1', 'F999']);
+      expect(r.succes, isTrue);
+      expect(r.inconnus, ['F999']);
+      expect(r.lignes, 1);
+    });
+
+    test('48 : retenue sur un inventaire clôturé (409) → message du serveur ; droit manquant (403) → « Droit manquant »', () async {
+      final (_, api) = await connecte();
+      serveur.scripter('lignes/retenue',
+          ReponseScriptee.json({'success': 0, 'code': 'INVENTAIRE_CLOTURE', 'msg': 'Inventaire clôturé : aucune ligne n\'a été modifiée.'}, code: 409, fois: 1));
+      await expectLater(api.retenirProduits('INV1', ['F1']),
+          throwsA(isA<ApiLoadException>().having((e) => e.message, 'message', 'Inventaire clôturé : aucune ligne n\'a été modifiée.')));
+      serveur.scripter('lignes/retenue',
+          ReponseScriptee.json({'success': 0, 'interdit': true, 'msg': 'Droit manquant : Créer un inventaire'}, code: 403, fois: 1));
+      await expectLater(api.retenirProduits('INV1', ['F1']),
+          throwsA(isA<ApiLoadException>().having((e) => e.message, 'message', 'Droit manquant : Créer un inventaire').having((e) => e.sessionExpiree, 'session', isFalse)));
+    });
+
+    test('50 : auteur de la saisie lu dans les lignes (auteurLogin, auteurNom) ; absent sur une ligne jamais saisie', () async {
+      final (_, api) = await connecte();
+      expect((await api.poserQuantiteSession(1, 5)).estOk, isTrue);
+      final lignes = await api.fetchProducts('INV1', 'S3');
+      final saisie = lignes.firstWhere((p) => p.id == 1);
+      expect(saisie.auteurLogin, 'admin');
+      expect(saisie.auteur, 'Awa Kouassi');
+      expect(lignes.firstWhere((p) => p.id == 3).auteur, isNull, reason: 'compté avant, sans auteur connu');
+    });
+
+    test('47 : rayons d\'un inventaire aux lignes en partie non retenues : seulement ceux à compter', () async {
+      final (_, api) = await connecte();
+      serveur.serveurRecent = true;
+      // Inventaire créé par l'ancienne méthode (emplacements, lignes non retenues) : rien de retenu → aucun rayon.
+      final r = await api.creerInventaire('Ancienne méthode', 'Emplacement', valeurs: ['S2B2', 'S3'], nonRetenues: true);
+      final id = r.inventaireId!;
+      expect(await api.fetchRayons(id), isEmpty);
+      await api.retenirProduits(id, ['F1']);
+      expect((await api.fetchRayons(id)).map((x) => x.id), ['S3']);
     });
   });
 }

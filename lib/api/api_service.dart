@@ -377,7 +377,13 @@ class ApiService implements SaisieServeur {
   /// lignes sont créées mais NON retenues (invisibles des lectures ws/inventaires, de la saisie et de la
   /// clôture) jusqu'à [retenirProduits]. C'est ainsi que Prestige crée un inventaire limité à une liste
   /// de produits (écran web « Inventaire unitaire » puis « Ajouter des articles »).
-  Future<ResultatCreationServeur> creerInventaire(String libelle, String type, {List<String>? valeurs, bool nonRetenues = false}) async {
+  ///
+  /// 4.16.1 (demande serveur 46) — [produits] (lg_FAMILLE_ID) : un serveur à jour crée l'inventaire de CES produits
+  /// seulement, lignes retenues, en UNE transaction, et répond `inconnus` (éléments non retrouvés) ; un serveur plus
+  /// ancien ignore le champ et applique [valeurs] / [nonRetenues] (méthode en deux temps, voir
+  /// CreationInventaire.creerDepuisCollecte). [ResultatCreationServeur.inconnus] non null ⇔ pris en compte.
+  Future<ResultatCreationServeur> creerInventaire(String libelle, String type,
+      {List<String>? valeurs, bool nonRetenues = false, List<String>? produits}) async {
     final url = Uri.parse('$baseUrl/api/v1/inventaire/creation');
     final http.Response response;
     try {
@@ -388,6 +394,7 @@ class ApiService implements SaisieServeur {
                 'str_TYPE_TRANSACTION': type,
                 if (valeurs != null && valeurs.isNotEmpty) 'valeurs': valeurs,
                 if (nonRetenues) 'bool_INVENTAIRE': 0,
+                if (produits != null && produits.isNotEmpty) 'produits': produits,
               }))
           // Plusieurs milliers de produits : la création peut prendre du temps.
           .timeout(const Duration(seconds: 180));
@@ -419,9 +426,10 @@ class ApiService implements SaisieServeur {
     }
     if (code != 200 || data is! Map) return ResultatCreationServeur.refus('Le serveur a refusé la création (code $code).');
     final succes = m['success'];
+    final inconnus = m['inconnus'] is List ? [for (final e in m['inconnus'] as List) '$e'] : null;
     if (succes == 1 || succes == true) {
       final id = '${m['lgInventaireId'] ?? ''}'.trim();
-      return ResultatCreationServeur.ok((m['lignes'] as num?)?.toInt(), inventaireId: id.isEmpty ? null : id);
+      return ResultatCreationServeur.ok((m['lignes'] as num?)?.toInt(), inventaireId: id.isEmpty ? null : id, inconnus: inconnus);
     }
     if (message.toLowerCase().contains('connecter')) return const ResultatCreationServeur.session();
     return ResultatCreationServeur.refus(message.isEmpty ? 'Création refusée par le serveur.' : message);
@@ -597,6 +605,15 @@ class ApiService implements SaisieServeur {
     final code = r.statusCode;
     if (code == 401 || code == 403) throw ApiLoadException('Session expirée ($quoi) : reconnectez-vous.', TypeErreurChargement.session);
     if (code >= 500) throw ApiLoadException('Erreur du serveur (code $code, $quoi). Réessayez dans un instant.');
+    // 4.16.1 (demande serveur 48) : inventaire clôturé (409 INVENTAIRE_CLOTURE) → message du serveur.
+    if (code == 409) {
+      var m = '';
+      try {
+        final d = json.decode(utf8.decode(r.bodyBytes, allowMalformed: true));
+        if (d is Map) m = '${d['msg'] ?? d['errors'] ?? d['message'] ?? ''}'.trim();
+      } catch (_) {}
+      throw ApiLoadException(m.isEmpty ? 'Inventaire clôturé : aucune ligne n\'a été modifiée.' : m);
+    }
     if (code != 200) throw ApiLoadException('Le serveur a refusé la demande ($quoi, code $code).');
     final dynamic d;
     try {
@@ -969,7 +986,10 @@ class ResultatCreationServeur {
   /// retrouver dans la liste des inventaires ouverts.
   final String? inventaireId;
 
-  const ResultatCreationServeur.ok(this.lignes, {this.inventaireId})
+  /// 4.16.1 — Éléments de `produits` non retrouvés par le serveur ; null : champ `produits` ignoré (serveur ancien).
+  final List<String>? inconnus;
+
+  const ResultatCreationServeur.ok(this.lignes, {this.inventaireId, this.inconnus})
       : succes = true,
         session = false,
         incertain = false,
@@ -979,20 +999,23 @@ class ResultatCreationServeur {
         lignes = null,
         session = false,
         incertain = false,
-        inventaireId = null;
+        inventaireId = null,
+        inconnus = null;
   const ResultatCreationServeur.session()
       : succes = false,
         lignes = null,
         session = true,
         incertain = false,
         inventaireId = null,
+        inconnus = null,
         message = 'Session expirée : reconnectez-vous.';
   const ResultatCreationServeur.incertain(this.message)
       : succes = false,
         lignes = null,
         session = false,
         incertain = true,
-        inventaireId = null;
+        inventaireId = null,
+        inconnus = null;
 }
 
 /// Produit de l'officine retrouvé par son code (fiche article).

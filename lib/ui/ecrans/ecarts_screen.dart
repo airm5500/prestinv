@@ -448,6 +448,8 @@ class _NvEcartsScreenState extends State<NvEcartsScreen> {
               if ((p.locationLabel ?? widget.rayon?.libelle) != null) (p.locationLabel ?? widget.rayon!.libelle),
               '${i + 1} / ${_affiches.length}',
               if (_verifies.contains(p.id)) 'vérifié',
+              // 4.16.1 (demande serveur 50) : qui a compté cette ligne (serveur à jour).
+              if (p.auteur != null) 'compté par ${p.auteur}',
             ].join(' · '),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,

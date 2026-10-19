@@ -85,6 +85,28 @@ void main() {
     await demonter(tester);
   });
 
+  // 4.16.1 (demande serveur 50) : serveur à jour → l'auteur de la dernière saisie est rappelé (« compté par … »)
+  // dans la ligne d'informations de la correction ; serveur ancien : rien de plus.
+  testWidgets('écarts : « compté par » (auteur rendu par un serveur à jour) ; absent sur un serveur ancien', (tester) async {
+    final b = await ouvrirEcarts(tester);
+    await tester.tap(find.text('AUGMENTIN 1 G SACHETS'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('compté par'), findsNothing, reason: 'serveur ancien : pas d\'auteur');
+    await demonter(tester);
+
+    final s = serveurRealiste()..routesRecentes = true;
+    s.produits.firstWhere((p) => p.id == 6).auteur = 'admin';
+    tailleEcran(tester, telephone360);
+    final b2 = await preparerBanc(serveur: s);
+    await tester.pumpWidget(monterNv(b2, NvEcartsScreen(inventaire: _inv)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AUGMENTIN 1 G SACHETS'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('compté par Awa Kouassi'), findsOneWidget);
+    expect(b.serveur.produits, isNotEmpty);
+    await demonter(tester);
+  });
+
   testWidgets('écarts : échec réseau → message, PAS vérifié, saisie gardée ; champ vide refusé ; Garder', (tester) async {
     final b = await ouvrirEcarts(tester);
     await tester.tap(find.text('AUGMENTIN 1 G SACHETS'));

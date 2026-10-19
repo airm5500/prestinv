@@ -12,8 +12,8 @@ minimum_sunmi: 4.8.5+4
 |---|---|---|---|
 | 4.8.5 | 4 | à compléter | dernière version publiée connue |
 
-Version en préparation (pas encore publiée) : **4.16.0+18** (`pubspec.yaml`), au-dessus de 4.8.5 / 4
-(4.16.0 > 4.8.5 nombre par nombre : 16 > 8 ; 18 > 4) et de la livraison de test précédente 4.15.3+17.
+Version en préparation (pas encore publiée) : **4.16.1+19** (`pubspec.yaml`), au-dessus de 4.8.5 / 4
+(4.16.1 > 4.8.5 nombre par nombre : 16 > 8 ; 19 > 4) et de la livraison de test précédente 4.16.0+18.
 
 **Google Play (4.16.0)** : le même numéro sert à Google Play (piste « Test interne », `docs/android/README.md`). Le
 `+N` doit rester plus grand que celui de **chaque** canal (Sunmi et Play). L'APK Sunmi, construit sur le PC du

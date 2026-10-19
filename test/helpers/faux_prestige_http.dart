@@ -123,6 +123,12 @@ class FauxPrestige {
   /// Demandes reçues par `POST /inventaire/{id}/versement` (corps décodé).
   final List<Map<String, dynamic>> versementsLot = [];
 
+  /// Noms complets des auteurs de saisie (demande 50), par identifiant.
+  final Map<String, String> nomsAuteurs = {'admin': 'Awa Kouassi'};
+
+  /// Demandes de création reçues avec `produits` (demande 46).
+  final List<List<String>> creationsProduits = [];
+
   /// Versement en lot : les N prochaines réponses se perdent APRÈS l'enregistrement (réseau coupé).
   int versementsReponsePerdue = 0;
 
@@ -171,8 +177,13 @@ class FauxPrestige {
         query.isEmpty || p.cip.contains(query) || p.nom.toLowerCase().contains(query) || (p.ean != null && p.ean!.startsWith(query));
     final lignes = lignesDe(q['idInventaire']);
     List<FauxProduit> touches() => lignes.where((p) => p.dtUpdated != null).toList();
+    // Serveur à jour (demande 50) : auteur de la dernière saisie (identifiant, nom), absent sur une ligne jamais saisie.
+    Map<String, dynamic> ligneJson(FauxProduit p) => {
+          ...p.toJson(),
+          if (routesRecentes && p.auteur != null) ...{'auteurId': 'U-${p.auteur}', 'auteurLogin': p.auteur, 'auteurNom': nomsAuteurs[p.auteur] ?? p.auteur},
+        };
     http.Response liste(Iterable<FauxProduit> ps) =>
-        http.Response.bytes(utf8.encode(json.encode(ps.map((p) => p.toJson()).toList())), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+        http.Response.bytes(utf8.encode(json.encode(ps.map(ligneJson).toList())), 200, headers: {'content-type': 'application/json; charset=utf-8'});
 
     if (req.method == 'POST' && fin == 'quantite') {
       if (sansRouteLigneQuantite) return http.Response('', 404);
@@ -205,6 +216,42 @@ class FauxPrestige {
       if (type.isEmpty) return http.Response(json.encode({'success': 0, 'message': "Choisissez un type d'inventaire."}), 200);
       // Comme createInventaireMultiCriteres : sans valeur → tous les produits ; sinon ceux des emplacements.
       final filtre = valeurs?.where((v) => v.isNotEmpty && v != '0' && v != '%%').toSet() ?? const <String>{};
+      // Serveur à jour (demande 46) : `produits` → ces produits seulement (dans le critère), lignes retenues, une
+      // transaction ; `inconnus` dans la réponse. Serveur plus ancien : le champ est ignoré.
+      final demandes = b['produits'] is List ? [for (final e in b['produits'] as List) '$e'] : null;
+      if (routesRecentes && demandes != null && demandes.isNotEmpty) {
+        creationsProduits.add(demandes);
+        if (demandes.length > 500) return http.Response(json.encode({'success': 0, 'message': '500 produits au plus par inventaire.'}), 413);
+        final inconnus = <String>[];
+        final choisis = <FauxProduit>[];
+        for (final d in demandes) {
+          final p = produits.where((p) => 'F${p.id}' == d || p.cip == d || p.ean == d).firstOrNull;
+          if (p == null || (filtre.isNotEmpty && !filtre.contains(p.rayon))) {
+            inconnus.add(d);
+          } else if (!choisis.contains(p)) {
+            choisis.add(p);
+          }
+        }
+        if (choisis.isEmpty) {
+          return http.Response.bytes(
+              utf8.encode(json.encode({'success': 0, 'inconnus': inconnus, 'message': "Aucun inventaire n'a ete cree : aucun des produits n'a ete retrouve."})), 200);
+        }
+        final id = 'NEW${creations.length}';
+        inventaires = {id: nom, ...inventaires};
+        final base = 100000 * creations.length;
+        final copies = [for (final p in choisis) p.copie(base + p.id)];
+        crees[id] = FauxInventaireCree(copies, {for (final p in choisis) base + p.id: p.id}, {for (final c in copies) c.id});
+        return http.Response.bytes(
+            utf8.encode(json.encode({
+              'inconnus': inconnus,
+              'success': 1,
+              'lignes': choisis.length,
+              'nombre': '${choisis.length} article(s) inventorie(s)',
+              'lgInventaireId': id,
+              'libelle': nom,
+            })),
+            200);
+      }
       final inclus = filtre.isEmpty ? produits : produits.where((p) => filtre.contains(p.rayon)).toList();
       if (inclus.isEmpty) return http.Response(json.encode({'success': 0, 'message': "Aucun inventaire n'a ete cree."}), 200);
       // Le plus récent en tête (ORDER BY dtCREATED DESC).
@@ -257,7 +304,8 @@ class FauxPrestige {
       final toutes = c?.lignes ?? produits;
       final retenuesInv = lignesDe(inv).map((p) => p.id).toSet();
       final ids = <String>[];
-      for (final p in toutes) {
+      // Demande 47 : seulement les rayons qui ont des lignes à compter (HAVING … > 0).
+      for (final p in toutes.where((p) => retenuesInv.contains(p.id))) {
         if (!ids.contains(p.rayon)) ids.add(p.rayon);
       }
       ids.sort((a, b) => (rayons[a] ?? a).compareTo(rayons[b] ?? b));
@@ -349,7 +397,9 @@ class FauxPrestige {
       case 'rayons':
         // Comme fetchRayon : les rayons de TOUTES les lignes de l'inventaire (retenues ou non).
         final c = crees[q['idInventaire']];
-        final ids = c == null ? rayons.keys.toList() : [for (final r in rayons.keys) if (c.lignes.any((l) => l.rayon == r)) r];
+        // Serveur à jour (demande 47) : seulement les rayons des lignes à compter (retenues).
+        final lignesRayons = c == null ? null : (routesRecentes ? c.lignesRetenues : c.lignes);
+        final ids = lignesRayons == null ? rayons.keys.toList() : [for (final r in rayons.keys) if (lignesRayons.any((l) => l.rayon == r)) r];
         return http.Response.bytes(utf8.encode(json.encode([for (final r in ids) {'id': r, 'code': r, 'libelle': rayons[r]}])), 200);
       case 'details':
         return liste(lignes.where((p) => p.rayon == q['idRayon'] && correspond(p)));

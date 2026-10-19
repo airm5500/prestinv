@@ -80,8 +80,8 @@ void main() {
       expect(r.ok, isTrue, reason: r.message);
       expect(r.retenus, 40);
       // Actuel : essai de la route + doublon (liste) + création + identifiant (liste) + retenue = 5.
-      // À jour : doublon (liste) + création + retenue = 3.
-      mesurer('Requêtes — création depuis la collecte, $nom', rs.length, seuil: recent ? 3 : 5, unite: 'requêtes', detail: detail(rs));
+      // À jour (4.16.1, demande 46) : doublon (liste) + création atomique des produits = 2.
+      mesurer('Requêtes — création depuis la collecte, $nom', rs.length, seuil: recent ? 2 : 5, unite: 'requêtes', detail: detail(rs));
     });
   }
 

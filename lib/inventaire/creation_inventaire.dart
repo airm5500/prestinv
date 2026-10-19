@@ -94,7 +94,10 @@ class ResultatCreation {
   /// 4.15 — Depuis la collecte : lignes retenues (produits collectés mis dans l'inventaire) ; null :
   /// serveur qui ne sait pas retenir (l'inventaire contient tous les produits de ces emplacements).
   final int? retenus;
-  const ResultatCreation(this.issue, {this.inventaire, this.lignes, this.message = '', this.retenus});
+
+  /// 4.16.1 — Produits que le serveur n'a pas retrouvés (création atomique, demande 46) ; null : non fourni.
+  final List<String>? inconnus;
+  const ResultatCreation(this.issue, {this.inventaire, this.lignes, this.message = '', this.retenus, this.inconnus});
 
   bool get ok => issue == IssueCreation.creee;
 }
@@ -133,7 +136,8 @@ class CreationInventaire {
     }
   }
 
-  Future<ResultatCreation> _creer(String libelle, TypeInventaire type, {List<String>? valeurs, bool nonRetenues = false}) async {
+  Future<ResultatCreation> _creer(String libelle, TypeInventaire type,
+      {List<String>? valeurs, bool nonRetenues = false, List<String>? produits}) async {
     // 1. Doublon parmi les inventaires ouverts (et serveur joignable avant d'envoyer quoi que ce soit).
     final List<Inventory> avant;
     try {
@@ -148,12 +152,13 @@ class CreationInventaire {
     }
 
     // 2. Création.
-    final r = await api.creerInventaire(libelle, type.valeur, valeurs: valeurs, nonRetenues: nonRetenues);
+    final r = await api.creerInventaire(libelle, type.valeur, valeurs: valeurs, nonRetenues: nonRetenues, produits: produits);
     if (r.session) return ResultatCreation(IssueCreation.session, message: r.message);
     if (!r.succes && !r.incertain) return ResultatCreation(IssueCreation.refus, message: r.message);
     // Identifiant donné par le serveur (demande 20) : pas besoin de relire la liste.
     if (r.succes && r.inventaireId != null) {
-      return ResultatCreation(IssueCreation.creee, inventaire: Inventory(id: r.inventaireId!, libelle: libelle), lignes: r.lignes);
+      return ResultatCreation(IssueCreation.creee,
+          inventaire: Inventory(id: r.inventaireId!, libelle: libelle), lignes: r.lignes, inconnus: r.inconnus);
     }
 
     // 3. Identifiant : relu dans la liste (aussi quand la réponse s'est perdue).
@@ -203,9 +208,15 @@ class CreationInventaire {
         return ResultatCreation(e.sessionExpiree ? IssueCreation.session : IssueCreation.reseau, message: e.message);
       }
       if (!retenue) return const ResultatCreation(IssueCreation.refus, message: messageServeurAncien);
+      // 4.16.1 (demande 46) : la liste des produits part AVEC les emplacements et les lignes non retenues. Serveur
+      // à jour : inventaire de ces produits seulement, en une transaction (réponse `inconnus`), rien d'autre à faire.
+      // Serveur plus ancien : `produits` ignoré, méthode en deux temps (emplacements non retenus, puis retenue).
       final r = await _creer(LibelleInventaire.normaliser(libelleSaisi), TypeInventaire.emplacement,
-          valeurs: [for (final e in analyse.emplacements) e.rayon.id], nonRetenues: true);
+          valeurs: [for (final e in analyse.emplacements) e.rayon.id], nonRetenues: true, produits: [for (final p in analyse.inclus) p.id]);
       if (!r.ok) return r;
+      if (r.inconnus != null && r.inventaire != null && r.inventaire!.id.isNotEmpty) {
+        return ResultatCreation(IssueCreation.creee, inventaire: r.inventaire, lignes: r.lignes, retenus: r.lignes, inconnus: r.inconnus);
+      }
       final inv = r.inventaire;
       if (inv == null || inv.id.isEmpty) {
         return ResultatCreation(IssueCreation.produitsNonAjoutes,
