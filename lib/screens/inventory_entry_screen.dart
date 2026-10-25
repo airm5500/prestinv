@@ -1629,13 +1629,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
     if (targetIndex != -1) {
       final targetProduct = products[targetIndex];
 
+      // 4.16.3 : plus de message « Position N : nom » (décision du pharmacien) ; le saut reste identique.
       provider.jumpToProduct(targetProduct, widget.inventoryId);
-
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              'Position ${targetIndex + 1} : ${targetProduct.produitName}'),
-          duration: const Duration(seconds: 1),
-          backgroundColor: Colors.green));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Aucun produit trouvé.'), backgroundColor: Colors.red));

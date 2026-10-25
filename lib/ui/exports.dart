@@ -251,11 +251,44 @@ class NvExports {
     }
   }
 
+  /// 4.16.3 (décision du pharmacien) — lignes du rapport des cumuls : colonne « Auteur » = qui avait déjà compté
+  /// la quantité « avant » (nom, à défaut identifiant, comme l'historique ; vide si le serveur ne le donne pas).
+  /// Utilisées par les PDF des deux interfaces.
+  static const enTetesCumuls = ['Heure', 'CIP', 'Produit', 'Avant', 'Ajout', 'Total', 'Rayon', 'Auteur'];
+
+  static List<List<String>> lignesCumuls(List<Map<String, dynamic>> logs) => [
+        for (final l in logs)
+          [
+            heure('${l['date']}'),
+            '${l['cip']}',
+            '${l['name']}',
+            '${l['oldQty']}',
+            '${l['addedQty']}',
+            '${l['newQty']}',
+            '${l['rayon']}',
+            l['comptePar'] is String ? l['comptePar'] as String : '',
+          ],
+      ];
+
+  /// Largeurs des colonnes (A4 portrait) : le produit garde la plus grande part ; rayon et auteur passent à la ligne
+  /// si besoin, sans déborder.
+  static const largeursCumuls = <int, pw.TableColumnWidth>{
+    0: pw.FlexColumnWidth(1.1),
+    1: pw.FlexColumnWidth(1.9),
+    2: pw.FlexColumnWidth(3.2),
+    3: pw.FlexColumnWidth(0.9),
+    4: pw.FlexColumnWidth(0.9),
+    5: pw.FlexColumnWidth(0.9),
+    6: pw.FlexColumnWidth(1.6),
+    7: pw.FlexColumnWidth(1.8),
+  };
+
   static Future<Uint8List> pdfCumuls(List<Map<String, dynamic>> logs) {
     final doc = pw.Document();
-    doc.addPage(pw.Page(
+    // 4.16.3 : plusieurs pages si besoin (le tableau se poursuit, en-têtes répétés) ; avant, une seule page.
+    doc.addPage(pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
-      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      build: (ctx) => [
         pw.Header(
           level: 0,
           child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
@@ -266,19 +299,19 @@ class NvExports {
         pw.SizedBox(height: 20),
         pw.TableHelper.fromTextArray(
           context: ctx,
-          data: [
-            ['Heure', 'CIP', 'Produit', 'Avant', 'Ajout', 'Total', 'Rayon'],
-            ...logs.map((l) => [heure('${l['date']}'), '${l['cip']}', '${l['name']}', '${l['oldQty']}', '${l['addedQty']}', '${l['newQty']}', '${l['rayon']}']),
-          ],
-          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+          data: [enTetesCumuls, ...lignesCumuls(logs)],
+          columnWidths: largeursCumuls,
+          cellStyle: const pw.TextStyle(fontSize: 9),
+          headerStyle: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
           headerDecoration: const pw.BoxDecoration(color: PdfColors.blue),
+          headerCount: 1,
           rowDecoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(width: 0.5, color: PdfColors.grey))),
           cellAlignment: pw.Alignment.centerLeft,
           cellAlignments: {3: pw.Alignment.centerRight, 4: pw.Alignment.centerRight, 5: pw.Alignment.centerRight},
         ),
         pw.Padding(padding: const pw.EdgeInsets.all(10)),
         pw.Text('Total des lignes cumulées : ${logs.length}'),
-      ]),
+      ],
     ));
     return doc.save();
   }

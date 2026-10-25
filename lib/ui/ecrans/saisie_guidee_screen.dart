@@ -276,8 +276,8 @@ class _NvSaisieGuideeScreenState extends State<NvSaisieGuideeScreen> with Douche
       cible = produits.indexWhere((p) => p.produitCip.contains(saisie) || p.produitName.toLowerCase().contains(saisie.toLowerCase()));
     }
     if (cible != -1) {
+      // 4.16.3 : plus de message « Position N : nom » (décision du pharmacien) ; le saut reste identique.
       provider.jumpToProduct(produits[cible], inventoryId);
-      nvMessage(context, 'Position ${cible + 1} : ${produits[cible].produitName}', ton: context.nv.ok, duree: const Duration(seconds: 1));
     } else {
       nvMessage(context, 'Aucun produit trouvé.', ton: context.nv.erreur);
     }

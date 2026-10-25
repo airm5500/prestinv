@@ -145,4 +145,39 @@ void main() {
     await tester.pumpAndSettle();
     await demonter(tester);
   });
+
+  testWidgets('4.16.3 : « Aller au produit » (ancienne interface) saute au produit, sans message « Position N : nom »', (tester) async {
+    ecranTerminal(tester);
+    final b = await preparerBanc(mode: SendMode.collect);
+    await tester.pumpWidget(monter(b, const InventoryEntryScreen(inventoryId: 'INV1')));
+    await tester.pumpAndSettle();
+    await ouvrirRayon(tester, 'RAYON UN');
+    expect(b.entry.products.length, greaterThan(1));
+    expect(b.entry.currentProductIndex, 0);
+    final cible = b.entry.products[1];
+    for (final saisie in ['2', cible.produitCip]) {
+      await tester.tap(find.byIcon(Icons.find_in_page));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Position, Nom ou Code'), saisie);
+      await tester.tap(find.text('Aller'));
+      await tester.pump();
+      expect(b.entry.currentProductIndex, 1, reason: 'saut par « $saisie »');
+      expect(b.entry.currentProduct!.id, cible.id);
+      expect(find.textContaining(RegExp(r'^Position \d+ :')), findsNothing, reason: 'message retiré');
+      expect(find.byType(SnackBar), findsNothing);
+      await tester.pumpAndSettle();
+      b.entry.jumpToProduct(b.entry.products.first, 'INV1');
+      await tester.pumpAndSettle();
+    }
+    // Introuvable : le message d'erreur reste.
+    await tester.tap(find.byIcon(Icons.find_in_page));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Position, Nom ou Code'), 'ZZZ-INTROUVABLE');
+    await tester.tap(find.text('Aller'));
+    await tester.pump();
+    expect(find.text('Aucun produit trouvé.'), findsOneWidget);
+    expect(b.entry.currentProductIndex, 0);
+    await tester.pumpAndSettle(const Duration(seconds: 5));
+    await demonter(tester);
+  });
 }

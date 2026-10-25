@@ -240,14 +240,17 @@ void main() {
       await douchette(tester, '3400930000001');
       await tester.pumpAndSettle();
       expect(find.text('Code 3400930000001'), findsOneWidget);
+      expect(find.textContaining('Additionnée'), findsNothing, reason: '4.16.3 : aide retirée');
       await taperNv(tester, '12');
       await tester.pumpAndSettle();
       await douchette(tester, '3400930000001');
       await tester.pumpAndSettle();
+      expect(find.text('Code 3400930000001'), findsOneWidget);
+      expect(find.textContaining('Additionnée'), findsNothing, reason: '4.16.3 : aide retirée, code déjà dans la liste');
       await douchette(tester, '3'); // chiffres + Entrée de la douchette
       await tester.pumpAndSettle();
       final items = await CollecteStore.lire();
-      expect(items.single.quantity, 15);
+      expect(items.single.quantity, 15, reason: 'addition inchangée : 12 + 3');
       expect(champScanAFocus(tester), isTrue);
       await demonter(tester);
     });
@@ -429,6 +432,32 @@ void main() {
       expect(find.text('6 + 4 = 10'), findsOneWidget);
       expect(find.textContaining('déjà compté par'), findsNothing, reason: 'serveur ancien : pas d\'auteur, rien de plus');
       await demonter(tester);
+    });
+
+    // 4.16.3 (décision du pharmacien) : colonne « Auteur » dans le PDF du rapport des cumuls (deux interfaces).
+    test('rapport des cumuls (PDF) : colonne « Auteur » = nom, sinon identifiant ; vide si le serveur ne le donne pas', () async {
+      final logs = <Map<String, dynamic>>[
+        {'date': '2026-10-25T09:05:07', 'cip': '3400000000012', 'name': 'PRODUIT 012', 'oldQty': 6, 'addedQty': 4, 'newQty': 10, 'rayon': 'RAYON UN', 'comptePar': 'Awa Kouassi'},
+        {'date': '2026-10-25T09:06:00', 'cip': '3400000000013', 'name': 'PRODUIT 013', 'oldQty': 2, 'addedQty': 1, 'newQty': 3, 'rayon': 'RAYON UN'},
+      ];
+      expect(NvExports.enTetesCumuls, ['Heure', 'CIP', 'Produit', 'Avant', 'Ajout', 'Total', 'Rayon', 'Auteur']);
+      final lignes = NvExports.lignesCumuls(logs);
+      expect(lignes.first, ['09:05:07', '3400000000012', 'PRODUIT 012', '6', '4', '10', 'RAYON UN', 'Awa Kouassi']);
+      expect(lignes.last.last, '', reason: 'auteur absent (serveur ancien) : colonne vide');
+      expect(lignes.every((l) => l.length == NvExports.enTetesCumuls.length), isTrue);
+      expect(NvExports.largeursCumuls.length, NvExports.enTetesCumuls.length, reason: 'une largeur par colonne');
+      // Mise en page : 300 lignes aux textes longs, sans erreur (passage à la ligne, pages suivantes).
+      final longues = [
+        for (var i = 0; i < 40; i++)
+          {
+            ...logs[i.isEven ? 0 : 1],
+            'name': 'PRODUIT D\'ESSAI AU LIBELLÉ TRÈS LONG POUR LA MISE EN PAGE N° $i (FORMAT HOSPITALIER)',
+            'rayon': 'EMPLACEMENT AU NOM LONG $i',
+            if (i.isEven) 'comptePar': 'Prénom Composé Nom De Famille Très Long $i',
+          },
+      ];
+      final pdf = await NvExports.pdfCumuls(longues);
+      expect(String.fromCharCodes(pdf.take(4)), '%PDF');
     });
 
     // 4.16.2 (décision du pharmacien) : auteur du comptage précédent (serveur à jour), sur la même ligne.

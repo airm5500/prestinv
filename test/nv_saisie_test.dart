@@ -342,4 +342,33 @@ void main() {
       await demonter(tester);
     });
   });
+
+  testWidgets('4.16.3 : « Aller au produit » (saisie guidée) saute au produit, sans message « Position N : nom »', (tester) async {
+    final b = await guidee(tester);
+    final produits = b.entry.products;
+    expect(produits.length, greaterThan(2));
+    expect(produitCourant(tester), produits.first.produitName);
+    Future<void> aller(String saisie) async {
+      await tester.tap(find.byKey(const ValueKey('nv-menu-guidee')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Aller au produit…'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, saisie);
+      await tester.tap(find.text('Aller'));
+      await tester.pump();
+    }
+    await aller('3');
+    expect(produitCourant(tester), produits[2].produitName, reason: 'saut par position');
+    expect(find.textContaining(RegExp(r'^Position \d+ :')), findsNothing, reason: 'message retiré');
+    await tester.pumpAndSettle();
+    await aller(produits[1].produitCip);
+    expect(produitCourant(tester), produits[1].produitName, reason: 'saut par code');
+    expect(find.textContaining(RegExp(r'^Position \d+ :')), findsNothing);
+    await tester.pumpAndSettle();
+    await aller('ZZZ-INTROUVABLE');
+    expect(find.text('Aucun produit trouvé.'), findsOneWidget, reason: 'le message d\'erreur reste');
+    expect(produitCourant(tester), produits[1].produitName);
+    await tester.pumpAndSettle(const Duration(seconds: 5));
+    await demonter(tester);
+  });
 }

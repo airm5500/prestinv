@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:prestinv/providers/entry_provider.dart';
 import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
+import 'package:prestinv/ui/exports.dart';
 
 class CumulHistoryScreen extends StatelessWidget {
   const CumulHistoryScreen({super.key});
@@ -77,63 +77,10 @@ class CumulHistoryScreen extends StatelessWidget {
     }
   }
 
+  // 4.16.3 : même rapport que la nouvelle interface (colonne « Auteur », plusieurs pages si besoin).
   Future<void> _generateAndPrintPdf(BuildContext context, List<Map<String, dynamic>> logs) async {
-    final doc = pw.Document();
-
-    final tableData = [
-      ['Heure', 'CIP', 'Produit', 'Avant', 'Ajout', 'Total', 'Rayon'],
-      ...logs.map((log) => [
-        _formatDate(log['date']),
-        log['cip'],
-        log['name'],
-        log['oldQty'].toString(),
-        log['addedQty'].toString(),
-        log['newQty'].toString(),
-        log['rayon']
-      ]).toList()
-    ];
-
-    doc.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a4,
-        build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Header(
-                level: 0,
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('Rapport des Cumuls', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('Généré le: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}'),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-              pw.TableHelper.fromTextArray(
-                context: context,
-                data: tableData,
-                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
-                headerDecoration: const pw.BoxDecoration(color: PdfColors.blue),
-                rowDecoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(width: 0.5, color: PdfColors.grey))),
-                cellAlignment: pw.Alignment.centerLeft,
-                cellAlignments: {
-                  3: pw.Alignment.centerRight,
-                  4: pw.Alignment.centerRight,
-                  5: pw.Alignment.centerRight,
-                },
-              ),
-              pw.Padding(padding: const pw.EdgeInsets.all(10)),
-              pw.Text("Total des lignes cumulées : ${logs.length}"),
-            ],
-          );
-        },
-      ),
-    );
-
     await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => doc.save(),
+      onLayout: (PdfPageFormat format) => NvExports.pdfCumuls(logs),
       name: 'Rapport_Cumuls_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}',
     );
   }

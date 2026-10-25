@@ -249,7 +249,8 @@ class _NvCollecteScreenState extends State<NvCollecteScreen> {
                     Text('Code $code', key: const ValueKey('nv-collecte-code'), maxLines: 2, overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: nv.encre)),
                     const SizedBox(height: 10),
-                    AfficheQuantite(label: 'Quantité', valeur: saisie, aide: 'Additionnée si le code est déjà dans la liste'),
+                    // 4.16.3 : sans l'aide « Additionnée si… » (décision du pharmacien) ; l'addition reste identique.
+                    AfficheQuantite(label: 'Quantité', valeur: saisie),
                   ]),
                 ),
                 NvPave(onKey: touche, hauteur: NvPave.hauteurPour(ctx)),
