@@ -50,7 +50,8 @@ class CumulHistoryScreen extends StatelessWidget {
                 child: Icon(Icons.add, color: Colors.white),
               ),
               title: Text(log['name'] ?? 'Produit inconnu', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text("CIP: ${log['cip']} • ${log['rayon']}"),
+              // 4.16.2 : auteur du comptage précédent (serveur à jour), sur la même ligne.
+              subtitle: Text("CIP: ${log['cip']} • ${log['rayon']}${log['comptePar'] is String ? " • déjà compté par ${log['comptePar']}" : ''}"),
               trailing: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.end,

@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:prestinv/screens/cumul_history_screen.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prestinv/collecte/collecte_store.dart';
 import 'package:prestinv/collecte/versement.dart';
@@ -426,6 +427,37 @@ void main() {
       await tester.pumpWidget(monterNv(b, const NvCumulsScreen()));
       await tester.pumpAndSettle();
       expect(find.text('6 + 4 = 10'), findsOneWidget);
+      expect(find.textContaining('déjà compté par'), findsNothing, reason: 'serveur ancien : pas d\'auteur, rien de plus');
+      await demonter(tester);
+    });
+
+    // 4.16.2 (décision du pharmacien) : auteur du comptage précédent (serveur à jour), sur la même ligne.
+    testWidgets('historique des cumuls : « déjà compté par … » (auteur du serveur), sans place en plus ; deux interfaces', (tester) async {
+      tailleEcran(tester, sunmiV2s);
+      final b = await banc();
+      final p = Product(
+          id: 2,
+          produitCip: '3400935959001',
+          produitName: 'AMOXICILLINE 500 GÉL B/12',
+          produitPrixAchat: 0,
+          produitPrixUni: 0,
+          quantiteInitiale: 10,
+          quantiteSaisie: 6,
+          auteurLogin: 'awa.k',
+          auteurNom: 'Awa Kouassi');
+      await b.entry.addCumulLog(p, 6, 4);
+      await b.entry.addCumulLog(
+          Product(id: 3, produitCip: '3400936000002', produitName: 'EFFERALGAN', produitPrixAchat: 0, produitPrixUni: 0, quantiteInitiale: 1, quantiteSaisie: 2, auteurLogin: 'kone'),
+          2,
+          1);
+      expect(b.entry.cumulLogs.first['comptePar'], 'Awa Kouassi');
+      await tester.pumpWidget(monterNv(b, const NvCumulsScreen()));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('déjà compté par Awa Kouassi'), findsOneWidget);
+      expect(find.textContaining('déjà compté par kone'), findsOneWidget, reason: 'identifiant si le nom manque');
+      await tester.pumpWidget(monter(b, const CumulHistoryScreen()));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('déjà compté par Awa Kouassi'), findsOneWidget, reason: 'ancienne interface');
       await demonter(tester);
     });
   });

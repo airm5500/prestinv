@@ -237,6 +237,9 @@ class EntryProvider with ChangeNotifier {
       'addedQty': addedQty,
       'newQty': oldQty + addedQty,
       'rayon': _selectedRayon?.libelle ?? 'Global',
+      // 4.16.2 (décision du pharmacien) : qui avait compté la quantité « avant » (serveur à jour, demande 50 :
+      // auteurNom / auteurLogin) ; absent sur un serveur plus ancien.
+      if (product.auteur != null) 'comptePar': product.auteur,
     };
     _cumulLogs.add(log);
     final prefs = await SharedPreferences.getInstance();

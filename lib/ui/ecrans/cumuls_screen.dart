@@ -49,7 +49,13 @@ class NvCumulsScreen extends StatelessWidget {
                       Expanded(
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Text('${log['name'] ?? 'Produit inconnu'}', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, color: nv.encre)),
-                          Text('CIP ${log['cip']} · ${log['rayon']} · ${NvExports.heure('${log['date']}')}', style: TextStyle(color: nv.gris, fontSize: 13)),
+                          // 4.16.2 : auteur du comptage précédent, sur la même ligne (sans place en plus).
+                          Text(
+                              'CIP ${log['cip']} · ${log['rayon']} · ${NvExports.heure('${log['date']}')}'
+                              '${log['comptePar'] is String ? ' · déjà compté par ${log['comptePar']}' : ''}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: nv.gris, fontSize: 13)),
                         ]),
                       ),
                       Text('${log['oldQty']} + ${log['addedQty']} = ${log['newQty']}', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: nv.ok.fg)),
