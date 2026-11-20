@@ -1,4 +1,5 @@
-# Google Play (piste « Test interne ») — Prestige Inventaire 4.16.0. Mode d'emploi pour le pharmacien :
+# Google Play (piste « Test interne ») — Prestige Inventaire 4.16.0 ; Prestige Inventaire V3 depuis 5.0.0
+# (com.dici.prestigeinventaire.v3, NOUVELLE application : premier AAB envoyé À LA MAIN dans la Play Console). Mode d'emploi pour le pharmacien :
 # docs/android/README.md (commun aux 4 applications Prestige).
 #
 # 1. aab (à chaque envoi de code sur claude/refonte, et à la main) : SI les quatre secrets de la clé d'envoi
@@ -8,7 +9,8 @@
 #    d'une nouvelle application se fait à la main dans la Play Console avec cet artefact). Sans ces secrets : rien
 #    (Google refuse un bundle signé avec la clé debug). L'APK de ci.yml n'est pas touché.
 # 2. envoi : SEULEMENT quand android/DEMANDE_PLAY est modifié (1re ligne = version de pubspec.yaml, ex. 4.16.0+18) et
-#    que le secret PLAY_SERVICE_ACCOUNT_JSON existe : envoi de l'AAB sur la piste « internal » de com.dici.prestinv
+#    que le secret PLAY_SERVICE_ACCOUNT_JSON existe : envoi de l'AAB sur la piste « internal » de
+#    com.dici.prestigeinventaire.v3
 #    (action r0adkll/upload-google-play épinglée par SHA), statut « completed » ; si l'application est encore en
 #    brouillon côté Play (« draft app »), nouvel essai en statut « draft » avec un message clair.
 # Secrets : jamais écrits dans le dépôt ni affichés ; keystore et compte de service écrits dans $RUNNER_TEMP
@@ -30,7 +32,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PACKAGE_NAME: com.dici.prestinv
+  PACKAGE_NAME: com.dici.prestigeinventaire.v3
 
 jobs:
   # Les secrets ne peuvent pas être lus dans un « if » de job : ce job dit seulement s'ils existent (sans les afficher)

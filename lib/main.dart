@@ -1,5 +1,6 @@
 // lib/main.dart
 
+import 'package:prestinv/identite_appli.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -291,7 +292,7 @@ class _PrestinvAppState extends State<PrestinvApp> with WidgetsBindingObserver {
           return RacineTailleEcran(
             child: MaterialApp(
               navigatorKey: navigateurApp,
-              title: 'Prestige Inventaire',
+              title: nomAppli,
               debugShowCheckedModeBanner: false,
               theme: themeOrigine(),
               home: homeWidget,

@@ -58,7 +58,7 @@ void main() {
     expect(find.byType(NvAccueilScreen), findsOneWidget);
     expect(app.auth.sessionCookie, 'JSESSIONID=essai-1');
     // 4.13 : accueil de la maquette (« Prestige Inventaire », pharmacie, bienvenue) ; liste à dérouler.
-    expect(find.text('PRESTIGE INVENTAIRE'), findsOneWidget);
+    expect(find.text('PRESTIGE INVENTAIRE V3'), findsOneWidget);
     expect(find.text(CompteFictif.officine), findsOneWidget);
     expect(find.text('Bienvenu(e), ${CompteFictif.prenom} ${CompteFictif.nom}'), findsOneWidget);
     expect(find.text('Voir les inventaires (2)'), findsOneWidget);

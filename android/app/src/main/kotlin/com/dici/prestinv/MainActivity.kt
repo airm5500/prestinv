@@ -39,6 +39,9 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "prestinv/appareil").setMethodCallHandler { call, result ->
             when (call.method) {
                 "cameraPresente" -> result.success(packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY))
+                // 5.0.0 (Prestige Inventaire V3) : ancienne Prestige Inventaire (com.dici.prestinv) installée ? Présence
+                // seulement (visibilité déclarée par <queries>) : aucune donnée lue, jamais ouverte.
+                "ancienneAppliInstallee" -> result.success(packageManager.getLaunchIntentForPackage("com.dici.prestinv") != null)
                 else -> result.notImplemented()
             }
         }

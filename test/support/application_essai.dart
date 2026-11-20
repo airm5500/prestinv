@@ -47,8 +47,11 @@ Future<AppEssai> lancerApplication(
   Map<String, Object> prefs = const {},
   bool attendre = true,
   DateTime Function()? horloge,
+  // 5.0.0 (Prestige Inventaire V3) : appareil VIERGE (nouvelle application : aucune préférence, coffre vide, code
+  // administrateur par défaut) ; [mode], [nouvelleInterface] et [prefs] sont alors ignorés.
+  bool vierge = false,
 }) async {
-  SharedPreferences.setMockInitialValues({
+  SharedPreferences.setMockInitialValues(vierge ? <String, Object>{} : {
     'localApiAddress': adresseServeurFictive,
     'localApiPort': '8080',
     'sendMode': mode.index,
@@ -64,7 +67,7 @@ Future<AppEssai> lancerApplication(
   final coffre = CoffreMemoire();
   IdentifiantsSecurises.instance = IdentifiantsSecurises(coffre: coffre);
   CodeAdmin.instance = CodeAdmin(coffre: coffre, iterations: 1000);
-  await CodeAdmin.instance.definir(codeAdminFictif);
+  if (!vierge) await CodeAdmin.instance.definir(codeAdminFictif);
 
   final config = AppConfig();
   await config.load();

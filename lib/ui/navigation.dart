@@ -1,6 +1,7 @@
 // lib/ui/navigation.dart
 // Navigation de la nouvelle interface : ouverture des écrans pour un inventaire, inventaire « en
 // cours » mémorisé sur l'appareil, menu latéral bleu de la tablette (maquette C).
+import 'package:prestinv/identite_appli.dart';
 import 'package:flutter/material.dart';
 import 'package:prestinv/models/inventory.dart';
 import 'package:prestinv/providers/entry_provider.dart';
@@ -151,9 +152,9 @@ class NvMenuLateral extends StatelessWidget {
       child: SafeArea(
         right: false,
         child: ListView(padding: const EdgeInsets.symmetric(vertical: 16), children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(24, 4, 16, 18),
-            child: Text('Prestige\nInventaire', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, height: 1.15)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 4, 16, 18),
+            child: Text(nomAppli.replaceFirst(' ', '\n'), style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, height: 1.15)),
           ),
           if (inventaire != null)
             Padding(

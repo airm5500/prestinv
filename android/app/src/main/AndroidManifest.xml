@@ -20,9 +20,10 @@
 
     <!-- La balise application contient la configuration principale -->
     <application
-        android:label="Prestige Inventaire"
+        android:label="Prestige Inventaire V3"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon"
+        android:roundIcon="@mipmap/launcher_icon_round"
         android:networkSecurityConfig="@xml/network_security_config"
         android:fullBackupContent="@xml/regles_sauvegarde"
         android:dataExtractionRules="@xml/regles_extraction"
@@ -62,5 +63,8 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- 5.0.0 (Prestige Inventaire V3) : ANCIENNE Prestige Inventaire encore installée ? Seulement pour afficher, une
+             fois, l'information de l'écran de connexion ; aucune de ses données n'est lue, elle n'est jamais ouverte. -->
+        <package android:name="com.dici.prestinv" />
     </queries>
 </manifest>

@@ -1,6 +1,7 @@
 // lib/ui/ecrans/lancement_screen.dart
 // Nouvelle interface — lancement (vérification de la licence) et cadre commun des écrans d'entrée
 // (connexion, licence, serveur injoignable) : bandeau bleu nuit avec le logo, contenu sur carte.
+import 'package:prestinv/identite_appli.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:prestinv/ui/responsive.dart';
@@ -13,7 +14,7 @@ class LogoApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Semantics(
-        label: 'Prestige Inventaire',
+        label: nomAppli,
         image: true,
         child: Container(
           width: taille,
@@ -106,7 +107,7 @@ class NvLancementScreen extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const LogoApp(taille: 96),
               const SizedBox(height: 20),
-              const Text('Prestige Inventaire', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+              const Text(nomAppli, style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               const Text('Vérification de la licence…', style: TextStyle(color: Pal.headerMuted, fontSize: 15)),
               const SizedBox(height: 24),

@@ -14,6 +14,7 @@
 // Mêmes données et même logique qu'avant : InventoryProvider.fetchInventories (rafraîchi à chaque retour
 // sur l'accueil), SaisieQueue (bandeau « à envoyer »), rappels de licence, performLogout. Un échec du
 // serveur n'est jamais une liste vide.
+import 'package:prestinv/identite_appli.dart';
 import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/collecte/collecte_store.dart';
@@ -442,7 +443,7 @@ class _NvAccueilScreenState extends State<NvAccueilScreen> {
     );
 
     return NvScaffold(
-      surtitre: 'Prestige Inventaire',
+      surtitre: nomAppli,
       title: officine.isEmpty ? 'Inventaire' : officine,
       subtitle: user == null ? null : 'Bienvenu(e), ${user.nomComplet}',
       retour: false,

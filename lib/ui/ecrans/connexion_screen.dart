@@ -2,6 +2,7 @@
 // Nouvelle interface — connexion. Même logique que l'écran d'origine (LoginScreen) : identifiants
 // mémorisés (« Rester connecté », mot de passe dans le stockage sécurisé), AuthProvider.login,
 // choix Local / Distant, accès à la Configuration ; succès → accueil (InterfaceVersion.home()).
+import 'package:prestinv/identite_appli.dart';
 import 'package:flutter/material.dart';
 import 'package:prestinv/config/app_config.dart';
 import 'package:prestinv/interface_version.dart';
@@ -72,7 +73,7 @@ class _NvConnexionScreenState extends State<NvConnexionScreen> {
     final config = context.watch<AppConfig>();
     final local = config.apiMode == ApiMode.local;
     return CadreEntree(
-      titre: 'Prestige Inventaire',
+      titre: nomAppli,
       sousTitre: 'Connexion',
       // Version installée (pubspec.yaml → Gradle), lue à l'exécution, discrète en bas.
       bas: const Padding(padding: EdgeInsets.only(bottom: 8, top: 4), child: VersionAffichee()),
@@ -84,6 +85,8 @@ class _NvConnexionScreenState extends State<NvConnexionScreen> {
         ),
       ],
       enfants: [
+        // 5.0.0 : ancienne Prestige Inventaire encore installée → information, une fois (rien sinon).
+        const BandeauAncienneAppli(),
         SoftCard(
           padding: const EdgeInsets.all(18),
           child: AutofillGroup(

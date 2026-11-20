@@ -2,6 +2,7 @@
 // Premier lancement sans joindre le serveur (aucune licence en cache) : ce n'est PAS un problème de
 // licence. Message clair, « Réessayer », réessai automatique toutes les 10 s, accès à la Configuration
 // (adresse du serveur). Même principe que lancement_screen.dart de prestige_vente_app.
+import 'package:prestinv/identite_appli.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -60,7 +61,7 @@ class _ServeurInjoignableScreenState extends State<ServeurInjoignableScreen> {
     final adresse = config.currentApiUrl.isEmpty ? 'non configurée' : config.currentApiUrl;
     final indisponible = (licence.error ?? '').startsWith('Serveur indisponible');
     return Scaffold(
-      appBar: AppBar(title: const Text('Prestige Inventaire')),
+      appBar: AppBar(title: const Text(nomAppli)),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),

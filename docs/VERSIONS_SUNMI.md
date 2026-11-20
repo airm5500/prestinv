@@ -1,4 +1,4 @@
-# Versions publiées sur le magasin Sunmi — Prestige Inventaire
+# Versions publiées sur le magasin Sunmi — Prestige Inventaire (V3 depuis 5.0.0)
 
 Ce fichier est **lu par le test** `test/non_regression/version_sunmi_test.dart` : la ligne `minimum_sunmi:`
 ci-dessous est la dernière version publiée sur le magasin Sunmi. Garder son format exact
@@ -12,8 +12,15 @@ minimum_sunmi: 4.8.5+4
 |---|---|---|---|
 | 4.8.5 | 4 | à compléter | dernière version publiée connue |
 
-Version en préparation (pas encore publiée) : **4.16.3+21** (`pubspec.yaml`), au-dessus de 4.8.5 / 4
-(4.16.3 > 4.8.5 nombre par nombre : 16 > 8 ; 21 > 4) et de la livraison de test précédente 4.16.2+20.
+Version en préparation (pas encore publiée) : **5.0.0+22** (`pubspec.yaml`) : **Prestige Inventaire V3**, NOUVELLE
+application (`com.dici.prestigeinventaire.v3`, « Prestige Inventaire V3 », icône avec le badge « V3 »), même
+fonctionnement que la 4.16.3+21 (voir `docs/NOTE_VERSION_5.0.0.md`). Elle est publiée sur une **nouvelle fiche** du
+magasin Sunmi : aucune version n'y a encore été publiée, la première sera 5.0.0+22 (au-dessus de 4.8.5 / 4 et de la
+livraison de test précédente 4.16.3+21 : les règles ci-dessous restent appliquées).
+
+L'**ancienne fiche** (`com.dici.prestinv`, « Prestige Inventaire ») garde la version déjà en ligne : rien n'y est
+republié. Pour information : dernier commit construit avec l'ancien identifiant
+`3e46c1ed7857e1b43fe7b87fff5e1cd0ccb9ec15` (4.16.3+21).
 
 **Google Play (4.16.0)** : le même numéro sert à Google Play (piste « Test interne », `docs/android/README.md`). Le
 `+N` doit rester plus grand que celui de **chaque** canal (Sunmi et Play). L'APK Sunmi, construit sur le PC du

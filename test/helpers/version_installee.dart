@@ -14,8 +14,8 @@ String versionPubspec() =>
 String simulerVersionInstallee() {
   final v = versionPubspec().split('+');
   PackageInfo.setMockInitialValues(
-    appName: 'Prestige Inventaire',
-    packageName: 'com.dici.prestinv',
+    appName: 'Prestige Inventaire V3',
+    packageName: 'com.dici.prestigeinventaire.v3',
     version: v.first,
     buildNumber: v.length > 1 ? v[1] : '',
     buildSignature: '',

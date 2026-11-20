@@ -1,6 +1,7 @@
 // lib/ui/ecrans/licence_screen.dart
 // Nouvelle interface — activation de la licence. Même logique que LicenseRegisterScreen (clé
 // nettoyée, LicenseProvider.registerLicense ; au retour de la Configuration, nouvelle vérification).
+import 'package:prestinv/identite_appli.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:prestinv/api/api_service.dart';
@@ -63,7 +64,7 @@ class _NvLicenceScreenState extends State<NvLicenceScreen> {
     final nv = context.nv;
     return CadreEntree(
       titre: 'Activation',
-      sousTitre: 'Prestige Inventaire',
+      sousTitre: nomAppli,
       actions: [ActionEntete(icon: Icons.settings_outlined, tooltip: 'Configuration du serveur', onPressed: _configuration)],
       enfants: [
         SoftCard(

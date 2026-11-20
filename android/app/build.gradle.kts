@@ -55,8 +55,11 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.dici.prestinv"
+        // 5.0.0 — Prestige Inventaire V3 : NOUVELLE application (nouvelle fiche Sunmi / Google Play), installable à côté
+        // de l'ancienne « Prestige Inventaire » (com.dici.prestinv, fiche gardée telle quelle pour les officines aux
+        // anciens serveurs). Seul l'identifiant change : le `namespace` (paquet Kotlin de MainActivity, R) reste
+        // com.dici.prestinv. Voir docs/NOTE_VERSION_5.0.0.md.
+        applicationId = "com.dici.prestigeinventaire.v3"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

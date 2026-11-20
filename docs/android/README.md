@@ -1,4 +1,13 @@
-# Prestige Inventaire sur Google Play — piste « Test interne »
+# Prestige Inventaire V3 sur Google Play — piste « Test interne »
+
+> **5.0.0 — Prestige Inventaire V3 (20/11/2026).** Prestige Inventaire est devenue une **nouvelle application** :
+> identifiant **`com.dici.prestigeinventaire.v3`**, nom « Prestige Inventaire V3 » (voir `docs/NOTE_VERSION_5.0.0.md`).
+> Pour Google Play, c'est une **application nouvelle** : la créer dans la Play Console (« Prestige Inventaire V3 »,
+> étape 2) puis faire le **premier envoi à la main** (étape 6) avec l'artefact `prestige-inventaire-aab` d'un envoi
+> de la branche `claude/refonte` (5.0.0+22 ou plus) ; tant que ce premier envoi manuel n'est pas fait, l'envoi
+> automatique (`android/DEMANDE_PLAY`) est refusé par Google (message clair dans la CI). Si une application
+> « Prestige Inventaire » (`com.dici.prestinv`) existe déjà dans la Play Console, elle n'est plus alimentée par ce dépôt
+> (son identifiant ne peut pas être changé sur Play) : la laisser telle quelle ou l'archiver.
 
 Ce guide est pour le pharmacien. La piste **Test interne** de Google Play est l'équivalent de TestFlight : jusqu'à
 100 testeurs choisis par e-mail, version disponible en quelques minutes, **sans examen** de Google ni fiche publique.
@@ -13,7 +22,7 @@ quatre** : la créer une fois (étape 3) et déposer les **mêmes** secrets dans
 
 | Élément | Valeur pour Prestige Inventaire |
 |---|---|
-| Nom du paquet (package name) | **`com.dici.prestinv`** (identifiant actuel de l'application ; ne peut plus jamais changer sur Play) |
+| Nom du paquet (package name) | **`com.dici.prestigeinventaire.v3`** (depuis 5.0.0 ; avant : `com.dici.prestinv`) ; ne peut plus jamais changer sur Play |
 | Piste | Test interne (`internal`) |
 | Format envoyé | App Bundle `.aab`, signé par **votre** clé d'envoi, re-signé par Google (Play App Signing) |
 | Android minimum / cible | celui de Flutter (Android 5.0, API 21) / **Android 16 (API 36) pour le build Google Play seulement** (exigé depuis le 31/08/2026) ; les APK des terminaux Sunmi gardent l'API cible de Flutter (35) |
@@ -143,7 +152,7 @@ Un même compte de service peut servir aux quatre applications (autorisations do
 Demander « envoie sur Google Play » : l'équipe écrit la version en cours (ex. `4.16.0+18`) en première ligne du
 fichier **`android/DEMANDE_PLAY`** de la branche `claude/refonte`. Le workflow **Google Play (test interne)** :
 vérifie que la demande correspond à `pubspec.yaml`, construit l'App Bundle signé, l'envoie sur la piste **internal**
-de `com.dici.prestinv` avec des notes en français, statut **« completed »** (disponible pour les testeurs après
+de `com.dici.prestigeinventaire.v3` avec des notes en français, statut **« completed »** (disponible pour les testeurs après
 traitement par Google, quelques minutes). Si l'application est encore en brouillon dans la Play Console, il renvoie
 en **« draft »** et l'explique : publier alors la version à la main (Test interne › Modifier la version › Publier).
 

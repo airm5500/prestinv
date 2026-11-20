@@ -1,5 +1,6 @@
 // lib/screens/login_screen.dart
 
+import 'package:prestinv/identite_appli.dart';
 import 'package:flutter/material.dart';
 import 'package:prestinv/config/app_colors.dart';
 import 'package:prestinv/config/app_config.dart';
@@ -108,8 +109,10 @@ class _LoginScreenState extends State<AncienLoginScreen> {
               children: [
                 const Icon(Icons.inventory_2_outlined, size: 80, color: AppColors.primary),
                 const SizedBox(height: 20),
-                const Text('Prestige Inventaire', style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                const Text(nomAppli, textAlign: TextAlign.center, style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: AppColors.primary)),
                 const SizedBox(height: 40),
+                // 5.0.0 : ancienne Prestige Inventaire encore installée → information, une fois (rien sinon).
+                const BandeauAncienneAppli(),
 
                 TextField(
                   controller: _loginController,

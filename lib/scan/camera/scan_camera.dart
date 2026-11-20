@@ -15,6 +15,7 @@
 //
 // Ce fichier ne dépend pas du module de l'appareil photo (mobile_scanner) : le moteur réel
 // (moteur_mobile_scanner.dart) et l'accès au système sont remplaçables dans les tests ([moteur], [acces]).
+import 'package:prestinv/identite_appli.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -217,7 +218,7 @@ class ScanCamera {
           key: const ValueKey('camera-refusee-definitivement'),
           icon: const Icon(Icons.no_photography_outlined),
           title: const Text('Appareil photo refusé'),
-          content: const Text('L\'autorisation « Caméra » a été refusée pour Prestige Inventaire. Pour scanner avec '
+          content: const Text('L\'autorisation « Caméra » a été refusée pour $nomAppli. Pour scanner avec '
               'l\'appareil photo, autorisez-la dans les paramètres d\'Android. La saisie continue normalement sans elle.'),
           actions: [
             TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Fermer')),
@@ -238,7 +239,7 @@ class ScanCamera {
         key: const ValueKey('camera-explication'),
         icon: const Icon(Icons.photo_camera_outlined),
         title: const Text('Scanner avec l\'appareil photo'),
-        content: const Text('Prestige Inventaire va demander l\'accès à l\'appareil photo. Il sert uniquement à lire '
+        content: const Text('$nomAppli va demander l\'accès à l\'appareil photo. Il sert uniquement à lire '
             'les codes-barres et DataMatrix des boîtes : aucune photo n\'est prise ni enregistrée.'),
         actions: [
           TextButton(key: const ValueKey('camera-plus-tard'), onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Plus tard')),

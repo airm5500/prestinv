@@ -54,7 +54,7 @@ void main() {
       expect(gradle, contains('targetSdk = apiCiblePlay ?: flutter.targetSdkVersion'));
       expect(gradle, contains('compileSdk = apiCiblePlay ?: flutter.compileSdkVersion'));
       expect(gradle, isNot(contains('targetSdk = 36')), reason: 'APK Sunmi : comportements d\'Android 16 inchangés');
-      expect(gradle, contains('applicationId = "com.dici.prestinv"'));
+      expect(gradle, contains('applicationId = "com.dici.prestigeinventaire.v3"'), reason: '5.0.0 : Prestige Inventaire V3');
       expect(gradle, contains('versionCode = flutter.versionCode'));
       expect(lire('android/gradle.properties'), contains('android.suppressUnsupportedCompileSdk=36'));
     });
@@ -89,7 +89,7 @@ void main() {
 
     test('appareil photo facultatif (installable sans), nom affiché, HTTP vers le serveur local', () {
       expect(manifeste, contains('<uses-feature android:name="android.hardware.camera" android:required="false" />'));
-      expect(manifeste, contains('android:label="Prestige Inventaire"'));
+      expect(manifeste, contains('android:label="Prestige Inventaire V3"'), reason: '5.0.0 : Prestige Inventaire V3');
       expect(manifeste, contains('android:networkSecurityConfig="@xml/network_security_config"'));
       expect(manifeste, isNot(contains('screenOrientation')), reason: 'aucune orientation imposée (ignorée sur grand écran en Android 16)');
     });
@@ -103,7 +103,7 @@ void main() {
         expect(play, contains('secrets.$s'));
       }
       expect(play, contains('android/DEMANDE_PLAY'));
-      expect(play, contains('PACKAGE_NAME: com.dici.prestinv'));
+      expect(play, contains('PACKAGE_NAME: com.dici.prestigeinventaire.v3'), reason: '5.0.0 : nouvelle application');
       expect(play, contains("- 'claude/refonte'"));
       expect(File('android/DEMANDE_PLAY').existsSync(), isFalse, reason: 'écrit seulement sur demande du pharmacien');
     });

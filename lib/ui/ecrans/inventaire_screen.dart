@@ -9,6 +9,7 @@
 //  - Écarts (grisé « Pas encore d'écart » s'il n'y en a aucun) et Restant à faire (grisé « Super ! tout
 //    a été saisi » à 100 %).
 // Les saisies faites ensuite sur le téléphone sont ajoutées à l'affichage sans nouvelle requête.
+import 'package:prestinv/identite_appli.dart';
 import 'package:flutter/material.dart';
 import 'package:prestinv/api/api_service.dart';
 import 'package:prestinv/config/app_config.dart';
@@ -93,7 +94,7 @@ class _NvInventaireScreenState extends State<NvInventaireScreen> {
         final sansEcart = etat.ecarts == 0 && !saisiesDepuis;
         final toutSaisi = etat.action == ActionInventaire.reverifier;
         return NvScaffold(
-          surtitre: 'Prestige Inventaire',
+          surtitre: nomAppli,
           title: officine.isEmpty ? 'Inventaire' : officine,
           wide: true,
           header: [

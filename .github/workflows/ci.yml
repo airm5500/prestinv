@@ -112,6 +112,28 @@ jobs:
           if [ "$attendu" != "$apk" ]; then echo "::error title=Version de l'APK::APK $apk ≠ pubspec.yaml $attendu"; exit 1; fi
           echo "::notice title=Version de l'APK::$apk"
 
+      # 5.0.0 — Prestige Inventaire V3 : NOUVEL identifiant, nouveau nom, version de pubspec.yaml (badging de l'APK).
+      - name: Identité de l'APK (Prestige Inventaire V3)
+        shell: bash
+        run: |
+          apk=$(find build/app/outputs -name '*.apk' -path '*elease*' | head -1)
+          [ -n "$apk" ] || { echo "::error title=APK::APK release introuvable"; exit 1; }
+          version=$(sed -n 's/^version: *//p' pubspec.yaml | tr -d '[:space:]')
+          aapt2=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)/aapt2
+          "$aapt2" dump badging "$apk" | grep -E "^(package|application-label|launchable-activity):" | sed -E "s/ platformBuildVersion.*//" | tee badging-inventaire.txt
+          grep -q "^package: name='com.dici.prestigeinventaire.v3' versionCode='${version#*+}' versionName='${version%+*}'" badging-inventaire.txt \
+            || { echo "::error title=Prestige Inventaire V3::applicationId/version attendus com.dici.prestigeinventaire.v3 $version"; exit 1; }
+          grep -q "^application-label:'Prestige Inventaire V3'" badging-inventaire.txt || { echo "::error title=Prestige Inventaire V3::nom affiché attendu « Prestige Inventaire V3 »"; exit 1; }
+          grep -q "launchable-activity: name='com.dici.prestinv.MainActivity'" badging-inventaire.txt || { echo "::error title=Prestige Inventaire V3::activité de lancement (namespace inchangé)"; exit 1; }
+          "$aapt2" dump permissions "$apk" | grep -E "^(uses-permission|permission)" | sort
+          {
+            echo "## APK Prestige Inventaire V3"
+            echo '```'
+            cat badging-inventaire.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Prestige Inventaire V3::com.dici.prestigeinventaire.v3 $version, « Prestige Inventaire V3 »"
+
       # 4.16.0 : l'APK (terminaux Sunmi, PC du pharmacien) garde l'API cible de Flutter ; seul le build Google Play
       # passe à 36 (-P prestinvTargetSdk=36, play.yml).
       - name: API cible de l'APK (inchangée, pas 36)
