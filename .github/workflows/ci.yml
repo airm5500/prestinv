@@ -120,11 +120,15 @@ jobs:
           [ -n "$apk" ] || { echo "::error title=APK::APK release introuvable"; exit 1; }
           version=$(sed -n 's/^version: *//p' pubspec.yaml | tr -d '[:space:]')
           aapt2=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)/aapt2
-          "$aapt2" dump badging "$apk" | grep -E "^(package|application-label|launchable-activity):" | sed -E "s/ platformBuildVersion.*//" | tee badging-inventaire.txt
+          "$aapt2" dump badging "$apk" | grep -E "^(package|application-label|launchable-activity|application):" | sed -E "s/ platformBuildVersion.*//" | tee badging-inventaire.txt
           grep -q "^package: name='com.dici.prestigeinventaire.v3' versionCode='${version#*+}' versionName='${version%+*}'" badging-inventaire.txt \
             || { echo "::error title=Prestige Inventaire V3::applicationId/version attendus com.dici.prestigeinventaire.v3 $version"; exit 1; }
           grep -q "^application-label:'Prestige Inventaire V3'" badging-inventaire.txt || { echo "::error title=Prestige Inventaire V3::nom affiché attendu « Prestige Inventaire V3 »"; exit 1; }
           grep -q "launchable-activity: name='com.dici.prestinv.MainActivity'" badging-inventaire.txt || { echo "::error title=Prestige Inventaire V3::activité de lancement (namespace inchangé)"; exit 1; }
+          # 5.0.1 — icône SANS cadre, comme l'ancienne : PNG transparent, jamais l'icône adaptative (XML).
+          grep -qE "^application: .*icon='[^']*\.png'" badging-inventaire.txt || { echo "::error title=Prestige Inventaire V3::icône adaptative (XML) : attendu un PNG sans cadre (5.0.1)"; exit 1; }
+          # 5.0.1 — nom explicite du fichier APK (Gradle) : PrestigeInventaireV3-release-<versionName>.apk.
+          ls build/app/outputs/apk/release/PrestigeInventaireV3-release-${version%+*}.apk || { echo "::error title=Prestige Inventaire V3::APK PrestigeInventaireV3-release-${version%+*}.apk absent"; exit 1; }
           "$aapt2" dump permissions "$apk" | grep -E "^(uses-permission|permission)" | sort
           {
             echo "## APK Prestige Inventaire V3"
@@ -172,6 +176,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: prestinv-apk
-          # Le Gradle du projet renomme l'APK (prestigeinv-<variante>-<version>.apk) : on prend tous les APK produits.
+          # Le Gradle du projet renomme l'APK (PrestigeInventaireV3-<variante>-<version>.apk, 5.0.1) : on prend tous les APK produits.
           path: build/app/outputs/**/*.apk
           retention-days: 30

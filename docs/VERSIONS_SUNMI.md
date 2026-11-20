@@ -12,7 +12,12 @@ minimum_sunmi: 4.8.5+4
 |---|---|---|---|
 | 4.8.5 | 4 | à compléter | dernière version publiée connue |
 
-Version en préparation (pas encore publiée) : **5.0.0+22** (`pubspec.yaml`) : **Prestige Inventaire V3**, NOUVELLE
+Version en préparation (pas encore publiée) : **5.0.1+23** (`pubspec.yaml`) : icônes du lanceur sans cadre, comme
+les anciennes (PNG transparents, plus d'icône adaptative ni ronde), version de l'APK lue directement dans
+`pubspec.yaml` par Gradle (build depuis Android Studio) et APK nommé `PrestigeInventaireV3-release-<version>.apk` (voir
+`docs/NOTE_VERSION_5.0.1.md`).
+
+Avant : **5.0.0+22** : **Prestige Inventaire V3**, NOUVELLE
 application (`com.dici.prestigeinventaire.v3`, « Prestige Inventaire V3 », icône avec le badge « V3 »), même
 fonctionnement que la 4.16.3+21 (voir `docs/NOTE_VERSION_5.0.0.md`). Elle est publiée sur une **nouvelle fiche** du
 magasin Sunmi : aucune version n'y a encore été publiée, la première sera 5.0.0+22 (au-dessus de 4.8.5 / 4 et de la
@@ -29,7 +34,8 @@ pharmacien, garde sa signature (clé debug locale) et l'API cible de Flutter ; s
 ## Les 3 règles (permanentes)
 
 1. **Une seule source : `pubspec.yaml`** (`version: X.Y.Z+N`). Gradle la reprend
-   (`versionCode = flutter.versionCode`, `versionName = flutter.versionName` dans `android/app/build.gradle.kts`),
+   (5.0.1 : lue directement dans `pubspec.yaml` par `android/app/build.gradle.kts`, `versionPubspec`, même depuis
+   Android Studio sans commande flutter ; `flutter.versionCode` / `flutter.versionName` en repli seulement),
    **aucun numéro en dur** (ni dans Gradle, ni dans le code : l'application lit sa version à l'exécution avec
    `package_info_plus`, voir `lib/version_app.dart`).
 2. **X.Y.Z jamais inférieur** (comparaison nombre par nombre : 4.13.0 > 4.8.5) à la dernière version publiée

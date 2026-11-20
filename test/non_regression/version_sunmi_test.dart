@@ -61,8 +61,11 @@ void main() {
       for (final f in gradles) {
         final g = sansCommentaires(f.readAsStringSync());
         expect(_enDur.allMatches(g).map((m) => m.group(0)).toList(), isEmpty, reason: '${f.path} : numéro en dur');
-        expect(g, matches(RegExp(r'versionCode\s*=?\s*flutter\.versionCode')), reason: f.path);
-        expect(g, matches(RegExp(r'versionName\s*=?\s*flutter\.versionName')), reason: f.path);
+        // 5.0.1 : lue directement dans pubspec.yaml (build depuis Android Studio sans commande flutter : la version de
+        // flutter.* venait d'un android/local.properties périmé) ; valeurs de Flutter en repli seulement.
+        expect(g, contains('file("../../pubspec.yaml")'), reason: f.path);
+        expect(g, matches(RegExp(r'versionCode\s*=\s*versionPubspec\?\.second\s*\?:\s*flutter\.versionCode')), reason: f.path);
+        expect(g, matches(RegExp(r'versionName\s*=\s*versionPubspec\?\.first\s*\?:\s*flutter\.versionName')), reason: f.path);
       }
     });
 
@@ -77,7 +80,13 @@ void main() {
       for (final dur in ['versionCode = 8', 'versionName = "3.4.1"', 'versionCode 8', "versionName '3.4.1'", 'versionCode=8']) {
         expect(_enDur.hasMatch(sansCommentaires(dur)), isTrue, reason: dur);
       }
-      for (final ok in ['versionCode = flutter.versionCode', 'versionName = flutter.versionName', '// versionCode = 8']) {
+      for (final ok in [
+        'versionCode = flutter.versionCode',
+        'versionName = flutter.versionName',
+        '// versionCode = 8',
+        'versionCode = versionPubspec?.second ?: flutter.versionCode',
+        'versionName = versionPubspec?.first ?: flutter.versionName',
+      ]) {
         expect(_enDur.hasMatch(sansCommentaires(ok)), isFalse, reason: ok);
       }
     });

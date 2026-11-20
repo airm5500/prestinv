@@ -55,7 +55,7 @@ void main() {
       expect(gradle, contains('compileSdk = apiCiblePlay ?: flutter.compileSdkVersion'));
       expect(gradle, isNot(contains('targetSdk = 36')), reason: 'APK Sunmi : comportements d\'Android 16 inchangés');
       expect(gradle, contains('applicationId = "com.dici.prestigeinventaire.v3"'), reason: '5.0.0 : Prestige Inventaire V3');
-      expect(gradle, contains('versionCode = flutter.versionCode'));
+      expect(gradle, contains('versionCode = versionPubspec?.second ?: flutter.versionCode'), reason: '5.0.1 : lue dans pubspec.yaml');
       expect(lire('android/gradle.properties'), contains('android.suppressUnsupportedCompileSdk=36'));
     });
 

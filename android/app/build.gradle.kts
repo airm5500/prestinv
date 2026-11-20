@@ -8,6 +8,16 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// 5.0.1 — VERSION lue DIRECTEMENT dans pubspec.yaml (« version: X.Y.Z+N » → versionName X.Y.Z, versionCode N).
+// flutter.versionName / flutter.versionCode viennent de android/local.properties, réécrit seulement par une commande
+// flutter (pub get, build) : un build lancé depuis Android Studio sans commande flutter reprenait une version
+// périmée. Repli sur les valeurs de Flutter seulement si pubspec.yaml est absent ou sans « version: X.Y.Z+N ». Aucun
+// numéro en dur (test/non_regression/version_sunmi_test.dart, test/non_regression/version_gradle_test.dart).
+val versionPubspec: Pair<String, Int>? = file("../../pubspec.yaml").takeIf { it.exists() }?.readText()?.let { texte ->
+    Regex("""^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$""", RegexOption.MULTILINE).find(texte)
+        ?.let { it.groupValues[1] to it.groupValues[2].toInt() }
+}
+
 // 4.16.0 — CLÉ D'ENVOI (Google Play, piste « Test interne »). Lue, dans cet ordre, dans les variables
 // d'environnement (CI : secrets GitHub, voir .github/workflows/play.yml) puis dans android/key.properties (poste du
 // développeur ; fichier JAMAIS commité, ignoré par android/.gitignore) :
@@ -64,10 +74,11 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = apiCiblePlay ?: flutter.targetSdkVersion
-        // Version unique : celle de pubspec.yaml (« version: X.Y.Z+N » → versionName X.Y.Z, versionCode N).
+        // Version unique : celle de pubspec.yaml (« version: X.Y.Z+N » → versionName X.Y.Z, versionCode N), lue
+        // directement (5.0.1, versionPubspec ci-dessus) ; valeurs de Flutter en repli seulement.
         // Aucun numéro en dur ici (test/non_regression/version_sunmi_test.dart, docs/VERSIONS_SUNMI.md).
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        versionCode = versionPubspec?.second ?: flutter.versionCode
+        versionName = versionPubspec?.first ?: flutter.versionName
     }
 
     // Ajouter ce bloc pour renommer les fichiers de sortie
@@ -77,8 +88,9 @@ android {
             // 'this' ici fait référence à la sortie (l'APK)
             // Nous changeons le nom du fichier de sortie.
             val outputImpl = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            // Construire le nouveau nom, par exemple : prestigeinv-release-1.0.0+1.apk
-            outputImpl.outputFileName = "prestigeinv-${variant.name}-${variant.versionName}.apk"
+            // 5.0.1 : « PrestigeInventaireV3-release-5.0.1.apk » (avant : « prestigeinv-release-… »). Flutter copie
+            // aussi l'APK sous build/app/outputs/flutter-apk/app-release.apk (nom fixe).
+            outputImpl.outputFileName = "PrestigeInventaireV3-${variant.buildType.name}-${variant.versionName}.apk"
         }
     }
 
