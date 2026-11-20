@@ -3,8 +3,10 @@
 // (com.dici.prestigeinventaire.v3), installable à côté de l'ancienne « Prestige Inventaire » (com.dici.prestinv, fiche
 // Sunmi gardée telle quelle pour les officines aux anciens serveurs). Voir docs/NOTE_VERSION_5.0.0.md.
 //
-// - [nomAppli] : nom affiché partout où l'application se nomme (lanceur : android:label du manifeste ; lancement,
-//   connexion, licence, accueil, inventaire, serveur injoignable, titre de la tâche Android).
+// - [nomAppli] : nom affiché partout où l'application se nomme (lanceur : android:label du manifeste ; licence,
+//   accueil, inventaire, serveur injoignable, titre de la tâche Android).
+// - [titreConnexion] (5.0.2) : titre des écrans de lancement et de connexion, « Prestige Inventaire v3 », sur une
+//   seule ligne ([TexteUneLigne]).
 // - [AncienneAppli] : l'ancienne application est-elle encore installée ? (visibilité du paquet déclarée par <queries>
 //   dans AndroidManifest.xml ; canal « prestinv/appareil », méthode ancienneAppliInstallee). Rien n'est lu dans
 //   l'ancienne application : Android sépare les données de chaque application.
@@ -15,6 +17,32 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Nom de l'application (lanceur Android, écrans).
 const nomAppli = 'Prestige Inventaire V3';
+
+/// 5.0.2 — Titre des écrans de LANCEMENT et de CONNEXION (demande du pharmacien) : « v » minuscule, affiché
+/// sur UNE seule ligne (taille réduite, rétréci si besoin : terminal Sunmi de 360 dp, tablette, grand texte).
+/// Le nom du lanceur Android (android:label), l'identifiant et [nomAppli] (autres écrans, rapports) ne
+/// changent pas.
+const titreConnexion = 'Prestige Inventaire v3';
+
+/// Taille du [titreConnexion] (avant 5.0.2 : 22 à 36, sur deux lignes aux petites largeurs).
+const tailleTitreConnexion = 18.0;
+
+/// Texte sur UNE seule ligne : jamais de retour à la ligne ni de débordement ; si la largeur manque (petit
+/// écran, grande police d'Android), le texte est réduit proportionnellement au lieu d'être coupé.
+class TexteUneLigne extends StatelessWidget {
+  final String texte;
+  final TextStyle? style;
+  final AlignmentGeometry alignement;
+  final TextAlign? alignementTexte;
+  const TexteUneLigne(this.texte, {super.key, this.style, this.alignement = Alignment.centerLeft, this.alignementTexte});
+
+  @override
+  Widget build(BuildContext context) => FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: alignement,
+        child: Text(texte, style: style, maxLines: 1, softWrap: false, textAlign: alignementTexte),
+      );
+}
 
 /// Ancienne Prestige Inventaire (même terminal) : détection seulement.
 class AncienneAppli {

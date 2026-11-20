@@ -73,7 +73,9 @@ class _NvConnexionScreenState extends State<NvConnexionScreen> {
     final config = context.watch<AppConfig>();
     final local = config.apiMode == ApiMode.local;
     return CadreEntree(
-      titre: nomAppli,
+      // 5.0.2 : « Prestige Inventaire v3 », taille réduite, sur UNE ligne (Sunmi 360 dp, tablette).
+      titre: titreConnexion,
+      tailleTitre: tailleTitreConnexion,
       sousTitre: 'Connexion',
       // Version installée (pubspec.yaml → Gradle), lue à l'exécution, discrète en bas.
       bas: const Padding(padding: EdgeInsets.only(bottom: 8, top: 4), child: VersionAffichee()),

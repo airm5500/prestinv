@@ -12,7 +12,12 @@ minimum_sunmi: 4.8.5+4
 |---|---|---|---|
 | 4.8.5 | 4 | à compléter | dernière version publiée connue |
 
-Version en préparation (pas encore publiée) : **5.0.1+23** (`pubspec.yaml`) : icônes du lanceur sans cadre, comme
+Version en préparation (pas encore publiée) : **5.0.2+24** (`pubspec.yaml`) : titre « Prestige Inventaire v3 » sur une
+seule ligne aux écrans de lancement et de connexion (nom du lanceur inchangé) ; serveur éteint ou en erreur (5xx)
+pendant l'inventaire : saisies gardées en attente sur le terminal, envoyées seules au retour du serveur, bandeau « N
+saisies en attente d'envoi (serveur injoignable) » (voir `docs/NOTE_VERSION_5.0.2.md`).
+
+Avant : **5.0.1+23** : icônes du lanceur sans cadre, comme
 les anciennes (PNG transparents, plus d'icône adaptative ni ronde), version de l'APK lue directement dans
 `pubspec.yaml` par Gradle (build depuis Android Studio) et APK nommé `PrestigeInventaireV3-release-<version>.apk` (voir
 `docs/NOTE_VERSION_5.0.1.md`).

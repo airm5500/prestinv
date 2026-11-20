@@ -1,5 +1,6 @@
 // lib/screens/inventory_entry_screen.dart
 
+import 'package:prestinv/widgets/bandeau_attente_serveur.dart';
 import 'package:flutter/material.dart';
 import 'package:prestinv/utils/journal.dart';
 import 'package:flutter/services.dart';
@@ -1711,7 +1712,10 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
                 ]);
               })
             ]),
-        body: Consumer<EntryProvider>(
+        // 5.0.2 : « N saisies en attente d'envoi (serveur injoignable) », non bloquant (rien sinon).
+        body: Column(children: [
+          const BandeauAttenteServeur(),
+          Expanded(child: Consumer<EntryProvider>(
           builder: (context, provider, child) {
             bool showLocationSelector = !widget.isQuickMode;
             bool showSearchAndBody =
@@ -1940,7 +1944,8 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
               ],
             );
           },
-        ),
+        )),
+        ]),
       ),
     );
   }

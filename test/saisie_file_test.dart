@@ -163,16 +163,22 @@ void main() {
     expect(q.sessionExpiree, isFalse);
   });
 
-  test('erreur serveur 5xx : réessayée, puis « refusée » après 3 échecs', () async {
+  test('erreur serveur 5xx : réessayée, JAMAIS « refusée » (5.0.2), envoyée au retour du serveur', () async {
     final serveur = FauxServeur()..panne = ResultatEnvoi.erreurServeur;
     final q = await f.ouvrir(serveur: serveur);
     await saisir(q, 1, 4);
-    await q.envoyer();
-    expect(q.ligne('INV1', 1)!.enAttente, isTrue);
-    await q.envoyer();
-    await q.envoyer();
-    expect(q.ligne('INV1', 1)!.refusee, isTrue);
-    expect(serveur.requetes.length, 3);
+    for (var i = 0; i < 5; i++) {
+      final b = await q.envoyer();
+      expect(b.refusees, 0);
+      expect(b.interruption, isNotNull);
+    }
+    expect(q.ligne('INV1', 1)!.enAttente, isTrue, reason: 'avant 5.0.2 : « refusée » après 3 échecs');
+    expect(q.refusees(), 0);
+    expect(serveur.requetes.length, 5);
+    serveur.panne = null;
+    expect((await q.envoyer()).complet, isTrue);
+    expect(q.ligne('INV1', 1)!.envoyee, isTrue);
+    expect(serveur.quantites, {1: 4});
   });
 
   test('refus 4xx : « refusée » tout de suite, visible, jamais renvoyée seule', () async {

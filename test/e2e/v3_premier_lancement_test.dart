@@ -76,7 +76,8 @@ void main() {
     }
     await _laisser(tester, 12);
     expect(find.byType(NvConnexionScreen), findsOneWidget);
-    expect(find.text(nomAppli), findsWidgets, reason: 'nom de la V3 sur la connexion');
+    // 5.0.2 : titre de la connexion « Prestige Inventaire v3 » (v minuscule), sur une ligne.
+    expect(find.text(titreConnexion), findsWidgets, reason: 'nom de la V3 sur la connexion');
     expect(find.byKey(const ValueKey('bandeau-ancienne-appli')), findsNothing, reason: 'ancienne application absente');
     await seConnecter(tester);
     await _laisser(tester, 12);

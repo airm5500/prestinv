@@ -33,7 +33,12 @@ class CadreEntree extends StatelessWidget {
   final List<Widget> enfants;
   final List<Widget> actions;
   final Widget? bas;
-  const CadreEntree({super.key, required this.titre, this.sousTitre, required this.enfants, this.actions = const [], this.bas});
+
+  /// Taille du titre (5.0.2 : réduite sur la connexion, [tailleTitreConnexion]). Le titre tient toujours
+  /// sur UNE ligne ([TexteUneLigne]).
+  final double tailleTitre;
+  const CadreEntree(
+      {super.key, required this.titre, this.sousTitre, required this.enfants, this.actions = const [], this.bas, this.tailleTitre = 22});
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +66,9 @@ class CadreEntree extends StatelessWidget {
                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Semantics(
                               header: true,
-                              child: Text(titre, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                              child: TexteUneLigne(titre,
+                                  key: const ValueKey('titre-entree'),
+                                  style: TextStyle(color: Colors.white, fontSize: tailleTitre, fontWeight: FontWeight.bold)),
                             ),
                             if (sousTitre != null) Text(sousTitre!, style: const TextStyle(color: Pal.headerMuted, fontSize: 13.5)),
                           ]),
@@ -107,7 +114,14 @@ class NvLancementScreen extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const LogoApp(taille: 96),
               const SizedBox(height: 20),
-              const Text(nomAppli, style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+              // 5.0.2 : « Prestige Inventaire v3 », sur UNE ligne.
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: TexteUneLigne(titreConnexion,
+                    key: ValueKey('titre-lancement'),
+                    alignement: Alignment.center,
+                    style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+              ),
               const SizedBox(height: 6),
               const Text('Vérification de la licence…', style: TextStyle(color: Pal.headerMuted, fontSize: 15)),
               const SizedBox(height: 24),

@@ -109,7 +109,12 @@ class _LoginScreenState extends State<AncienLoginScreen> {
               children: [
                 const Icon(Icons.inventory_2_outlined, size: 80, color: AppColors.primary),
                 const SizedBox(height: 20),
-                const Text(nomAppli, textAlign: TextAlign.center, style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                // 5.0.2 : « Prestige Inventaire v3 », sur UNE ligne (avant : 36, sur deux lignes).
+                const TexteUneLigne(titreConnexion,
+                    key: ValueKey('titre-connexion-ancienne'),
+                    alignement: Alignment.center,
+                    alignementTexte: TextAlign.center,
+                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: AppColors.primary)),
                 const SizedBox(height: 40),
                 // 5.0.0 : ancienne Prestige Inventaire encore installée → information, une fois (rien sinon).
                 const BandeauAncienneAppli(),

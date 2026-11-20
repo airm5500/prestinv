@@ -12,10 +12,12 @@ enum ResultatEnvoi {
   /// Session expirée ou accès refusé (401 / 403) : on garde la saisie, reconnexion nécessaire.
   session,
 
-  /// Refus définitif (4xx) : la saisie passe en « refusée », visible, jamais renvoyée seule.
+  /// Refus MÉTIER définitif (4xx explicite : 400, 404 JSON, 409, 422…) : la saisie passe en « refusée »,
+  /// visible, jamais renvoyée seule.
   refus,
 
-  /// Erreur du serveur (5xx) : réessayée, puis « refusée » après plusieurs échecs.
+  /// Erreur du serveur (5xx, réponse illisible) : la saisie RESTE en attente et est renvoyée automatiquement
+  /// (5.0.2 : jamais « refusée », quel que soit le nombre d'essais : serveur qui s'arrête, redémarre…).
   erreurServeur,
 }
 

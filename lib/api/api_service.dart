@@ -110,6 +110,15 @@ class ApiService implements SaisieServeur {
     return true;
   }
 
+  /// 5.0.2 — Réponses 4xx TRANSITOIRES (ni refus métier, ni session) : 407 (relais / proxy demandant une
+  /// authentification), 408 (délai de la requête dépassé), 425 (trop tôt), 429 (trop de requêtes). La saisie est
+  /// gardée et renvoyée automatiquement, comme pour un serveur injoignable.
+  static bool reponseTransitoire(int code) => code == 407 || code == 408 || code == 425 || code == 429;
+
+  /// Message d'une réponse transitoire ([reponseTransitoire]).
+  static String messageTransitoire(int code) =>
+      'Serveur momentanément injoignable (code $code) : saisie gardée sur l\'appareil, nouvel essai automatique.';
+
   /// Connexion REFUSÉE (la machine répond, le serveur d'applications ne l'écoute pas : arrêt, redémarrage).
   static bool connexionRefusee(Object e) {
     if (e is! SocketException) return false;
@@ -135,11 +144,15 @@ class ApiService implements SaisieServeur {
       // Prestige indisponible (redéploiement : 404 sans réponse de Prestige, 502 / 503 / 504) : la saisie est
       // gardée et renvoyée (jamais « refusée » à tort).
       if (serveurIndisponible(response)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageIndisponible);
+      // 5.0.2 : relais (407), délai (408), surcharge (425 / 429) : jamais « refusée », renvoyée seule.
+      if (reponseTransitoire(code)) return ReponseEnvoi(ResultatEnvoi.reseau, messageTransitoire(code));
       // Droit manquant (403 « interdit », serveurs récents) : refus visible, pas de reconnexion en boucle.
       if (droitManquant(response) != null) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
       // Session absente (PUT exige une session depuis le 12/10) : la saisie reste sur l'appareil.
       if (code == 401 || code == 403) return ReponseEnvoi(ResultatEnvoi.session, 'Session expirée ou accès refusé (code $code).');
+      // Refus MÉTIER définitif (400, 404 JSON, 409, 422…, avec le message du serveur) : « refusée ».
       if (code >= 400 && code < 500) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
+      // 5xx (500, 501, 505…) : erreur du serveur, la saisie RESTE en attente (5.0.2 : jamais « refusée »).
       return ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Erreur du serveur (code $code).');
     } on TimeoutException {
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Le serveur met trop de temps à répondre.');
@@ -248,6 +261,7 @@ class ApiService implements SaisieServeur {
         return r;
       }
       if (serveurIndisponible(response)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageIndisponible);
+      if (reponseTransitoire(code)) return ReponseEnvoi(ResultatEnvoi.reseau, messageTransitoire(code));
       if (droitManquant(response) != null) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
       if (code == 401 || code == 403) return ReponseEnvoi(ResultatEnvoi.session, 'Session expirée ou accès refusé (code $code).');
       if (code >= 500) return ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Erreur du serveur (code $code).');

@@ -12,6 +12,13 @@
 // 3. Panne réseau / session expirée : rien n'est perdu, la saisie reste « en attente ». Reprise
 //    automatique ([demarrerReprise]) toutes les 15 s en mode Direct (et pour les corrections Écarts /
 //    Restants, qui partent toujours tout de suite), au retour au premier plan et après reconnexion.
+//    5.0.2 : serveur ÉTEINT ou en erreur pendant l'inventaire (5xx, 502 / 503 / 504, délai dépassé, relais,
+//    connexion refusée) : la saisie RESTE « en attente », quel que soit le nombre d'essais (avant : « refusée »
+//    après 3 erreurs 5xx, la relance s'arrêtait). Relances espacées tant que le serveur ne répond pas (15 s,
+//    30 s, 1 min, puis 2 min au plus) ; l'envoi reprend seul au retour du serveur, dans l'ordre de saisie, sans
+//    doublon (quantité totale). Un envoi DEMANDÉ (mode Collecte : « Envoyer ») interrompu ainsi reprend aussi
+//    seul. Seuls les refus MÉTIER du serveur (4xx explicites : 400, 404 JSON, 409, 422…) donnent « refusée ».
+//    Bandeau non bloquant : « N saisies en attente d'envoi (serveur injoignable) » ([messageAttenteServeur]).
 // 4. Inventaire clôturé : avant d'envoyer, la liste des inventaires ouverts est lue ; une saisie d'un
 //    inventaire absent de cette liste n'est PAS envoyée, elle passe en « refusée » (visible dans
 //    « À envoyer »).
@@ -55,8 +62,18 @@ class SaisieQueue extends ChangeNotifier {
   /// [SaisieLigne.envoiAuto] partent automatiquement.
   bool Function() modeDirect = () => false;
 
-  /// Erreurs serveur (5xx) tolérées avant de passer une saisie en « refusée ».
-  static const maxTentatives = 3;
+  /// 5.0.2 — Relance automatique espacée quand le serveur ne répond pas : après k tours de reprise en échec
+  /// consécutifs, on attend 2^(k-1) intervalles (15 s, 30 s, 1 min…), au plus [plafondIntervallesReprise]
+  /// intervalles (2 min). Toute réponse du serveur remet l'espacement à zéro.
+  static const plafondIntervallesReprise = 8;
+
+  /// 5.0.2 — Erreurs serveur (5xx) consécutives dans un même envoi groupé avant de l'interrompre (serveur qui
+  /// s'arrête : on n'insiste pas ; une erreur isolée sur UNE ligne ne bloque pas les suivantes).
+  static const erreursServeurAvantInterruption = 2;
+
+  /// Motifs d'erreur serveur (et non de refus) : une saisie « refusée » ainsi par une version précédente
+  /// (avant 5.0.2 : après 3 erreurs 5xx) est remise en attente au chargement.
+  static const _motifsErreurServeur = ['Erreur du serveur', 'Réponse illisible du serveur', 'Réponse inattendue du serveur'];
 
   /// Les saisies envoyées sont gardées 7 jours (historique « À envoyer », export), puis purgées.
   static const conservationEnvoyees = Duration(days: 7);
@@ -88,6 +105,13 @@ class SaisieQueue extends ChangeNotifier {
   Timer? _reprise;
   String? _erreurLecture;
 
+  /// 5.0.2 : dernier essai d'envoi sans réponse utilisable du serveur (injoignable, 5xx, délai…).
+  bool _injoignable = false;
+
+  /// 5.0.2 : tours de reprise automatique en échec consécutifs, et tours encore à laisser passer.
+  int _echecsReprise = 0;
+  int _toursAttente = 0;
+
   // ---------------------------------------------------------------------------
   // Lecture de l'état
   // ---------------------------------------------------------------------------
@@ -102,6 +126,26 @@ class SaisieQueue extends ChangeNotifier {
 
   /// Stockage illisible au chargement (le fichier n'est pas effacé).
   String? get erreurLecture => _erreurLecture;
+
+  /// 5.0.2 — Saisies en attente ET dernier essai sans réponse du serveur (éteint, injoignable, en erreur).
+  bool get serveurInjoignable => _injoignable && enAttente() > 0;
+
+  /// 5.0.2 — Texte du bandeau non bloquant : « N saisies en attente d'envoi (serveur injoignable) » (null :
+  /// rien à signaler).
+  String? get messageAttenteServeur {
+    if (!_injoignable) return null;
+    final n = enAttente();
+    if (n == 0) return null;
+    return n == 1 ? '1 saisie en attente d\'envoi (serveur injoignable)' : '$n saisies en attente d\'envoi (serveur injoignable)';
+  }
+
+  /// Tours de reprise automatique encore sautés avant le prochain essai (espacement, tests).
+  @visibleForTesting
+  int get toursAvantRelance => _toursAttente;
+
+  /// Envoi demandé, interrompu, qui reprendra seul (clé : inventaire, '' = tous ; tests).
+  @visibleForTesting
+  String? get envoiARependre => _envoiARependre;
 
   bool get envoiEnCours => _envoiGroupe != null || _enVol.isNotEmpty;
 
@@ -145,6 +189,14 @@ class SaisieQueue extends ChangeNotifier {
         ..clear()
         ..addEntries(lues.map((s) => MapEntry(s.cle, s)));
       _erreurLecture = null;
+      // 5.0.2 : saisies passées en « refusée » par une ERREUR DU SERVEUR (versions précédentes, après 3 essais) :
+      // ce n'était pas un refus, elles repartent en attente (aucune perte).
+      for (final s in _lignes.values.where((s) => s.refusee && _estMotifErreurServeur(s.motif)).toList()) {
+        s
+          ..etat = EtatSaisie.enAttente
+          ..tentatives = 0;
+        await store.ecrire(s);
+      }
       // Purge des saisies confirmées depuis plus de 7 jours (jamais des saisies en attente / refusées).
       final limite = _clock().subtract(conservationEnvoyees);
       final perimees = _lignes.values.where((s) => s.envoyee && (s.envoyeeLe ?? s.modifieLe).isBefore(limite)).map((s) => s.cle).toList();
@@ -158,6 +210,8 @@ class SaisieQueue extends ChangeNotifier {
     _charge = true;
     notifyListeners();
   }
+
+  static bool _estMotifErreurServeur(String? motif) => motif != null && _motifsErreurServeur.any(motif.startsWith);
 
   // ---------------------------------------------------------------------------
   // Saisie
@@ -316,6 +370,7 @@ class SaisieQueue extends ChangeNotifier {
       } finally {
         _enVol.remove(cle);
       }
+      _noterJoignable(r);
       final apres = _lignes[cle];
       if (apres == null) return r; // abandonnée entre-temps
       switch (r.type) {
@@ -346,11 +401,10 @@ class SaisieQueue extends ChangeNotifier {
           }
           continue;
         case ResultatEnvoi.erreurServeur:
-          apres.tentatives++;
-          apres.motif = r.message;
-          if (apres.tentatives >= maxTentatives && apres.version == version) {
-            apres.etat = EtatSaisie.refusee;
-          }
+          // 5.0.2 : erreur du SERVEUR (5xx…), pas un refus : la saisie reste en attente, renvoyée automatiquement.
+          apres
+            ..tentatives = apres.tentatives + 1
+            ..motif = r.message;
           await store.ecrire(apres);
           notifyListeners();
           return r;
@@ -392,6 +446,8 @@ class SaisieQueue extends ChangeNotifier {
       return r;
     }
     if (ouvert == null) {
+      _injoignable = true;
+      notifyListeners();
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Serveur injoignable : impossible de vérifier l\'inventaire.');
     }
     if (!ouvert) {
@@ -403,10 +459,35 @@ class SaisieQueue extends ChangeNotifier {
     return r;
   }
 
+  /// 5.0.2 : le serveur a-t-il répondu ? (ok / refus / session : oui ; réseau / erreur serveur : non).
+  void _noterJoignable(ReponseEnvoi r) {
+    switch (r.type) {
+      case ResultatEnvoi.reseau:
+      case ResultatEnvoi.erreurServeur:
+        _injoignable = true;
+      case ResultatEnvoi.ok:
+        _injoignable = false;
+        _echecsReprise = 0;
+        _toursAttente = 0;
+      case ResultatEnvoi.refus:
+      case ResultatEnvoi.session:
+        _injoignable = false;
+    }
+  }
+
+  /// Envoi DEMANDÉ ([inventaireId], null = tous) interrompu : il reprendra seul (reconnexion, retour du serveur).
+  void _memoriserReprise(String? inventaireId) {
+    final cle = inventaireId ?? '';
+    final avant = _envoiARependre;
+    _envoiARependre = avant == null || avant == cle ? cle : '';
+  }
+
   void _noterResultat(ReponseEnvoi r) {
     if (r.type == ResultatEnvoi.session) _sessionExpiree = true;
     if (r.type == ResultatEnvoi.ok) _sessionExpiree = false;
-    if (r.type == ResultatEnvoi.reseau || r.type == ResultatEnvoi.session) _derniereErreur = r.message;
+    if (r.type == ResultatEnvoi.reseau || r.type == ResultatEnvoi.session || r.type == ResultatEnvoi.erreurServeur) {
+      _derniereErreur = r.message;
+    }
     notifyListeners();
   }
 
@@ -448,13 +529,15 @@ class SaisieQueue extends ChangeNotifier {
         // pas une panne réseau, il faut se reconnecter. Rien n'est perdu ; l'envoi reprend ensuite.
         _sessionExpiree = true;
         _derniereErreur = messageSessionExpiree;
-        if (!seulementAuto) _envoiARependre = inventaireId ?? '';
+        if (!seulementAuto) _memoriserReprise(inventaireId);
         notifyListeners();
         return BilanEnvoi(restantes: candidates.length, interruption: messageSessionExpiree, sessionExpiree: true);
       }
       if (ouvert == null) {
         const msg = 'Serveur injoignable : saisies gardées sur l\'appareil, nouvel essai automatique.';
         _derniereErreur = msg;
+        _injoignable = true;
+        if (!seulementAuto) _memoriserReprise(inventaireId);
         notifyListeners();
         return BilanEnvoi(restantes: candidates.length, interruption: msg);
       }
@@ -468,9 +551,13 @@ class SaisieQueue extends ChangeNotifier {
     var envoyees = 0;
     String? interruption;
     var session = false;
+    // 5.0.2 : erreurs du serveur (5xx) consécutives ; la dernière, pour le message.
+    var erreursServeurSuite = 0;
+    String? erreurServeur;
     for (final s in candidates) {
       if (!s.enAttente) continue;
       final r = await _envoyerAJour(s.cle, serveur);
+      if (r.type != ResultatEnvoi.erreurServeur) erreursServeurSuite = 0;
       switch (r.type) {
         case ResultatEnvoi.ok:
           envoyees++;
@@ -478,7 +565,9 @@ class SaisieQueue extends ChangeNotifier {
         case ResultatEnvoi.refus:
           refusees++;
         case ResultatEnvoi.erreurServeur:
-          if (_lignes[s.cle]?.refusee ?? false) refusees++;
+          // Gardée en attente. Serveur qui s'arrête (erreurs successives) : envoi interrompu, repris plus tard.
+          erreurServeur = r.message;
+          if (++erreursServeurSuite >= erreursServeurAvantInterruption) interruption = _messageErreurServeur(r.message);
         case ResultatEnvoi.reseau:
           interruption = r.message.isEmpty ? 'Serveur injoignable.' : r.message;
         case ResultatEnvoi.session:
@@ -487,24 +576,38 @@ class SaisieQueue extends ChangeNotifier {
       }
       if (interruption != null) break;
     }
+    final restantes = aEnvoyer().length;
+    // Erreur du serveur sur une ligne restée en attente : l'envoi n'est pas complet (message, reprise).
+    if (interruption == null && erreurServeur != null && restantes > 0) interruption = _messageErreurServeur(erreurServeur);
     _derniereErreur = interruption;
     if (session) {
       _sessionExpiree = true;
-      if (!seulementAuto) _envoiARependre = inventaireId ?? '';
+      if (!seulementAuto) _memoriserReprise(inventaireId);
     } else if (interruption == null) {
       _sessionExpiree = false;
-      _envoiARependre = null;
+      if (!seulementAuto && (inventaireId == null || _envoiARependre == inventaireId)) _envoiARependre = null;
+    } else if (!seulementAuto) {
+      // 5.0.2 : serveur éteint / injoignable / en erreur pendant un envoi DEMANDÉ : il reprendra seul.
+      _memoriserReprise(inventaireId);
     }
-    final restantes = aEnvoyer().length;
     notifyListeners();
     return BilanEnvoi(envoyees: envoyees, refusees: refusees, restantes: restantes, interruption: interruption, sessionExpiree: session);
   }
 
+  static String _messageErreurServeur(String message) =>
+      '${message.isEmpty ? 'Erreur du serveur.' : message} Saisies gardées sur l\'appareil, nouvel essai automatique.';
+
   /// Envoi automatique (mode Direct : tout ; sinon : corrections Écarts / Restants seulement).
-  /// Ne fait rien si un envoi groupé est déjà en cours ou si rien n'est à envoyer.
+  /// 5.0.2 : reprend aussi un envoi DEMANDÉ interrompu par une panne du serveur (hors session expirée, qui
+  /// attend la reconnexion). Ne fait rien si un envoi groupé est déjà en cours ou si rien n'est à envoyer.
   Future<void> relancer() async {
     if (_envoiGroupe != null) return;
     await load();
+    final reprise = _envoiARependre;
+    if (reprise != null && !_sessionExpiree && _serveur() != null) {
+      final b = await envoyer(inventaireId: reprise.isEmpty ? null : reprise);
+      if (b.interruption != null) return;
+    }
     final direct = modeDirect();
     final aEnvoyer = _lignes.values.any((s) => s.enAttente && (direct || s.envoiAuto));
     if (!aEnvoyer || _serveur() == null) return;
@@ -512,9 +615,32 @@ class SaisieQueue extends ChangeNotifier {
   }
 
   /// Reprise automatique périodique (au retour du réseau, la file repart d'elle-même).
+  /// 5.0.2 : relances espacées tant que le serveur ne répond pas ([repriseAutomatique]).
   void demarrerReprise({Duration intervalle = const Duration(seconds: 15)}) {
     _reprise?.cancel();
-    _reprise = Timer.periodic(intervalle, (_) => relancer());
+    _echecsReprise = 0;
+    _toursAttente = 0;
+    _reprise = Timer.periodic(intervalle, (_) => repriseAutomatique());
+  }
+
+  /// Un tour de la reprise automatique : relance, sauf pendant l'espacement qui suit des échecs (serveur
+  /// éteint : 15 s, 30 s, 1 min, puis 2 min au plus entre deux essais). Toute réponse du serveur le remet à zéro.
+  @visibleForTesting
+  Future<void> repriseAutomatique() async {
+    if (_toursAttente > 0) {
+      _toursAttente--;
+      return;
+    }
+    await relancer();
+    if (serveurInjoignable) {
+      _echecsReprise++;
+      // 1, 2, 4 puis 8 intervalles (plafond) entre deux essais.
+      final intervalles = (1 << (_echecsReprise - 1).clamp(0, 30)).clamp(1, plafondIntervallesReprise);
+      _toursAttente = intervalles - 1;
+    } else {
+      _echecsReprise = 0;
+      _toursAttente = 0;
+    }
   }
 
   void arreterReprise() {

@@ -3,6 +3,7 @@
 // (lib/widgets/presentation_style.dart : NavyHeader, SoftCard, KpiTile, StatusBadge, ThinProgress,
 // SegmentedPills, PresentationScaffold), mêmes conventions, plus le mode sombre (couleurs lues dans
 // `context.nv`) et des cibles tactiles de 48 dp au moins.
+import 'package:prestinv/widgets/bandeau_attente_serveur.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:prestinv/ui/responsive.dart';
@@ -496,6 +497,8 @@ class NvScaffold extends StatelessWidget {
         retour: avecMenu ? false : retour,
         children: header,
       ),
+      // 5.0.2 : « N saisies en attente d'envoi (serveur injoignable) », non bloquant (rien sinon).
+      const BandeauAttenteServeur(),
       Expanded(child: avecMenu ? body : ContentWidth(wide: wide, child: body)),
       if (piedDeCorps != null) ContentWidth(wide: wide, child: piedDeCorps!),
     ]);

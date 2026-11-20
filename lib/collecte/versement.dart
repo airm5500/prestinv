@@ -506,11 +506,13 @@ class MoteurVersement {
           await enregistrer(v);
           await surLigneVersee?.call(l, v);
         case ResultatEnvoi.refus:
-        case ResultatEnvoi.erreurServeur:
           l
             ..etat = EtatLigneVersement.erreur
             ..raison = r.message;
           await enregistrer(v);
+        // 5.0.2 : erreur du serveur (5xx) = serveur en panne, pas un refus : comme une coupure, la quantité
+        // reste en attente dans la file (renvoyée seule) et le versement est interrompu.
+        case ResultatEnvoi.erreurServeur:
         case ResultatEnvoi.reseau:
         case ResultatEnvoi.session:
           l
