@@ -19,6 +19,9 @@
 //    doublon (quantité totale). Un envoi DEMANDÉ (mode Collecte : « Envoyer ») interrompu ainsi reprend aussi
 //    seul. Seuls les refus MÉTIER du serveur (4xx explicites : 400, 404 JSON, 409, 422…) donnent « refusée ».
 //    Bandeau non bloquant : « N saisies en attente d'envoi (serveur injoignable) » ([messageAttenteServeur]).
+//    5.0.3 : une réponse qui n'est PAS celle du serveur Prestige (page HTML d'un portail captif, texte, JSON d'un
+//    autre service, redirection vers une page de connexion) n'est jamais un succès : ApiService la classe
+//    « serveur injoignable » (ResultatEnvoi.reseau), la saisie reste en attente, même traitement que ci-dessus.
 // 4. Inventaire clôturé : avant d'envoyer, la liste des inventaires ouverts est lue ; une saisie d'un
 //    inventaire absent de cette liste n'est PAS envoyée, elle passe en « refusée » (visible dans
 //    « À envoyer »).

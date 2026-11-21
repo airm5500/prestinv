@@ -12,7 +12,12 @@ minimum_sunmi: 4.8.5+4
 |---|---|---|---|
 | 4.8.5 | 4 | à compléter | dernière version publiée connue |
 
-Version en préparation (pas encore publiée) : **5.0.2+24** (`pubspec.yaml`) : titre « Prestige Inventaire v3 » sur une
+Version en préparation (pas encore publiée) : **5.0.3+25** (`pubspec.yaml`) : une réponse qui n'est pas celle du
+serveur Prestige (page HTML d'un portail captif, d'un relais ou d'une box, texte, JSON d'un autre service, redirection
+vers une page de connexion) n'est plus jamais prise pour un envoi réussi : la saisie reste en attente sur le terminal
+(« serveur injoignable »), renvoyée seule, sans doublon (voir `docs/NOTE_VERSION_5.0.3.md`).
+
+Avant : **5.0.2+24** : titre « Prestige Inventaire v3 » sur une
 seule ligne aux écrans de lancement et de connexion (nom du lanceur inchangé) ; serveur éteint ou en erreur (5xx)
 pendant l'inventaire : saisies gardées en attente sur le terminal, envoyées seules au retour du serveur, bandeau « N
 saisies en attente d'envoi (serveur injoignable) » (voir `docs/NOTE_VERSION_5.0.2.md`).

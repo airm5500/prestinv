@@ -51,12 +51,12 @@ void main() {
     test('l\'expression de Gradle appliquée au vrai pubspec.yaml donne la version attendue de l\'APK', () {
       final (nom, numero) = _versionApk(_expressionGradle(gradle), pubspec, {});
       expect('$nom+$numero', version);
-      expect('$nom+$numero', '5.0.2+24');
+      expect('$nom+$numero', '5.0.3+25');
     });
 
     test('local.properties périmé (4.10.0+36) : ignoré, la version vient de pubspec.yaml', () {
       final perime = {'flutter.versionName': '4.10.0', 'flutter.versionCode': '36'};
-      expect(_versionApk(_expressionGradle(gradle), pubspec, perime), ('5.0.2', 24));
+      expect(_versionApk(_expressionGradle(gradle), pubspec, perime), ('5.0.3', 25));
     });
 
     test('repli : pubspec.yaml absent ou sans « version: X.Y.Z+N » → valeurs de Flutter', () {
@@ -101,6 +101,15 @@ void main() {
         expect(n, contains(t), reason: t);
       }
       expect(_lire('docs/VERSIONS_SUNMI.md'), contains('5.0.2+24'));
+    });
+
+    test('note de version 5.0.3 (réponse qui n\'est pas celle de Prestige : saisie gardée)', () {
+      final n = _lire('docs/NOTE_VERSION_5.0.3.md');
+      for (final t in ['5.0.3+25', 'portail captif', 'HTML', '302', '204', 'en attente d\'envoi (serveur injoignable)',
+        'saisies_v1.jsonl', 'sans doublon', 'refusée', 'réponse non reconnue']) {
+        expect(n, contains(t), reason: t);
+      }
+      expect(_lire('docs/VERSIONS_SUNMI.md'), contains('5.0.3+25'));
     });
   });
 }

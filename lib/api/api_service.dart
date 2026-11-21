@@ -131,7 +131,109 @@ class ApiService implements SaisieServeur {
   /// Message d'une panne réseau pendant une lecture ([quoi] : « inventaires », « produits »…) : cas 1.
   static String messageReseau(String quoi, Object e) => injoignable('$quoi non chargés');
 
+  // --- 5.0.3 : RÉPONSE QUI N'EST PAS CELLE DU SERVEUR PRESTIGE ---
+  //
+  // Un portail captif (Wi-Fi d'invités), un relais, une box ou un autre service installé à la même adresse peut
+  // répondre 200 avec SA page (HTML, texte, autre JSON) ou rediriger (302) vers une page de connexion : la requête
+  // n'est jamais arrivée à Prestige. Une telle réponse n'est jamais un succès : elle est classée comme un serveur
+  // injoignable (la saisie reste en attente, renvoyée seule). Le journal et les messages ne gardent QUE le code,
+  // le type et la taille de la réponse, jamais son contenu (ni l'adresse de la redirection).
+
+  /// Type de contenu d'une réponse, réduit au type MIME (sans paramètres, caractères sûrs, 40 au plus).
+  static String typeContenu(http.Response r) {
+    final brut = (r.headers['content-type'] ?? '').split(';').first.trim().toLowerCase();
+    final sur = brut.replaceAll(RegExp(r'[^a-z0-9/+.\-]'), '');
+    if (sur.isEmpty) return 'sans type';
+    return sur.length > 40 ? sur.substring(0, 40) : sur;
+  }
+
+  /// Page HTML (type annoncé ou corps qui commence par « < ») : jamais une réponse de l'API Prestige.
+  static bool estPageHtml(http.Response r) {
+    final t = typeContenu(r);
+    if (t.contains('html')) return true;
+    final b = r.bodyBytes;
+    for (final o in b) {
+      if (o == 0x20 || o == 0x09 || o == 0x0A || o == 0x0D || o == 0xEF || o == 0xBB || o == 0xBF) continue; // blancs, BOM
+      return o == 0x3C; // '<'
+    }
+    return false;
+  }
+
+  /// Corps vide (ou seulement des blancs).
+  static bool corpsVide(http.Response r) => r.bodyBytes.every((o) => o == 0x20 || o == 0x09 || o == 0x0A || o == 0x0D);
+
+  /// Réponse de redirection (3xx) : non suivie pour un envoi (PUT / POST) — page de connexion d'un portail.
+  static bool estRedirection(http.Response r) => r.statusCode >= 300 && r.statusCode < 400;
+
+  /// Description SANS contenu d'une réponse non reconnue : « 200, text/html, 1 234 octets ».
+  static String descriptionReponse(http.Response r) =>
+      '${r.statusCode}${estRedirection(r) ? ' redirection' : ''}, ${typeContenu(r)}, ${r.bodyBytes.length} octets';
+
+  /// Message (et motif) d'une réponse non reconnue sur un envoi : classé « serveur injoignable ».
+  static String messageNonReconnue(http.Response r) =>
+      'Réponse non reconnue du serveur (${descriptionReponse(r)}) : serveur injoignable, saisie gardée sur l\'appareil, nouvel essai automatique.';
+
+  /// Envoi : réponse non reconnue → serveur injoignable ; une ligne de journal SANS le contenu reçu.
+  static ReponseEnvoi _nonReconnue(http.Response r, String route) {
+    journal('$route : réponse non reconnue (${descriptionReponse(r)})');
+    return ReponseEnvoi(ResultatEnvoi.reseau, messageNonReconnue(r));
+  }
+
+  /// Lecture : une page HTML (portail captif, relais, autre service) n'est JAMAIS une liste vide ni des données :
+  /// erreur levée (jamais un cache local effacé). Type « données illisibles » comme avant pour les listes ; la licence
+  /// passe [type] réseau (le serveur Prestige n'a pas répondu : la licence n'est pas en cause).
+  static void _refuserPageHtml(http.Response r, String quoi, {TypeErreurChargement type = TypeErreurChargement.donnees}) {
+    if (!estPageHtml(r)) return;
+    journal('$quoi : réponse non reconnue (${descriptionReponse(r)})');
+    throw ApiLoadException(
+        'Réponse non reconnue du serveur ($quoi : ${descriptionReponse(r)}) : ce n\'est pas le serveur Prestige qui a '
+        'répondu. Vérifiez le Wi-Fi et l\'adresse du serveur.',
+        type);
+  }
+
+  /// Décode un corps JSON ; null si illisible.
+  static Object? _json(http.Response r) {
+    try {
+      return json.decode(utf8.decode(r.bodyBytes)) as Object?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _vrai(Object? v) => v == 1 || v == true;
+  static bool _faux(Object? v) => v == 0 || v == false;
+
   // --- FILE DES SAISIES (SaisieServeur) ---
+
+  /// 5.0.3 — Succès de `PUT /ws/inventaires/details`, tel que le serveur Prestige le rend (ErpRessource.
+  /// updateDetailQuantity : `Response.ok().build()`, 200 SANS corps ; 204 toléré, même sens) : corps vide qui n'est
+  /// pas annoncé comme une page HTML. Un serveur qui confirmerait en JSON ({success:1}, avec `id` / `quantite`
+  /// égaux à ceux envoyés s'ils sont présents) est aussi reconnu. Tout autre 2xx (page HTML, texte, JSON d'un autre
+  /// service) n'est PAS la réponse de Prestige.
+  /// Renvoie null si c'est un succès reconnu, sinon la réponse à classer.
+  static ReponseEnvoi? _classerPose2xx(http.Response r, int ligneId, int quantite) {
+    if (estPageHtml(r)) return _nonReconnue(r, 'PUT ws/inventaires/details');
+    if (corpsVide(r)) {
+      return r.statusCode == 200 || r.statusCode == 204 ? null : _nonReconnue(r, 'PUT ws/inventaires/details');
+    }
+    final d = _json(r);
+    if (d is Map) {
+      final succes = d['success'];
+      if (_vrai(succes)) {
+        final id = d['id'];
+        final q = d['quantite'];
+        final idOk = id == null || '$id' == '$ligneId';
+        final qOk = q == null || (q is num && q.toInt() == quantite);
+        if (idOk && qOk) return null;
+      } else if (_faux(succes)) {
+        // Réponse de Prestige avec un refus (forme des autres routes) : session perdue, ou refus métier lisible.
+        final message = '${d['errors'] ?? d['message'] ?? d['msg'] ?? ''}'.trim();
+        if (message.toLowerCase().contains('connecter')) return ReponseEnvoi(ResultatEnvoi.session, message);
+        if (message.isNotEmpty) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(r));
+      }
+    }
+    return _nonReconnue(r, 'PUT ws/inventaires/details');
+  }
 
   /// Pose la quantité TOTALE sur une ligne (PUT /ws/inventaires/details). Ne lève jamais.
   @override
@@ -140,12 +242,20 @@ class ApiService implements SaisieServeur {
     try {
       final response = await _httpPut(url, jsonEncode({'id': ligneId, 'quantite': quantite})).timeout(const Duration(seconds: 15));
       final code = response.statusCode;
-      if (code >= 200 && code < 300) return ReponseEnvoi.ok;
+      // 5.0.3 : 2xx = succès SEULEMENT si c'est la réponse de Prestige (avant : tout 2xx, même la page d'un portail
+      // captif → saisie sortie de la file sans être arrivée). Redirection (page de connexion) : serveur injoignable.
+      if (code >= 200 && code < 300) return _classerPose2xx(response, ligneId, quantite) ?? ReponseEnvoi.ok;
+      if (estRedirection(response)) return _nonReconnue(response, 'PUT ws/inventaires/details');
       // Prestige indisponible (redéploiement : 404 sans réponse de Prestige, 502 / 503 / 504) : la saisie est
       // gardée et renvoyée (jamais « refusée » à tort).
       if (serveurIndisponible(response)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageIndisponible);
       // 5.0.2 : relais (407), délai (408), surcharge (425 / 429) : jamais « refusée », renvoyée seule.
       if (reponseTransitoire(code)) return ReponseEnvoi(ResultatEnvoi.reseau, messageTransitoire(code));
+      // 5.0.3 : refus 4xx sous forme de PAGE HTML (portail, relais) : ce n'est pas un refus de Prestige (ses refus
+      // sont en JSON) → serveur injoignable, saisie gardée. 401 / 403 : session, comme avant.
+      if (code >= 400 && code < 500 && code != 401 && code != 403 && estPageHtml(response)) {
+        return _nonReconnue(response, 'PUT ws/inventaires/details');
+      }
       // Droit manquant (403 « interdit », serveurs récents) : refus visible, pas de reconnexion en boucle.
       if (droitManquant(response) != null) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
       // Session absente (PUT exige une session depuis le 12/10) : la saisie reste sur l'appareil.
@@ -257,24 +367,37 @@ class ApiService implements SaisieServeur {
       if (code == 404 || code == 405) {
         final r = await poserQuantite(ligneId, quantite);
         // Route habituelle également indisponible (redéploiement) : rien n'est mémorisé.
-        if (!(r.type == ResultatEnvoi.reseau && r.message == messageIndisponible)) _sansRouteSession.add(baseUrl);
+        // 5.0.3 : réponse non reconnue (portail, relais) sur la route habituelle : rien n'est conclu non plus.
+        final nonReconnue = r.type == ResultatEnvoi.reseau && r.message.startsWith('Réponse non reconnue');
+        if (!(r.type == ResultatEnvoi.reseau && r.message == messageIndisponible) && !nonReconnue) _sansRouteSession.add(baseUrl);
         return r;
       }
+      // 5.0.3 : redirection (page de connexion d'un portail) : la demande n'est pas arrivée à Prestige.
+      if (estRedirection(response)) return _nonReconnue(response, 'POST inventaire/ligne/quantite');
       if (serveurIndisponible(response)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageIndisponible);
       if (reponseTransitoire(code)) return ReponseEnvoi(ResultatEnvoi.reseau, messageTransitoire(code));
+      if (code >= 400 && code < 500 && code != 401 && code != 403 && estPageHtml(response)) {
+        return _nonReconnue(response, 'POST inventaire/ligne/quantite');
+      }
       if (droitManquant(response) != null) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
       if (code == 401 || code == 403) return ReponseEnvoi(ResultatEnvoi.session, 'Session expirée ou accès refusé (code $code).');
       if (code >= 500) return ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Erreur du serveur (code $code).');
       if (code >= 400) return ReponseEnvoi(ResultatEnvoi.refus, _refusSaisie(response));
-      final dynamic data;
-      try {
-        data = json.decode(utf8.decode(response.bodyBytes));
-      } catch (_) {
-        return const ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Réponse illisible du serveur.');
-      }
-      if (data is! Map) return const ReponseEnvoi(ResultatEnvoi.erreurServeur, 'Réponse inattendue du serveur.');
+      // 5.0.3 : 2xx = la réponse de Prestige SEULEMENT ({success, int_NUMBER} ; refus {success:0, errors}). Page HTML,
+      // texte, JSON sans `success` (autre service) : non reconnue → serveur injoignable, saisie gardée (avant : JSON
+      // sans `success` → « refusée » ; corps illisible → erreur du serveur).
+      if (estPageHtml(response)) return _nonReconnue(response, 'POST inventaire/ligne/quantite');
+      final data = _json(response);
+      if (data is! Map || !data.containsKey('success')) return _nonReconnue(response, 'POST inventaire/ligne/quantite');
       final succes = data['success'];
-      if (succes == 1 || succes == true) return ReponseEnvoi.ok;
+      if (succes == 1 || succes == true) {
+        // Quantité confirmée par le serveur : doit être celle envoyée.
+        final confirme = data['int_NUMBER'];
+        if (confirme != null && !(confirme is num && confirme.toInt() == quantite)) {
+          return _nonReconnue(response, 'POST inventaire/ligne/quantite');
+        }
+        return ReponseEnvoi.ok;
+      }
       final message = '${data['errors'] ?? data['message'] ?? data['msg'] ?? 'Quantité refusée.'}';
       // Session perdue côté serveur (réponse « Veuillez vous connecter »).
       if (message.toLowerCase().contains('connecter')) return ReponseEnvoi(ResultatEnvoi.session, message);
@@ -339,6 +462,8 @@ class ApiService implements SaisieServeur {
     // Demande 21 : une lecture en échec côté serveur répond 500 (jamais `[]`) — jamais une liste vide ici.
     if (code >= 500) throw ApiLoadException('Erreur du serveur (code $code) : $quoi non chargés. Réessayez dans un instant.');
     if (code != 200) throw ApiLoadException('Le serveur a refusé le chargement des $quoi (code $code).');
+    // 5.0.3 : page HTML (portail captif, relais, autre service) : jamais une liste (vide ou non).
+    _refuserPageHtml(response, quoi);
     final dynamic data;
     try {
       data = json.decode(utf8.decode(response.bodyBytes));
@@ -487,6 +612,7 @@ class ApiService implements SaisieServeur {
       throw ApiLoadException('Session expirée ($quoi non chargés) : reconnectez-vous.', TypeErreurChargement.session);
     }
     if (code != 200) throw ApiLoadException('Le serveur a refusé le chargement des $quoi (code $code).');
+    _refuserPageHtml(response, quoi);
     final dynamic data;
     try {
       data = json.decode(utf8.decode(response.bodyBytes));
@@ -629,6 +755,7 @@ class ApiService implements SaisieServeur {
       throw ApiLoadException(m.isEmpty ? 'Inventaire clôturé : aucune ligne n\'a été modifiée.' : m);
     }
     if (code != 200) throw ApiLoadException('Le serveur a refusé la demande ($quoi, code $code).');
+    _refuserPageHtml(r, quoi);
     final dynamic d;
     try {
       d = json.decode(utf8.decode(r.bodyBytes));
@@ -675,6 +802,7 @@ class ApiService implements SaisieServeur {
     if (response.statusCode != 200) {
       throw ApiLoadException('Le serveur a refusé la vérification « déjà compté » (code ${response.statusCode}).');
     }
+    _refuserPageHtml(response, 'contrôle « déjà compté »');
     final List<dynamic> data;
     try {
       data = json.decode(utf8.decode(response.bodyBytes)) as List<dynamic>;
@@ -756,6 +884,7 @@ class ApiService implements SaisieServeur {
     }
     if (code >= 500) throw ApiLoadException('Erreur du serveur (code $code) : $quoi non chargés. Réessayez dans un instant.');
     if (code != 200) throw ApiLoadException('Le serveur a refusé le chargement des $quoi (code $code).');
+    _refuserPageHtml(response, quoi);
     final dynamic data;
     try {
       data = json.decode(utf8.decode(response.bodyBytes));
@@ -895,6 +1024,15 @@ class ApiService implements SaisieServeur {
       final d = json.decode(utf8.decode(response.bodyBytes));
       if (d is Map) m = d;
     } catch (_) {}
+    // 5.0.3 : réponse qui n'est pas celle de Prestige (redirection vers une page de connexion, page HTML, texte, JSON
+    // d'un autre service) : rien n'est conclu, le lot est GARDÉ et renvoyé à l'identique (même clé : le serveur ne
+    // compte jamais deux fois). Les refus de Prestige (400, 409, 410, 413) sont en JSON avec un `code` ; son rapport
+    // (200) porte `success` et une entrée {index, statut} par ligne demandée.
+    if (_lotNonReconnu(response, m, lignes.length)) {
+      journal('POST inventaire/versement : réponse non reconnue (${descriptionReponse(response)})');
+      return ResultatVersementLot(IssueVersementLot.incertain,
+          'Réponse non reconnue du serveur (${descriptionReponse(response)}) : serveur injoignable, versement gardé sur l\'appareil.');
+    }
     final codeMetier = '${m?['code'] ?? ''}';
     final message = '${m?['message'] ?? m?['msg'] ?? ''}'.trim();
     if (code == 409 && codeMetier == 'INVENTAIRE_CLOTURE') {
@@ -922,6 +1060,22 @@ class ApiService implements SaisieServeur {
       ));
     }
     return ResultatVersementLot.rapport(dejaTraite: m['dejaTraite'] == true, lignes: out);
+  }
+
+  /// 5.0.3 — Réponse du versement en lot qui n'est PAS celle de Prestige ([m] : corps JSON objet, null sinon).
+  static bool _lotNonReconnu(http.Response r, Map? m, int demandees) {
+    final code = r.statusCode;
+    if (estRedirection(r)) return true;
+    if (code == 400 || code == 409 || code == 410 || code == 413) {
+      // Refus de Prestige : JSON {success:0, code…}. Page HTML / corps vide d'un relais : non reconnu.
+      return m == null || !m.containsKey('code');
+    }
+    if (code < 200 || code >= 300) return false; // 5xx… : classés comme avant (incertain)
+    if (code != 200) return true;
+    if (m == null || !_vrai(m['success']) || m['lignes'] is! List) return true;
+    final ls = m['lignes'] as List;
+    if (demandees > 0 && ls.isEmpty) return true;
+    return ls.any((e) => e is! Map || e['index'] is! num || e['statut'] is! String);
   }
 
   // --- GESTION LICENCE ---
@@ -973,6 +1127,8 @@ class ApiService implements SaisieServeur {
     if (response.statusCode != 200) {
       throw ApiLoadException('Aucune licence valide trouvée (code ${response.statusCode}).');
     }
+    // 5.0.3 : page HTML (portail captif, relais) : le serveur Prestige n'a pas répondu, la licence n'est pas en cause.
+    _refuserPageHtml(response, 'licence', type: TypeErreurChargement.reseau);
     try {
       final dynamic data = json.decode(utf8.decode(response.bodyBytes));
       return License.fromJson(Map<String, dynamic>.from(data as Map));
