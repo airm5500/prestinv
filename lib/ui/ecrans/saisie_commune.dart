@@ -292,7 +292,7 @@ mixin SaisieCommune<T extends StatefulWidget> on State<T>, DouchetteCibleMixin<T
       if (!r.estOk && mounted) {
         if (r.type == ResultatEnvoi.session) return proposerReconnexion();
         messageEnvoiDirect(
-            context, r.type == ResultatEnvoi.refus ? r.message : 'Non envoyé (réseau) : gardé sur l\'appareil, nouvel essai automatique.');
+            context, r.type == ResultatEnvoi.refus || r.type == ResultatEnvoi.horlogeBloquee ? r.message : 'Non envoyé (réseau) : gardé sur l\'appareil, nouvel essai automatique.');
       }
     });
   }

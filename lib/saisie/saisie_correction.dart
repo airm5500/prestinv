@@ -46,6 +46,9 @@ String messageEchecCorrection(ReponseEnvoi r) {
       return 'Refusée par le serveur : ${r.message}';
     case ResultatEnvoi.session:
       return 'Session expirée : non enregistrée sur le serveur. Gardée sur l\'appareil, elle repartira après reconnexion.';
+    case ResultatEnvoi.horlogeBloquee:
+      // 5.0.4 : heure du serveur fausse : message du serveur tel quel ; la saisie reste en attente.
+      return '${r.message} Gardée sur l\'appareil (voir « À envoyer »).';
     case ResultatEnvoi.reseau:
     case ResultatEnvoi.erreurServeur:
       return 'Non enregistrée sur le serveur (${r.message.isEmpty ? 'réseau' : r.message}). '

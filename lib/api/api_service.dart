@@ -191,6 +191,37 @@ class ApiService implements SaisieServeur {
         type);
   }
 
+  // --- 5.0.4 : HEURE DU SERVEUR FAUSSE (refus 423 du serveur Prestige, plan du 24/11) ---
+  //
+  // Tant que l'heure du serveur est fausse, le serveur refuse TOUTE écriture (POST / PUT / DELETE / PATCH, sauf
+  // connexion / déconnexion / routes de l'horloge) : HTTP 423 {success:false, horlogeBloquee:true, msg:"Opération
+  // refusée : l'heure du serveur est fausse. …"}. Les lectures restent permises. Ce n'est ni une panne réseau, ni
+  // un refus de la saisie : rien n'est enregistré, la saisie reste en attente et repart quand l'heure est remise
+  // (seuls l'administrateur ou la tâche Windows du serveur la remettent ; l'application ne propose rien d'autre).
+
+  /// Code HTTP du refus « heure du serveur fausse ».
+  static const codeHorlogeBloquee = 423;
+
+  /// Message affiché si le serveur répond 423 sans message lisible.
+  static const messageHorlogeParDefaut = 'Opération refusée par le serveur (code 423).';
+
+  /// Message du serveur (tel quel) si [r] est le refus « heure du serveur fausse », sinon null.
+  static String? horlogeBloquee(http.Response r) {
+    if (r.statusCode != codeHorlogeBloquee) return null;
+    final d = _json(r);
+    if (d is Map) {
+      final m = '${d['msg'] ?? d['message'] ?? ''}'.trim();
+      if (m.isNotEmpty) return m;
+    }
+    return messageHorlogeParDefaut;
+  }
+
+  /// Envoi refusé par un serveur dont l'heure est fausse : une ligne de journal SANS le message ni les données.
+  static ReponseEnvoi _horloge(String message, String route) {
+    journal('$route : refusé (423, heure du serveur fausse) — saisie gardée en attente');
+    return ReponseEnvoi(ResultatEnvoi.horlogeBloquee, message);
+  }
+
   /// Décode un corps JSON ; null si illisible.
   static Object? _json(http.Response r) {
     try {
@@ -246,6 +277,9 @@ class ApiService implements SaisieServeur {
       // captif → saisie sortie de la file sans être arrivée). Redirection (page de connexion) : serveur injoignable.
       if (code >= 200 && code < 300) return _classerPose2xx(response, ligneId, quantite) ?? ReponseEnvoi.ok;
       if (estRedirection(response)) return _nonReconnue(response, 'PUT ws/inventaires/details');
+      // 5.0.4 : heure du serveur fausse (423) : rien n'est enregistré, la saisie reste en attente (jamais « refusée »).
+      final horlogePut = horlogeBloquee(response);
+      if (horlogePut != null) return _horloge(horlogePut, 'PUT ws/inventaires/details');
       // Prestige indisponible (redéploiement : 404 sans réponse de Prestige, 502 / 503 / 504) : la saisie est
       // gardée et renvoyée (jamais « refusée » à tort).
       if (serveurIndisponible(response)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageIndisponible);
@@ -374,6 +408,9 @@ class ApiService implements SaisieServeur {
       }
       // 5.0.3 : redirection (page de connexion d'un portail) : la demande n'est pas arrivée à Prestige.
       if (estRedirection(response)) return _nonReconnue(response, 'POST inventaire/ligne/quantite');
+      // 5.0.4 : heure du serveur fausse (423) : saisie gardée en attente, route habituelle non essayée.
+      final horlogePost = horlogeBloquee(response);
+      if (horlogePost != null) return _horloge(horlogePost, 'POST inventaire/ligne/quantite');
       if (serveurIndisponible(response)) return const ReponseEnvoi(ResultatEnvoi.reseau, messageIndisponible);
       if (reponseTransitoire(code)) return ReponseEnvoi(ResultatEnvoi.reseau, messageTransitoire(code));
       if (code >= 400 && code < 500 && code != 401 && code != 403 && estPageHtml(response)) {
@@ -547,6 +584,9 @@ class ApiService implements SaisieServeur {
       return ResultatCreationServeur.incertain(_estErreurReseau(e) ? messageInjoignable : 'Création impossible : $e');
     }
     final code = response.statusCode;
+    // 5.0.4 : heure du serveur fausse (423) : rien n'a été créé ; message du serveur tel quel.
+    final horlogeCreation = horlogeBloquee(response);
+    if (horlogeCreation != null) return ResultatCreationServeur.refus(horlogeCreation);
     // Prestige indisponible : PEUT-ÊTRE rien de créé (relais 502 / 504) → la liste est relue avant tout.
     if (serveurIndisponible(response)) return const ResultatCreationServeur.incertain(messageIndisponible);
     final interdit = droitManquant(response);
@@ -739,6 +779,9 @@ class ApiService implements SaisieServeur {
 
   /// Contrôle commun d'une réponse JSON objet : droit manquant, session, erreur du serveur, illisible.
   Map<dynamic, dynamic> _controlerReponse(http.Response r, String quoi) {
+    // 5.0.4 : heure du serveur fausse (423) : rien n'a été modifié ; message du serveur tel quel.
+    final horloge = horlogeBloquee(r);
+    if (horloge != null) throw ApiLoadException(horloge);
     if (serveurIndisponible(r)) throw ApiLoadException(indisponible(quoi), TypeErreurChargement.reseau);
     final interdit = droitManquant(r);
     if (interdit != null) throw ApiLoadException(interdit);
@@ -1019,6 +1062,13 @@ class ApiService implements SaisieServeur {
       return const ResultatVersementLot(IssueVersementLot.routeAbsente);
     }
     if (code == 401 || code == 403) return const ResultatVersementLot(IssueVersementLot.session, 'Session expirée : reconnectez-vous.');
+    // 5.0.4 : heure du serveur fausse (423) : rien n'a été enregistré ; le lot est GARDÉ avec sa clé (même clé et
+    // même contenu à la reprise : jamais compté deux fois).
+    final horlogeLot = horlogeBloquee(response);
+    if (horlogeLot != null) {
+      journal('POST inventaire/versement : refusé (423, heure du serveur fausse) — lot gardé');
+      return ResultatVersementLot(IssueVersementLot.horlogeBloquee, horlogeLot);
+    }
     Map? m;
     try {
       final d = json.decode(utf8.decode(response.bodyBytes));
@@ -1088,15 +1138,19 @@ class ApiService implements SaisieServeur {
   /// L'activation depuis l'application ne peut donc pas aboutir sans changement côté serveur.
   Future<bool> saveLicense(String key) async {
     final url = Uri.parse('$baseUrl/api/v1/licence/save/${Uri.encodeComponent(key)}');
+    final http.Response response;
     try {
-      final response = await (_client != null ? _client!.post(url, headers: _getHeaders()) : http.post(url, headers: _getHeaders()))
+      response = await (_client != null ? _client!.post(url, headers: _getHeaders()) : http.post(url, headers: _getHeaders()))
           .timeout(const Duration(seconds: 15));
-      return response.statusCode == 200;
     } catch (e) {
       throw Exception(estCertificatRefuse(e)
           ? messageCertificat
           : (_estErreurReseau(e) ? 'Serveur injoignable.' : 'Enregistrement de la licence impossible.'));
     }
+    // 5.0.4 : heure du serveur fausse (423) : message du serveur tel quel (jamais « serveur injoignable »).
+    final horloge = horlogeBloquee(response);
+    if (horloge != null) throw ApiLoadException(horloge);
+    return response.statusCode == 200;
   }
 
   /// Récupère la licence active.
@@ -1226,6 +1280,10 @@ enum IssueVersementLot {
 
   /// Inventaire clôturé ou inconnu : rien n'a été enregistré.
   refuse,
+
+  /// 5.0.4 — Heure du serveur fausse (423) : rien n'a été enregistré ; le lot est gardé avec sa clé et renvoyé à
+  /// l'identique quand l'heure est remise (jamais l'ancien chemin, jamais compté deux fois).
+  horlogeBloquee,
 
   /// La clé a déjà servi pour un autre contenu (ne devrait jamais arriver).
   cleReutilisee,

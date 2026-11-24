@@ -1,5 +1,5 @@
 // NON-RÉGRESSION — Prestige Inventaire V3 (5.0.0) : NOUVELLE application Android, seule l'identité change.
-//  - Gradle : applicationId com.dici.prestigeinventaire.v3, namespace INCHANGÉ (MainActivity, R) ; version 5.0.3+25
+//  - Gradle : applicationId com.dici.prestigeinventaire.v3, namespace INCHANGÉ (MainActivity, R) ; version 5.0.4+26
 //    lue dans pubspec.yaml.
 //  - Manifeste : nom « Prestige Inventaire V3 », icône (5.0.1 : plus d'icône ronde) ; visibilité de l'ANCIENNE application
 //    (com.dici.prestinv) seulement, jamais QUERY_ALL_PACKAGES ; canal natif : présence seulement.
@@ -39,14 +39,14 @@ void main() {
   group('Identité Android', () {
     final gradle = _lire('android/app/build.gradle.kts');
 
-    test('applicationId com.dici.prestigeinventaire.v3 ; namespace inchangé ; version 5.0.3+25', () {
+    test('applicationId com.dici.prestigeinventaire.v3 ; namespace inchangé ; version 5.0.4+26', () {
       expect(gradle, contains('applicationId = "com.dici.prestigeinventaire.v3"'));
       expect(gradle, contains('namespace = "com.dici.prestinv"'));
       expect(RegExp(r'^\s*applicationId\s*=\s*"com\.dici\.prestinv"', multiLine: true).hasMatch(gradle), isFalse,
           reason: 'ancien identifiant : plus construit (fiche Sunmi gardée telle quelle)');
       expect(gradle, isNot(contains('applicationIdSuffix')));
       expect(File('android/app/src/main/kotlin/com/dici/prestinv/MainActivity.kt').existsSync(), isTrue);
-      expect(RegExp(r'^version: (\S+)$', multiLine: true).firstMatch(_lire('pubspec.yaml'))!.group(1), '5.0.3+25');
+      expect(RegExp(r'^version: (\S+)$', multiLine: true).firstMatch(_lire('pubspec.yaml'))!.group(1), '5.0.4+26');
     });
 
     test('manifeste : nom « Prestige Inventaire V3 », icône sans icône ronde, visibilité de l\'ancienne application seulement', () {

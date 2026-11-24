@@ -12,7 +12,13 @@ minimum_sunmi: 4.8.5+4
 |---|---|---|---|
 | 4.8.5 | 4 | à compléter | dernière version publiée connue |
 
-Version en préparation (pas encore publiée) : **5.0.3+25** (`pubspec.yaml`) : une réponse qui n'est pas celle du
+Version en préparation (pas encore publiée) : **5.0.4+26** (`pubspec.yaml`) : serveur Prestige dont l'heure est
+fausse (refus 423 de toute écriture, plan du 24/11) : les saisies restent en attente sur le terminal (jamais
+« refusées »), le bandeau affiche le message du serveur tel quel, relances espacées, envoi seul et sans doublon quand
+l'heure est remise ; bandeau à l'écran de connexion si le serveur signale son heure fausse (voir
+`docs/NOTE_VERSION_5.0.4.md`).
+
+Avant : **5.0.3+25** : une réponse qui n'est pas celle du
 serveur Prestige (page HTML d'un portail captif, d'un relais ou d'une box, texte, JSON d'un autre service, redirection
 vers une page de connexion) n'est plus jamais prise pour un envoi réussi : la saisie reste en attente sur le terminal
 (« serveur injoignable »), renvoyée seule, sans doublon (voir `docs/NOTE_VERSION_5.0.3.md`).

@@ -36,8 +36,9 @@ class Seuils {
   /// Images rendues pendant ce démarrage (animations d'entrée comprises).
   static const demarrageImages = 10;
 
-  /// Requêtes au démarrage (avant connexion) : la licence seulement.
-  static const demarrageRequetes = 1;
+  /// Requêtes au démarrage (avant connexion) : la licence, et (5.0.4) UNE lecture de l'heure du serveur
+  /// (`GET horloge/public`, sans session, 5 s au plus, jamais relancée) pour le bandeau de l'écran de connexion.
+  static const demarrageRequetes = 2;
 
   // --- Longues listes : temps de construction d'UNE image (ms, mode test) ---
   /// PIRE image pendant le défilement d'une longue liste, après un premier passage (code déjà compilé) :

@@ -537,7 +537,7 @@ class _InventoryEntryScreenState extends State<InventoryEntryScreen> with Douche
       if (!r.estOk && mounted) {
         // Inventaire clôturé / refus : motif du serveur ; réseau : gardé sur l'appareil, nouvel essai.
         _showNotification(
-            r.type == ResultatEnvoi.refus ? r.message : 'Non envoyé (réseau) : gardé sur l\'appareil, nouvel essai automatique.',
+            r.type == ResultatEnvoi.refus || r.type == ResultatEnvoi.horlogeBloquee ? r.message : 'Non envoyé (réseau) : gardé sur l\'appareil, nouvel essai automatique.',
             Colors.red);
       }
     });

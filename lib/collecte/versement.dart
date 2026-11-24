@@ -512,6 +512,14 @@ class MoteurVersement {
           await enregistrer(v);
         // 5.0.2 : erreur du serveur (5xx) = serveur en panne, pas un refus : comme une coupure, la quantité
         // reste en attente dans la file (renvoyée seule) et le versement est interrompu.
+        // 5.0.4 : heure du serveur fausse (423) : rien n'est enregistré, la quantité reste en attente dans la file
+        // (renvoyée seule, même quantité totale) ; versement interrompu avec le message du serveur tel quel.
+        case ResultatEnvoi.horlogeBloquee:
+          l
+            ..etat = EtatLigneVersement.erreur
+            ..raison = '${r.message} — gardée sur l\'appareil';
+          await enregistrer(v);
+          return _interrompre(v, r.message);
         case ResultatEnvoi.erreurServeur:
         case ResultatEnvoi.reseau:
         case ResultatEnvoi.session:
@@ -591,6 +599,10 @@ class MoteurVersement {
         case IssueVersementLot.incertain:
           // A PEUT-ÊTRE été enregistré : le lot est gardé, la reprise renverra la même clé.
           return _interrompre(v, '${r.message} Reprenez le versement : rien ne sera compté deux fois.');
+        case IssueVersementLot.horlogeBloquee:
+          // 5.0.4 : heure du serveur fausse : rien n'est enregistré ; le lot est gardé (même clé et même contenu à
+          // la reprise : jamais compté deux fois). Message du serveur tel quel.
+          return _interrompre(v, r.message);
         case IssueVersementLot.indisponible:
           // Prestige en redéploiement : le lot est gardé (même clé à la reprise), jamais l'ancien chemin.
           return _interrompre(v, '${r.message} Reprenez le versement ensuite : rien ne sera compté deux fois.');

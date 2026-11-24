@@ -14,6 +14,7 @@ import 'package:prestinv/ui/etats.dart';
 import 'package:prestinv/ui/presentation_style.dart';
 import 'package:prestinv/ui/theme.dart';
 import 'package:prestinv/version_app.dart';
+import 'package:prestinv/widgets/bandeau_horloge_serveur.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -89,6 +90,8 @@ class _NvConnexionScreenState extends State<NvConnexionScreen> {
       enfants: [
         // 5.0.0 : ancienne Prestige Inventaire encore installée → information, une fois (rien sinon).
         const BandeauAncienneAppli(),
+        // 5.0.4 : heure du serveur fausse (GET horloge/public, sans session) → information ; sinon rien.
+        const BandeauHorlogeServeur(),
         SoftCard(
           padding: const EdgeInsets.all(18),
           child: AutofillGroup(

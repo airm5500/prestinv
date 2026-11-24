@@ -22,6 +22,11 @@
 //    5.0.3 : une réponse qui n'est PAS celle du serveur Prestige (page HTML d'un portail captif, texte, JSON d'un
 //    autre service, redirection vers une page de connexion) n'est jamais un succès : ApiService la classe
 //    « serveur injoignable » (ResultatEnvoi.reseau), la saisie reste en attente, même traitement que ci-dessus.
+//    5.0.4 : HEURE DU SERVEUR FAUSSE — le serveur refuse toute écriture (HTTP 423, horlogeBloquee) : la saisie
+//    RESTE en attente (jamais « refusée », jamais perdue), même relance espacée que ci-dessus (pas de boucle),
+//    repart seule quand l'heure est remise, même quantité totale (aucun doublon). Le bandeau affiche le message
+//    du serveur tel quel à la place de « serveur injoignable » ([messageAttenteServeur]). Une saisie passée en
+//    « refusée » par ce refus en 5.0.3 est remise en attente au chargement.
 // 4. Inventaire clôturé : avant d'envoyer, la liste des inventaires ouverts est lue ; une saisie d'un
 //    inventaire absent de cette liste n'est PAS envoyée, elle passe en « refusée » (visible dans
 //    « À envoyer »).
@@ -76,7 +81,13 @@ class SaisieQueue extends ChangeNotifier {
 
   /// Motifs d'erreur serveur (et non de refus) : une saisie « refusée » ainsi par une version précédente
   /// (avant 5.0.2 : après 3 erreurs 5xx) est remise en attente au chargement.
-  static const _motifsErreurServeur = ['Erreur du serveur', 'Réponse illisible du serveur', 'Réponse inattendue du serveur'];
+  /// 5.0.4 : aussi le refus « heure du serveur fausse » (423), classé « refusée » par la 5.0.3.
+  static const _motifsErreurServeur = [
+    'Erreur du serveur',
+    'Réponse illisible du serveur',
+    'Réponse inattendue du serveur',
+    'Opération refusée : l\'heure du serveur est fausse',
+  ];
 
   /// Les saisies envoyées sont gardées 7 jours (historique « À envoyer », export), puis purgées.
   static const conservationEnvoyees = Duration(days: 7);
@@ -111,6 +122,10 @@ class SaisieQueue extends ChangeNotifier {
   /// 5.0.2 : dernier essai d'envoi sans réponse utilisable du serveur (injoignable, 5xx, délai…).
   bool _injoignable = false;
 
+  /// 5.0.4 : message du serveur (tel quel) quand le dernier envoi a été refusé parce que l'heure du serveur est
+  /// fausse (423) ; null sinon. Effacé dès une autre réponse (envoi accepté, refus, panne…).
+  String? _horlogeBloquee;
+
   /// 5.0.2 : tours de reprise automatique en échec consécutifs, et tours encore à laisser passer.
   int _echecsReprise = 0;
   int _toursAttente = 0;
@@ -133,13 +148,23 @@ class SaisieQueue extends ChangeNotifier {
   /// 5.0.2 — Saisies en attente ET dernier essai sans réponse du serveur (éteint, injoignable, en erreur).
   bool get serveurInjoignable => _injoignable && enAttente() > 0;
 
+  /// 5.0.4 — Saisies en attente ET dernier envoi refusé parce que l'heure du serveur est fausse (423).
+  bool get horlogeServeurBloquee => _horlogeBloquee != null && enAttente() > 0;
+
+  /// 5.0.4 — Message du serveur (tel quel) du dernier refus « heure du serveur fausse », null sinon.
+  String? get messageHorlogeServeur => _horlogeBloquee;
+
   /// 5.0.2 — Texte du bandeau non bloquant : « N saisies en attente d'envoi (serveur injoignable) » (null :
-  /// rien à signaler).
+  /// rien à signaler). 5.0.4 : heure du serveur fausse → « N saisies en attente d'envoi. » suivi du message du
+  /// serveur, tel quel (jamais « serveur injoignable »).
   String? get messageAttenteServeur {
-    if (!_injoignable) return null;
+    final horloge = _horlogeBloquee;
+    if (!_injoignable && horloge == null) return null;
     final n = enAttente();
     if (n == 0) return null;
-    return n == 1 ? '1 saisie en attente d\'envoi (serveur injoignable)' : '$n saisies en attente d\'envoi (serveur injoignable)';
+    final attente = n == 1 ? '1 saisie en attente d\'envoi' : '$n saisies en attente d\'envoi';
+    if (horloge != null) return '$attente. $horloge';
+    return '$attente (serveur injoignable)';
   }
 
   /// Tours de reprise automatique encore sautés avant le prochain essai (espacement, tests).
@@ -411,6 +436,13 @@ class SaisieQueue extends ChangeNotifier {
           await store.ecrire(apres);
           notifyListeners();
           return r;
+        case ResultatEnvoi.horlogeBloquee:
+          // 5.0.4 : heure du serveur fausse : rien n'est enregistré, la saisie RESTE en attente (même quantité
+          // totale, renvoyée seule quand l'heure est remise). Le motif garde le message du serveur.
+          apres.motif = r.message;
+          await store.ecrire(apres);
+          notifyListeners();
+          return r;
         case ResultatEnvoi.reseau:
         case ResultatEnvoi.session:
           notifyListeners();
@@ -450,6 +482,7 @@ class SaisieQueue extends ChangeNotifier {
     }
     if (ouvert == null) {
       _injoignable = true;
+      _horlogeBloquee = null;
       notifyListeners();
       return const ReponseEnvoi(ResultatEnvoi.reseau, 'Serveur injoignable : impossible de vérifier l\'inventaire.');
     }
@@ -463,11 +496,16 @@ class SaisieQueue extends ChangeNotifier {
   }
 
   /// 5.0.2 : le serveur a-t-il répondu ? (ok / refus / session : oui ; réseau / erreur serveur : non).
+  /// 5.0.4 : heure du serveur fausse : le serveur a répondu, mais refuse toute écriture (message gardé).
   void _noterJoignable(ReponseEnvoi r) {
+    _horlogeBloquee = null;
     switch (r.type) {
       case ResultatEnvoi.reseau:
       case ResultatEnvoi.erreurServeur:
         _injoignable = true;
+      case ResultatEnvoi.horlogeBloquee:
+        _injoignable = false;
+        _horlogeBloquee = r.message;
       case ResultatEnvoi.ok:
         _injoignable = false;
         _echecsReprise = 0;
@@ -488,7 +526,10 @@ class SaisieQueue extends ChangeNotifier {
   void _noterResultat(ReponseEnvoi r) {
     if (r.type == ResultatEnvoi.session) _sessionExpiree = true;
     if (r.type == ResultatEnvoi.ok) _sessionExpiree = false;
-    if (r.type == ResultatEnvoi.reseau || r.type == ResultatEnvoi.session || r.type == ResultatEnvoi.erreurServeur) {
+    if (r.type == ResultatEnvoi.reseau ||
+        r.type == ResultatEnvoi.session ||
+        r.type == ResultatEnvoi.erreurServeur ||
+        r.type == ResultatEnvoi.horlogeBloquee) {
       _derniereErreur = r.message;
     }
     notifyListeners();
@@ -540,6 +581,7 @@ class SaisieQueue extends ChangeNotifier {
         const msg = 'Serveur injoignable : saisies gardées sur l\'appareil, nouvel essai automatique.';
         _derniereErreur = msg;
         _injoignable = true;
+        _horlogeBloquee = null;
         if (!seulementAuto) _memoriserReprise(inventaireId);
         notifyListeners();
         return BilanEnvoi(restantes: candidates.length, interruption: msg);
@@ -573,6 +615,10 @@ class SaisieQueue extends ChangeNotifier {
           if (++erreursServeurSuite >= erreursServeurAvantInterruption) interruption = _messageErreurServeur(r.message);
         case ResultatEnvoi.reseau:
           interruption = r.message.isEmpty ? 'Serveur injoignable.' : r.message;
+        case ResultatEnvoi.horlogeBloquee:
+          // 5.0.4 : toute écriture est refusée tant que l'heure du serveur est fausse : inutile d'envoyer les
+          // suivantes. Envoi interrompu (message du serveur tel quel), toutes gardées en attente, reprise espacée.
+          interruption = r.message;
         case ResultatEnvoi.session:
           interruption = messageSessionExpiree;
           session = true;
@@ -635,7 +681,8 @@ class SaisieQueue extends ChangeNotifier {
       return;
     }
     await relancer();
-    if (serveurInjoignable) {
+    // 5.0.4 : heure du serveur fausse : même espacement (pas de relance en boucle).
+    if (serveurInjoignable || horlogeServeurBloquee) {
       _echecsReprise++;
       // 1, 2, 4 puis 8 intervalles (plafond) entre deux essais.
       final intervalles = (1 << (_echecsReprise - 1).clamp(0, 30)).clamp(1, plafondIntervallesReprise);

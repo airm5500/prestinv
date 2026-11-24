@@ -67,6 +67,8 @@ void main() {
       await lancerApplication(tester, serveur: serveur);
     });
     mesurer('Requêtes — démarrage (jusqu\'à l\'écran de connexion)', demarrage.length, seuil: Seuils.demarrageRequetes, unite: 'requêtes', detail: detail(demarrage));
+    // 5.0.4 : la licence et UNE lecture de l'heure du serveur (bandeau de connexion), rien d'autre.
+    expect(demarrage.map((r) => '${r.methode} ${r.route}').toSet(), {'GET licence/find', 'GET horloge/public'});
 
     final accueil = await compter(serveur, () => seConnecter(tester));
     // Connexion (1) + liste des inventaires (1). Avant la 4.14.2 : liste lue DEUX fois (accueil construit

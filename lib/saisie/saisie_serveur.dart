@@ -19,6 +19,12 @@ enum ResultatEnvoi {
   /// Erreur du serveur (5xx, réponse illisible) : la saisie RESTE en attente et est renvoyée automatiquement
   /// (5.0.2 : jamais « refusée », quel que soit le nombre d'essais : serveur qui s'arrête, redémarre…).
   erreurServeur,
+
+  /// 5.0.4 — Le serveur refuse toute écriture tant que SON heure est fausse (HTTP 423, `horlogeBloquee:true`).
+  /// Ce n'est ni une panne réseau ni un refus de la saisie : elle RESTE en attente (même quantité totale, aucun
+  /// doublon) et repart seule, à intervalles espacés, quand l'heure du serveur est remise. Le message est celui
+  /// du serveur, affiché tel quel.
+  horlogeBloquee,
 }
 
 class ReponseEnvoi {
